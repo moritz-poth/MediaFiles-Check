@@ -138,7 +138,7 @@ Good to know:
 
 ## Media
 
-1. Media › **Drives and projects**: switch on the drives and the projects whose bins count, then **Scan**. The first scan reads the header of every media file; later ones only new or changed files. The last five scans are kept: **Load…** shows one again without scanning, after asking whether nothing changed since.
+1. Media › **Drives and projects**: switch on the drives and the projects whose bins count, then **Scan**. The first scan reads the header of every media file; later ones only new or changed files. After a few seconds the time left shows on the right under the bar. The last five scans are kept: **Load…** shows one again without scanning, after asking whether nothing changed since.
 2. **Overview** counts media and render files, in use or not, and how many files the projects use that are on none of the scanned drives. **Show table…** opens the media table: every file with clip, kind, codec, picture, fps, duration, sound, size, project and folder – filter, search, sort by a column, double-click a column edge to fit it to its longest entry, select files, **Save list…**.
 
 ![Media overview](images/en/media.png)

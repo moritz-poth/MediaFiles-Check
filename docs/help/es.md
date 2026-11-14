@@ -138,7 +138,7 @@ Conviene saber:
 
 ## Medios
 
-1. Medios › **Unidades y proyectos**: activa las unidades y los proyectos cuyos bins cuentan y pulsa **Analizar**. El primer análisis lee la cabecera de cada archivo de medios; los siguientes solo los archivos nuevos o cambiados. Se guardan los cinco últimos análisis: **Cargar…** vuelve a mostrar uno sin analizar, tras preguntar si no ha cambiado nada desde entonces.
+1. Medios › **Unidades y proyectos**: activa las unidades y los proyectos cuyos bins cuentan y pulsa **Analizar**. El primer análisis lee la cabecera de cada archivo de medios; los siguientes solo los archivos nuevos o cambiados. A los pocos segundos aparece a la derecha, bajo la barra, el tiempo restante. Se guardan los cinco últimos análisis: **Cargar…** vuelve a mostrar uno sin analizar, tras preguntar si no ha cambiado nada desde entonces.
 2. **Resumen** cuenta medios y archivos de render, en uso o no, y cuántos archivos usados por los proyectos no están en ninguna de las unidades leídas. **Mostrar tabla…** abre la tabla de medios: cada archivo con clip, tipo, códec, imagen, fps, duración, sonido, tamaño, proyecto y carpeta; filtrar, buscar, ordenar por columna, doble clic en el borde de una columna para ajustarla a su entrada más larga, seleccionar archivos, **Guardar lista…**.
 
 ![Resumen de medios](images/es/media.png)

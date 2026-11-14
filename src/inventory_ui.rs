@@ -634,12 +634,14 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
     g.set_error("".into());
     g.set_work_value(0.0);
     g.set_work_text(app.get_txt_reading_drives());
+    g.set_work_eta(-1);
     g.set_step(1);
     st.stop = Arc::default();
     let (weak, stop, result) = (app.as_weak(), st.stop.clone(), st.result.clone());
     std::thread::spawn(move || {
         let progress_to = weak.clone();
         let last = Mutex::new(std::time::Instant::now());
+        let samples = Mutex::new(std::collections::VecDeque::new());
         let progress = move |done: usize, total: usize| {
             // at most ten updates a second
             let mut l = last.lock().unwrap();
@@ -647,12 +649,14 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
                 return;
             }
             *l = std::time::Instant::now();
+            let eta = eta_seconds(&mut samples.lock().unwrap(), *l, done, total);
             let w = progress_to.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = w.upgrade() {
                     let g = w.global::<Inventory>();
                     g.set_work_value(done as f32 / total.max(1) as f32);
                     g.set_work_text(format!("{done} / {total}").into());
+                    g.set_work_eta(eta);
                 }
             });
         };
@@ -973,9 +977,42 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
     });
 }
 
+/// Seconds left for the media scan, from the read rate of the last 20 s: -1 nothing to show, 0 still estimating.
+/// The first sample is the count after the cache, so cached files do not make the rate look fast.
+fn eta_seconds(samples: &mut std::collections::VecDeque<(std::time::Instant, usize)>, now: std::time::Instant, done: usize, total: usize) -> i32 {
+    if done >= total {
+        return -1;
+    }
+    samples.push_back((now, done));
+    while samples.len() > 2 && now.duration_since(samples[1].0) >= Duration::from_secs(20) {
+        samples.pop_front();
+    }
+    let (t0, d0) = samples[0];
+    let span = now.duration_since(t0).as_secs_f64();
+    if span < 5.0 || done <= d0 {
+        return 0;
+    }
+    ((total - done) as f64 * span / (done - d0) as f64).ceil().clamp(1.0, i32::MAX as f64) as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eta_from_recent_rate() {
+        let (mut s, t) = (std::collections::VecDeque::new(), std::time::Instant::now());
+        let at = |secs| t + Duration::from_secs(secs);
+        assert_eq!(eta_seconds(&mut s, at(0), 400, 1000), 0); // 400 from the cache
+        assert_eq!(eta_seconds(&mut s, at(4), 440, 1000), 0); // too early
+        assert_eq!(eta_seconds(&mut s, at(10), 500, 1000), 50); // 10 files/s, 500 left
+        // after a slower drive only the last 20 s count: 1 file/s
+        for i in 11..=40 {
+            eta_seconds(&mut s, at(i), 500 + (i as usize - 10), 1000);
+        }
+        assert_eq!(eta_seconds(&mut s, at(41), 531, 1000), 469);
+        assert_eq!(eta_seconds(&mut s, at(42), 1000, 1000), -1);
+    }
 
     #[test]
     fn rates_and_lengths() {

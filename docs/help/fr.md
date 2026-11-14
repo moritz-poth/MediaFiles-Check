@@ -138,7 +138,7 @@ Bon à savoir :
 
 ## Médias
 
-1. Médias › **Disques et projets** : activez les disques et les projets dont les chutiers comptent, puis **Analyser**. La première analyse lit l’en-tête de chaque fichier média ; les suivantes seulement les fichiers nouveaux ou modifiés. Les cinq dernières analyses sont gardées : **Charger…** en réaffiche une sans nouvelle analyse, après avoir demandé si rien n’a changé depuis.
+1. Médias › **Disques et projets** : activez les disques et les projets dont les chutiers comptent, puis **Analyser**. La première analyse lit l’en-tête de chaque fichier média ; les suivantes seulement les fichiers nouveaux ou modifiés. Après quelques secondes, le temps restant s’affiche à droite sous la barre. Les cinq dernières analyses sont gardées : **Charger…** en réaffiche une sans nouvelle analyse, après avoir demandé si rien n’a changé depuis.
 2. **Vue d’ensemble** compte médias et fichiers de rendu, utilisés ou non, et combien de fichiers utilisés par les projets ne sont sur aucun des disques lus. **Afficher le tableau…** ouvre le tableau des médias : chaque fichier avec clip, type, codec, image, fps, durée, son, taille, projet et dossier – filtrer, chercher, trier par colonne, double-clic sur le bord d’une colonne pour l’ajuster à son entrée la plus longue, sélectionner, **Enregistrer la liste…**.
 
 ![Vue d’ensemble des médias](images/fr/media.png)

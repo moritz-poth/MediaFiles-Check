@@ -1334,3 +1334,15 @@ msgstr "Enregistrer la demande…"
 
 msgid "Preview…"
 msgstr "Aperçu…"
+
+msgid "Estimating time left…"
+msgstr "Estimation du temps restant…"
+
+msgid "Less than a minute left"
+msgstr "Moins d'une minute restante"
+
+msgid "About {} min left"
+msgstr "Environ {} min restantes"
+
+msgid "About {} h {} min left"
+msgstr "Environ {} h {} min restantes"

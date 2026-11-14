@@ -1597,6 +1597,8 @@ export global Inventory {
     in property <int> drive-count;
     in property <string> work-text;
     in property <float> work-value;
+    // Restzeit des Scans in Sekunden: -1 keine, 0 wird geschätzt
+    in property <int> work-eta: -1;
     in property <string> error;
     // Übersicht: 0 Medien benutzt, 1 Renders benutzt, 2 Medien unbenutzt, 3 Renders unbenutzt, 4 unbekannt,
     // 5 Medien gesamt, 6 Renders gesamt (Anzahl und Größe)
@@ -1873,9 +1875,22 @@ component InventoryPane inherits VerticalLayout {
             }
         }
         ProgressBar { value: Inventory.work-value; }
-        StatusLine {
-            text: Inventory.work-text;
-            color: Theme.muted;
+        HorizontalLayout {
+            spacing: 12px;
+            StatusLine {
+                text: Inventory.work-text;
+                color: Theme.muted;
+            }
+            StatusLine {
+                horizontal-stretch: 0;
+                horizontal-alignment: right;
+                color: Theme.muted;
+                text: Inventory.work-eta < 0 ? ""
+                    : Inventory.work-eta == 0 ? @tr("Estimating time left…")
+                    : Inventory.work-eta < 60 ? @tr("Less than a minute left")
+                    : Inventory.work-eta < 3600 ? @tr("About {} min left", Math.ceil(Inventory.work-eta / 60))
+                    : @tr("About {} h {} min left", Math.floor(Inventory.work-eta / 3600), Math.ceil(Math.mod(Inventory.work-eta, 3600) / 60));
+            }
         }
         Para {
             text: @tr("The first scan reads the header of every media file; later scans only read new or changed files.");

@@ -138,7 +138,7 @@ Gut zu wissen:
 
 ## Medien
 
-1. Medien › **Laufwerke und Projekte**: Laufwerke und die Projekte einschalten, deren Bins zählen, dann **Scannen**. Der erste Durchlauf liest den Kopf jeder Mediendatei, spätere nur neue oder geänderte Dateien. Die letzten fünf Scans werden gemerkt: **Laden…** zeigt einen davon ohne neuen Scan, nach der Rückfrage, ob sich seitdem nichts geändert hat.
+1. Medien › **Laufwerke und Projekte**: Laufwerke und die Projekte einschalten, deren Bins zählen, dann **Scannen**. Der erste Durchlauf liest den Kopf jeder Mediendatei, spätere nur neue oder geänderte Dateien. Nach ein paar Sekunden steht rechts unter dem Balken die Restzeit. Die letzten fünf Scans werden gemerkt: **Laden…** zeigt einen davon ohne neuen Scan, nach der Rückfrage, ob sich seitdem nichts geändert hat.
 2. **Übersicht** zählt Medien und Render-Dateien, benutzt oder nicht, und wie viele Dateien die Projekte benutzen, die auf keinem gelesenen Laufwerk liegen. **Tabelle öffnen…** zeigt die Medientabelle: jede Datei mit Clip, Art, Codec, Bild, fps, Dauer, Ton, Größe, Projekt und Ordner – filtern, suchen, nach einer Spalte sortieren, Doppelklick auf einen Spaltenrand passt die Spalte an ihren längsten Eintrag an, Dateien auswählen, **Liste sichern…**.
 
 ![Medienübersicht](images/de/media.png)
