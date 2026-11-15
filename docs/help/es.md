@@ -17,6 +17,10 @@ MediaFiles Check **nunca borra** un archivo de medios y **nunca sobrescribe** ni
 
 Las pestañas de arriba son las áreas. Dentro de cada pestaña, la barra lateral de la izquierda muestra sus pasos en el orden en que se hacen; bajo cada paso, una línea corta indica cómo está. Un pequeño punto naranja en una pestaña indica que algo espera allí.
 
+Cada análisis (Intercambio, Comprobar, Reequilibrado, Duplicados, Proyectos, Medios) muestra bajo su barra el tiempo restante y dos botones: **Pausa** detiene la lectura hasta que pulses **Reanudar**; **Cancelar** termina el análisis enseguida y vuelve atrás; no se guarda nada de él (las sumas de comprobación y cabeceras ya leídas se recuerdan para el siguiente análisis).
+
+Si se le dijo a macOS que no deje a MediaFiles Check leer una unidad, el análisis se detiene con «macOS no deja que MediaFiles Check lea: …». **Volver a pedir acceso** hace que macOS pregunte otra vez: pulsa Permitir. Si sigue bloqueado, se abre Ajustes del Sistema en Privacidad y seguridad › Archivos y carpetas: activa allí las unidades.
+
 ## Qué se espera
 
 En cada unidad, también en unidades de red:
@@ -40,9 +44,8 @@ Intercambio › **Analizar** registra cada archivo MXF de las unidades activadas
 
 1. Analiza primero este puesto para que tu manifiesto esté al día.
 2. Intercambio › **Comparar** → **Abrir manifiesto…** y elige el manifiesto del otro puesto, o una solicitud guardada en Proyectos › Solicitar.
-3. **Asignar unidades:** las unidades sin una del mismo nombre en el otro lado necesitan un destino, o **No enviar**. La elección se recuerda.
-4. **Carpetas en ambos lados:** elige **Unir** o **Renombrar** para cada carpeta (ver abajo).
-5. Revisa el número de archivos y las tareas; luego haz clic en **Reunir…** y elige dónde crear la carpeta de entrega.
+3. **Asignar unidades:** primero las unidades con el mismo nombre en el otro lado (asignadas), después las que allí tienen otro nombre: necesitan un destino, o **No enviar**. La elección se recuerda.
+4. Revisa el número de archivos (**Mostrar … tareas…** abre las tareas en una ventana aparte); luego haz clic en **Reunir…** y elige dónde crear la carpeta de entrega.
 
 Cada archivo se copia con control de suma en una carpeta nueva como `261102-1830_Mac Studio_to_MacBook`, junto con `Tasks.txt` (instrucciones para importar a mano). Reunir de nuevo tras una interrupción continúa donde se quedó.
 
@@ -52,9 +55,10 @@ Cada archivo se copia con control de suma en una carpeta nueva como `261102-1830
 
 1. Cierra Media Composer.
 2. Intercambio › **Importar** → **Elegir entrega…**.
-3. Cada unidad de la entrega necesita una unidad en este puesto; las del mismo nombre se asignan solas.
-4. **Verificar e importar** verifica primero cada archivo. Solo se importa una entrega completa y sin daños: los archivos solo se añaden, nunca se sobrescribe un archivo de medios. Las bases de datos reemplazadas se guardan en `Avid MediaFiles/Ferry-Backup/`.
-5. Después vuelve a analizar para que el manifiesto esté al día.
+3. Cada unidad de la entrega necesita una unidad en este puesto; las del mismo nombre se asignan solas. Con **Separar**, los archivos de medios van a una unidad y los de render a otra (se reconocen por su cabecera MXF).
+4. **Carpetas:** para cada carpeta **Combinar** (en la carpeta con el mismo nombre) o **Carpeta propia** (`<remitente>_<carpeta>`, p. ej. `Mac Studio_1`; si ya existe, los archivos van ahí). **Combinar todas** / **Todas en carpetas propias** lo elige para todas.
+5. **Verificar e importar** verifica primero cada archivo. Solo se importa una entrega completa y sin daños: los archivos solo se añaden, nunca se sobrescribe un archivo de medios. Las bases de datos reemplazadas se guardan en `Avid MediaFiles/Ferry-Backup/`.
+6. Después vuelve a analizar para que el manifiesto esté al día.
 
 ## ¿Cuándo se copia algo?
 
@@ -66,7 +70,7 @@ Un archivo cuenta como **presente** si existe en algún lugar del otro puesto co
 - **Ambos lados tienen archivos propios:** solo se copian los archivos; tarea «Reconstruir la base de datos».
 - **Mismo nombre de archivo, contenido distinto:** no se copia; una tarea pide comprobarlo.
 
-Una base de datos solo se entrega si la carpeta de destino queda exactamente como la de origen; nunca se borra una base de datos. Carpetas como `1` existen en cada puesto: **Unir** pone los archivos en la misma carpeta (hay que reconstruir la base de datos), **Renombrar** en una carpeta nueva como `261031_MacStudio_1`.
+Una base de datos solo se entrega si la carpeta de destino queda exactamente como la de origen; nunca se borra una base de datos. Al importar ocurre lo mismo: una carpeta que después no coincide con la del otro lado (combinada, copiada en una carpeta propia que ya existía o separada en medios y render) conserva su base de datos, y en Tareas aparece «Reconstruir la base de datos».
 
 ## Comprobar unidades
 
@@ -124,7 +128,7 @@ Mantenimiento › **Historial** muestra cada operación de reequilibrado y de du
 ## Proyectos
 
 1. Proyectos › **Elegir proyectos** → **Elegir carpeta…**: la carpeta con tus proyectos de Avid (cada carpeta con un archivo `.avp`; `Attic` se deja fuera). Se recuerda. Activa los proyectos que quieras comprobar y haz clic en **Analizar**.
-2. **Medios que faltan** muestra por bin cada archivo de medios que falta una vez, con el nombre de su master clip. Un clic muestra dónde se usa. **Guardar lista…** escribe la lista entera.
+2. **Medios que faltan** muestra por bin cada archivo de medios que falta en tres columnas: el clip tal como se llama en el bin, el nombre del archivo MXF y el archivo original (clip de cámara, cinta o archivo importado). El nombre MXF solo se conoce mientras una base de datos de Avid en las unidades aún lista el archivo; si no, aparece «–». Un clic en la flecha muestra dónde se usa un archivo; un clic en un nombre lo copia al portapapeles. Los bordes de las columnas en la cabecera y la separación entre el árbol y la lista se pueden arrastrar. La ventana se puede redimensionar; arriba eliges **Todos**, **Para volver a vincular**, **Faltan** o **Solo archivos** (cada archivo que falta una vez, sin bins). Para pasarla a otro, guarda una solicitud (ver abajo). A la izquierda está el árbol de carpetas de los proyectos analizados (cerrado al principio; la flecha abre una carpeta): desmarca una carpeta (o un proyecto entero) y sus bins desaparecen de cada vista y de cada número; un archivo usado solo allí ya no aparece. **Todos**, **Ninguna** e **Invertir** arriba a la derecha del árbol cambian todas las casillas a la vez. La solicitud sigue conteniendo cada archivo que falta.
 3. **Clips AMA** muestra dónde se usan los archivos vinculados por AMA. No se solicitan.
 4. **Solicitar** → **Guardar solicitud…** escribe un archivo `…_Request.ferry`. Envíalo al puesto que tiene los medios; allí: Intercambio › Comparar, ábrelo y luego Reunir. Aquí: Intercambio › Importar la entrega.
 
@@ -149,7 +153,7 @@ Cómo se clasifica un archivo:
 - **Medio**: todo lo demás que escribió Media Composer u otro programa. Un archivo que nada distingue queda como **Desconocido** y nunca se mueve por una regla.
 - **Sin usar**: ningún clip, secuencia ni efecto de los proyectos activados lo usa. Los medios de otros proyectos en las mismas unidades también cuentan como sin usar; activa todos los proyectos que usan estas unidades.
 
-Acciones (Media Composer debe estar cerrado):
+Medios › **Acciones** (paso propio, Media Composer debe estar cerrado; cada una muestra primero una vista previa):
 
 - **Archivos de render en sus propias carpetas**: los archivos de render van a carpetas como `Mac Studio-renderfiles-1` junto a su carpeta, como máximo tantos como permite el límite de reequilibrado.
 - **Intercambiar**: elige la unidad de importación y la de render. Los archivos de render de la unidad de importación van a la de render y los medios de la unidad de render a la de importación, cada uno a una carpeta con el mismo nombre. Cada archivo se copia y la copia se comprueba con una suma de control; después el original se borra o va a `MediaFiles Check Aside`: lo eliges cada vez.

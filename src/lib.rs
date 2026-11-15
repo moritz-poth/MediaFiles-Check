@@ -34,7 +34,42 @@ pub const UPDATE_APP: update::App = update::App {
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use unicode_normalization::UnicodeNormalization;
+
+/// Pause and Cancel of a running scan: the page sets it, the scan asks `cancelled()` between files.
+#[derive(Default)]
+pub struct Gate {
+    paused: AtomicBool,
+    cancelled: AtomicBool,
+}
+
+impl Gate {
+    pub fn pause(&self, on: bool) {
+        self.paused.store(on, Ordering::Relaxed);
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed) && !self.is_cancelled()
+    }
+
+    /// Without waiting (for the result after the scan).
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+
+    /// Waits while paused; true once the scan is cancelled (also from the pause).
+    pub fn cancelled(&self) -> bool {
+        while self.is_paused() {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        self.is_cancelled()
+    }
+}
 
 pub const PMR: &str = "msmFMID.pmr";
 pub const MDB: &str = "msmMMOB.mdb";
@@ -351,6 +386,12 @@ pub fn mxf_dir(volume: &Path) -> PathBuf {
     volume.join("Avid MediaFiles").join("MXF")
 }
 
+/// Places macOS does not let this app read (privacy: removable and network volumes, Documents, …): listing them
+/// fails with "Operation not permitted" – a scan would find nothing there – until the user allows it.
+pub fn denied(places: &[PathBuf]) -> Vec<PathBuf> {
+    places.iter().filter(|p| fs::read_dir(p).is_err_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)).cloned().collect()
+}
+
 /// All mounted drives (network drives too) with "Avid MediaFiles/MXF".
 pub fn find_volumes() -> Vec<PathBuf> {
     let candidates: Vec<PathBuf> = if cfg!(windows) {
@@ -415,16 +456,18 @@ pub fn folders(root: &Path) -> Vec<(String, PathBuf)> {
     dirs.into_iter().map(|d| (format!("{label}/{}", name_of(&d)), d)).collect()
 }
 
-/// Checks every MXF folder below the given places; progress gets (done, total, place).
-pub fn check(roots: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str)) -> Vec<FolderReport> {
+/// Checks every MXF folder below the given places; progress gets (done, total, place). Cancelled: the folders so far.
+pub fn check(roots: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str), gate: &Gate) -> Vec<FolderReport> {
     let all: Vec<(String, PathBuf)> = roots.iter().flat_map(|r| folders(r)).collect();
-    all.iter()
-        .enumerate()
-        .map(|(i, (place, dir))| {
-            progress(i, all.len(), place);
-            check_folder(dir, place.clone())
-        })
-        .collect()
+    let mut out = vec![];
+    for (i, (place, dir)) in all.iter().enumerate() {
+        if gate.cancelled() {
+            break;
+        }
+        progress(i, all.len(), place);
+        out.push(check_folder(dir, place.clone()));
+    }
+    out
 }
 
 /// Picks the text for a language code (en, de, fr, es; anything else = English).
@@ -607,7 +650,28 @@ mod tests {
 
         let places: Vec<String> = folders(&dir).into_iter().map(|f| f.0).collect();
         assert_eq!(places.len(), 3);
-        assert!(report_text(&check(&[dir.clone()], &mut |_, _, _| {}), "de").contains("1 Datei nicht in der Datenbank"));
+        assert!(report_text(&check(&[dir.clone()], &mut |_, _, _| {}, &Gate::default()), "de").contains("1 Datei nicht in der Datenbank"));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn gate_pauses_until_resumed_and_cancel_ends_the_pause() {
+        let g = std::sync::Arc::new(Gate::default());
+        assert!(!g.cancelled());
+        g.pause(true);
+        let (g2, t) = (g.clone(), std::time::Instant::now());
+        let waiter = std::thread::spawn(move || g2.cancelled());
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        g.pause(false);
+        assert!(!waiter.join().unwrap() && t.elapsed() >= std::time::Duration::from_millis(300));
+        g.pause(true);
+        g.cancel();
+        assert!(g.cancelled() && !g.is_paused());
+        assert!(check(&[std::env::temp_dir()], &mut |_, _, _| panic!("a cancelled check reads nothing"), &g).is_empty());
+    }
+
+    #[test]
+    fn readable_and_missing_places_are_not_denied() {
+        assert!(denied(&[std::env::temp_dir(), PathBuf::from("/no/such/place")]).is_empty());
     }
 }

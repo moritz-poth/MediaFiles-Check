@@ -1,7 +1,7 @@
 //! Fehlende Dateien in einen Lieferordner sammeln, Lieferungen prüfen und einspielen.
-use crate::ferry::plan::Plan;
+use crate::ferry::plan::{Plan, Task};
 use crate::ferry::*;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{Read, Write};
 
 pub const DELIVERY_FORMAT: &str = "mediafiles-ferry-delivery";
@@ -181,10 +181,26 @@ pub struct Imported {
     pub tasks: Vec<String>,
 }
 
+/// Where the files of a delivery go on this system (chosen when importing).
+#[derive(Default, Clone)]
+pub struct Targets {
+    /// delivery volume -> drive (without an entry: the drive of the same name)
+    pub media: HashMap<String, PathBuf>,
+    /// delivery volume -> drive for its render files; with an entry the volume is separated
+    pub render: HashMap<String, PathBuf>,
+    /// delivery folders ("Volume/Folder") that go into "<sender>_<Folder>" instead of the folder of the same name
+    pub own_folder: HashSet<String>,
+}
+
+/// Folder for a delivery folder imported into a folder of its own; if it exists already, the files go into it.
+pub fn own_folder_name(from: &str, folder: &str) -> String {
+    format!("{}_{folder}", safe_name(from))
+}
+
 /// Spielt eine Lieferung in die MXF-Ordner ein. Fügt nur hinzu und überschreibt keine Mediendatei;
-/// ersetzte Datenbanken wandern nach "Avid MediaFiles/Ferry-Backup/".
-/// `map`: Volume-Name aus der Lieferung -> Einhängepunkt (ohne Eintrag: gleichnamiges Laufwerk).
-pub fn import(dest: &Path, map: &HashMap<String, String>, progress: &mut dyn FnMut(&str)) -> io::Result<Imported> {
+/// ersetzte Datenbanken wandern nach "Avid MediaFiles/Ferry-Backup/". Ein Ordner, der Dateien bekommt, aber
+/// keine passende Datenbank, bekommt die Aufgabe "Datenbank neu schreiben" (in `lang`).
+pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<Imported> {
     let d = load(dest)?;
     let split = |p: &str| -> (String, String, String) {
         let mut it = p.splitn(3, '/').map(String::from);
@@ -199,9 +215,10 @@ pub fn import(dest: &Path, map: &HashMap<String, String>, progress: &mut dyn FnM
         if volumes.contains_key(&vol) {
             continue;
         }
-        let path = map
+        let path = t
+            .media
             .get(&vol)
-            .map(PathBuf::from)
+            .cloned()
             .or_else(|| found.iter().find(|p| p.file_name().is_some_and(|n| key(&n.to_string_lossy()) == key(&vol))).cloned())
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("drive \"{vol}\" not found – connect or assign it")))?;
         volumes.insert(vol, path);
@@ -210,24 +227,35 @@ pub fn import(dest: &Path, map: &HashMap<String, String>, progress: &mut dyn FnM
     let mut problems = vec![];
     let total = d.files.len();
     let mut done = 0;
+    // delivery folder -> folders its files went to; folder -> (drive name, folder name)
+    let mut landed: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
+    let mut touched: BTreeMap<PathBuf, (String, String)> = BTreeMap::new();
     // Mediendateien zuerst: eine Datenbank darf erst ersetzt werden, wenn ihre Dateien da sind
     for f in d.files.iter().filter(|f| !is_db(&split(&f.path).2)) {
         done += 1;
         progress(&format!("[{done}/{total}] {}", f.path));
         let (vol, folder, name) = split(&f.path);
-        let target = mxf_dir(&volumes[&vol]).join(&folder).join(&name);
-        if let Err(e) = copy_verified(&dest.join(&f.path), &target, Some(&f.hash)) {
+        let id = format!("{vol}/{folder}");
+        // shortcut: a file whose header says nothing counts as media, like Media › Overview's rule-based moves leave it
+        let render = t.render.get(&vol).filter(|_| crate::mxf::file_info(&dest.join(&f.path)).is_ok_and(|i| i.render == Some(true)));
+        let drive = render.unwrap_or(&volumes[&vol]);
+        let to_folder = if t.own_folder.contains(&id) { own_folder_name(&d.from, &folder) } else { folder };
+        let dir = mxf_dir(drive).join(&to_folder);
+        if let Err(e) = copy_verified(&dest.join(&f.path), &dir.join(&name), Some(&f.hash)) {
             problems.push(format!("{}: {e}", f.path));
         }
+        landed.entry(id).or_default().insert(dir.clone());
+        touched.insert(dir, (scan::volume_name(drive), to_folder));
     }
 
     let backup = format!("{}_{}", yymmdd(now_secs()), now_secs());
+    let mut db_done: HashSet<PathBuf> = HashSet::new();
     for (id, expected) in &d.db_folders {
-        let (vol, folder, _) = split(&format!("{id}/"));
-        let dir = mxf_dir(&volumes[&vol]).join(&folder);
+        // the database fits one folder only: separated into media and render files it fits none
+        let Some(dir) = landed.get(id).filter(|s| s.len() == 1).and_then(|s| s.first()) else { continue };
         // Hat sich der Ordner seit dem Scan verändert, passt die gelieferte Datenbank nicht mehr.
         let want: HashSet<String> = expected.iter().map(|n| key(n)).collect();
-        let have: HashSet<String> = fs::read_dir(&dir)?
+        let have: HashSet<String> = fs::read_dir(dir)?
             .flatten()
             .map(|e| key(&e.file_name().to_string_lossy()))
             .filter(|n| n.ends_with(".mxf"))
@@ -236,22 +264,41 @@ pub fn import(dest: &Path, map: &HashMap<String, String>, progress: &mut dyn FnM
             problems.push(format!("{id}: folder contains other files than expected – database not replaced, please rebuild it"));
             continue;
         }
+        let drive = dir.ancestors().nth(3).unwrap_or(dir);
+        let folder = dir.file_name().unwrap_or_default();
+        let mut ok = true;
         for f in d.files.iter().filter(|f| f.path.starts_with(&format!("{id}/")) && is_db(&split(&f.path).2)) {
             done += 1;
             progress(&format!("[{done}/{total}] {}", f.path));
             let name = split(&f.path).2;
             let target = dir.join(&name);
             if target.exists() && hash_file(&target)? != f.hash {
-                let saved = volumes[&vol].join("Avid MediaFiles").join(BACKUP_DIR).join(&backup).join(&folder);
+                let saved = drive.join("Avid MediaFiles").join(BACKUP_DIR).join(&backup).join(folder);
                 fs::create_dir_all(&saved)?;
                 crate::move_new(&target, &saved.join(&name))?;
             }
             if let Err(e) = copy_verified(&dest.join(&f.path), &target, Some(&f.hash)) {
                 problems.push(format!("{}: {e} – old database is in {BACKUP_DIR}/{backup}", f.path));
+                ok = false;
             }
         }
+        if ok {
+            db_done.insert(dir.clone());
+        }
     }
-    Ok(Imported { problems, tasks: d.tasks })
+
+    // The sender's "rebuild database" tasks name the folders as planned; the folders that really got files replace them.
+    let rebuild = |volume: &str, folder: &str, l: &str| Task::RebuildDb { system: d.to.clone(), volume: volume.into(), folder: folder.into() }.describe(l);
+    let planned: HashSet<String> = landed
+        .keys()
+        .flat_map(|id| {
+            let (v, f, _) = split(&format!("{id}/"));
+            ["en", "de", "fr", "es"].map(|l| rebuild(&v, &f, l))
+        })
+        .collect();
+    let mut tasks: Vec<String> = d.tasks.iter().filter(|t| !planned.contains(*t)).cloned().collect();
+    tasks.extend(touched.iter().filter(|(dir, _)| !db_done.contains(*dir)).map(|(_, (v, f))| rebuild(v, f, lang)));
+    Ok(Imported { problems, tasks })
 }
 
 /// Kopiert über eine Teildatei, prüft Quelle (gegen den Scan) und Ziel (nachgelesen) per Hash und überschreibt nie.
@@ -340,13 +387,13 @@ mod tests {
         fs::create_dir_all(folder.join("Creating/creating1")).unwrap();
         write_folder(&folder, &[("a.mxf", "aaa"), ("b.MXF", "bbb"), ("msmFMID.pmr", "db1"), ("msmMMOB.mdb", "db2"), ("notes.txt", "x")]);
         let cache = root.join("cache");
-        let s = scan::scan(&[vol.clone()], false, Some(&cache), &mut |_| {}).unwrap();
+        let s = scan::scan(&[vol.clone()], false, Some(&cache), &mut |_, _, _| {}, &crate::Gate::default()).unwrap();
         assert!(s.warnings.is_empty(), "{:?}", s.warnings);
         let f = &s.manifest.volumes[0].folders[0];
         assert_eq!((f.files.len(), f.has_db), (2, true));
 
         let remote = Manifest { system: "B".into(), volumes: vec![Volume { name: "V".into(), ..Default::default() }], ..Default::default() };
-        let p = plan::plan(&s.manifest, &remote, &Options::default(), "261031");
+        let p = plan::plan(&s.manifest, &remote, &Options::default());
         let dest = root.join("Lieferung");
         assert!(collect(&s.manifest, "B", &p, &dest, "de", &mut |_| {}).unwrap().is_empty());
         assert!(dest.join("V/Avid8.1/msmMMOB.mdb").exists());
@@ -364,8 +411,8 @@ mod tests {
         let mtime = fs::metadata(&a).unwrap().modified().unwrap();
         fs::write(&a, "zzz").unwrap();
         File::options().write(true).open(&a).unwrap().set_modified(mtime).unwrap();
-        assert!(scan::scan(&[vol.clone()], false, Some(&cache), &mut |_| {}).unwrap().warnings.is_empty());
-        assert_eq!(scan::scan(&[vol], true, Some(&cache), &mut |_| {}).unwrap().warnings.len(), 1);
+        assert!(scan::scan(&[vol.clone()], false, Some(&cache), &mut |_, _, _| {}, &crate::Gate::default()).unwrap().warnings.is_empty());
+        assert_eq!(scan::scan(&[vol], true, Some(&cache), &mut |_, _, _| {}, &crate::Gate::default()).unwrap().warnings.len(), 1);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -378,17 +425,17 @@ mod tests {
         write_folder(&mxf_dir(&b).join("1"), &[("x.mxf", "x"), ("msmFMID.pmr", "oldF"), ("msmMMOB.mdb", "oldM")]);
         write_folder(&mxf_dir(&b).join("2"), &[]);
 
-        let sa = scan::scan(&[a], false, None, &mut |_| {}).unwrap().manifest;
-        let sb = scan::scan(&[b.clone()], false, None, &mut |_| {}).unwrap().manifest;
-        let p = plan::plan(&sa, &sb, &Options::default(), "261101");
+        let sa = scan::scan(&[a], false, None, &mut |_, _, _| {}, &crate::Gate::default()).unwrap().manifest;
+        let sb = scan::scan(&[b.clone()], false, None, &mut |_, _, _| {}, &crate::Gate::default()).unwrap().manifest;
+        let p = plan::plan(&sa, &sb, &Options::default());
         let dest = root.join("Lieferung");
         assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
         assert!(fs::read_to_string(dest.join(tasks_file("en"))).unwrap().contains("ONLY THE CONTENTS"));
 
         // seit dem Scan ist auf B in Ordner 2 eine Datei dazugekommen -> dessen DB darf nicht ersetzt werden
         fs::write(mxf_dir(&b).join("2/neu.mxf"), "n").unwrap();
-        let map = [("V".to_string(), b.display().to_string())].into();
-        let r = import(&dest, &map, &mut |_| {}).unwrap();
+        let t = Targets { media: [("V".to_string(), b.clone())].into(), ..Default::default() };
+        let r = import(&dest, &t, "en", &mut |_| {}).unwrap();
         assert_eq!(r.problems.len(), 1, "{:?}", r.problems);
         assert!(r.problems[0].starts_with("V/2:"));
 
@@ -400,7 +447,36 @@ mod tests {
         assert_eq!(fs::read_to_string(backup.join("1/msmMMOB.mdb")).unwrap(), "oldM");
 
         // erneutes Einspielen ist harmlos
-        assert_eq!(import(&dest, &map, &mut |_| {}).unwrap().problems.len(), 1);
+        assert_eq!(import(&dest, &t, "en", &mut |_| {}).unwrap().problems.len(), 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn import_into_own_folder_with_or_without_database() {
+        let root = tmp("ownfolder");
+        let (a, b) = (root.join("A/V"), root.join("B/V"));
+        write_folder(&mxf_dir(&a).join("1"), &[("x.mxf", "x"), ("y.mxf", "y"), ("msmFMID.pmr", "F1"), ("msmMMOB.mdb", "M1")]);
+        write_folder(&mxf_dir(&a).join("2"), &[("p.mxf", "p"), ("msmFMID.pmr", "F2"), ("msmMMOB.mdb", "M2")]);
+        let sa = scan::scan(&[a], false, None, &mut |_, _, _| {}, &crate::Gate::default()).unwrap().manifest;
+        let (own1, own2) = (own_folder_name(&sa.system, "1"), own_folder_name(&sa.system, "2"));
+        // B has the own folder for "2" already (an earlier delivery) with a file of its own
+        write_folder(&mxf_dir(&b).join(&own2), &[("old.mxf", "o")]);
+        let sb = scan::scan(&[b.clone()], false, None, &mut |_, _, _| {}, &crate::Gate::default()).unwrap().manifest;
+        let p = plan::plan(&sa, &sb, &Options::default());
+        let dest = root.join("Lieferung");
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+
+        let t = Targets { media: [("V".to_string(), b.clone())].into(), own_folder: ["V/1".to_string(), "V/2".to_string()].into(), ..Default::default() };
+        let r = import(&dest, &t, "en", &mut |_| {}).unwrap();
+        let m = mxf_dir(&b);
+        // new folder: exact copy of the source, so its database comes along
+        assert_eq!(fs::read_to_string(m.join(&own1).join("msmMMOB.mdb")).unwrap(), "M1");
+        assert!(!m.join("1").exists(), "nothing goes into the folder of the same name");
+        // existing own folder: files go in, the database does not fit -> task for that folder
+        assert_eq!(fs::read_to_string(m.join(&own2).join("p.mxf")).unwrap(), "p");
+        assert!(!m.join(&own2).join("msmMMOB.mdb").exists());
+        let rebuild: Vec<_> = r.tasks.iter().filter(|t| t.contains("Rebuild database")).cloned().collect();
+        assert_eq!(rebuild, [format!("[B] Rebuild database: V/{own2}")]);
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -259,8 +259,9 @@ pub fn plan(mxf: &Path, main: &str, per: usize, rename_to: Option<&str>, mc_fold
 
 /// Groups on these drives that do not match the limit (a folder over it, or rebalanced folders laid out for another
 /// limit). `renamed` = (MXF folder, original name) of folders renamed for Media Composer right now: their group is
-/// marked blocked and their names stay reserved. `is_mc` tells Media Composer's own folder names.
-pub fn full_folders(volumes: &[PathBuf], limit: usize, renamed: &[(PathBuf, String)], is_mc: &dyn Fn(&Path, &str) -> bool) -> Vec<Plan> {
+/// marked blocked and their names stay reserved. `is_mc` tells Media Composer's own folder names. Cancelled through
+/// `gate`: an incomplete list the caller throws away.
+pub fn full_folders(volumes: &[PathBuf], limit: usize, renamed: &[(PathBuf, String)], is_mc: &dyn Fn(&Path, &str) -> bool, gate: &crate::Gate) -> Vec<Plan> {
     let per = per_folder(limit);
     let mut plans = vec![];
     for v in volumes {
@@ -273,6 +274,9 @@ pub fn full_folders(volumes: &[PathBuf], limit: usize, renamed: &[(PathBuf, Stri
         let mains: Vec<&String> = dirs.iter().filter(|d| member_of(d).is_none_or(|(b, _)| !bases.contains(&key(b)))).collect();
         let mut seen: HashSet<String> = HashSet::new();
         for main in mains {
+            if gate.cancelled() {
+                return plans;
+            }
             // "Mac Studio" and "Mac Studio.1" would share their rebalanced folders: only the first takes them
             if !seen.insert(key(base_name(main))) {
                 continue;
@@ -736,7 +740,7 @@ mod tests {
         assert_eq!(j.entries.len(), 1);
         // a folder renamed for Media Composer blocks its group
         let drive = mxf.parent().unwrap().parent().unwrap().to_path_buf();
-        let found = full_folders(&[drive], 4, &[(mxf.clone(), "Projekt-rebalanced-1".into())], &|_, n| n == "1");
+        let found = full_folders(&[drive], 4, &[(mxf.clone(), "Projekt-rebalanced-1".into())], &|_, n| n == "1", &crate::Gate::default());
         assert!(found.iter().any(|p| p.main == "Projekt" && p.blocked));
         // undo: all back, the old name returns
         let u = undo(&j.entries[0]).unwrap();
@@ -751,10 +755,10 @@ mod tests {
         let mxf = dir.parent().unwrap().to_path_buf();
         let drive = mxf.parent().unwrap().parent().unwrap().to_path_buf();
         fs::create_dir(mxf.join("Mac Studio-rebalanced-1")).unwrap(); // empty, from an earlier run
-        let found = full_folders(std::slice::from_ref(&drive), 9, &[], &|_, _| false);
+        let found = full_folders(std::slice::from_ref(&drive), 9, &[], &|_, _| false, &crate::Gate::default());
         assert_eq!(found.len(), 1);
         assert_eq!((found[0].main.as_str(), found[0].folders.clone(), found[0].stays), ("Mac Studio.1", vec![("Mac Studio-rebalanced-1".to_string(), 7)], 2));
-        assert!(full_folders(std::slice::from_ref(&drive), 12, &[], &|_, _| false).iter().all(|p| p.moves.is_empty()));
+        assert!(full_folders(std::slice::from_ref(&drive), 12, &[], &|_, _| false, &crate::Gate::default()).iter().all(|p| p.moves.is_empty()));
         // same file name in the target already: left where it is
         fs::write(mxf.join("Mac Studio-rebalanced-1/f00.mxf"), b"other").unwrap();
         let p = plan(&mxf, "Mac Studio.1", 4, None, false, &mut HashSet::new()).unwrap();

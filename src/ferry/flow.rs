@@ -2,9 +2,9 @@
 //! Der Zustand liegt in `Session`; jede Änderung baut die Modelle der Oberfläche neu auf.
 use crate::ferry::collect::{self, Delivery};
 use crate::ferry::plan::{self, Options, Plan};
-use crate::ferry::{DB_FILES, Manifest, key, local_time, now_secs, safe_name, scan, write_atomic, yymmdd};
+use crate::ferry::{DB_FILES, Manifest, key, local_time, now_secs, safe_name, scan, write_atomic};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -42,8 +42,6 @@ pub struct Compare {
     pub remote: Manifest,
     /// eigene Volumes ohne gleichnamiges Gegenstück; options = Volumes drüben, letzter Index = nicht senden
     pub drives: Vec<Choice>,
-    /// Ordner auf beiden Seiten: (Volume/Ordner, -1 offen / 0 zusammenführen / 1 umbenennen)
-    pub collisions: Vec<(String, i32)>,
     /// Anforderung aus MediaFiles Check: fester Plan, nichts zuzuordnen
     pub request: Option<Plan>,
 }
@@ -65,53 +63,35 @@ impl Compare {
                 Choice { name: lv.name.clone(), options: remote_names.clone(), selected }
             })
             .collect();
-        let mut c = Compare { local, remote, drives, collisions: vec![], request: None };
-        c.refresh_collisions();
-        c
+        Compare { local, remote, drives, request: None }
     }
 
     /// Anforderung: die Gegenseite ist der Anfordernde, der Plan steht fest.
     pub fn from_request(local: Manifest, req: &crate::ferry::request::Request) -> Self {
         let plan = crate::ferry::request::plan(&local, req);
         let remote = Manifest { system: req.system.clone(), created: req.created, ..Default::default() };
-        Compare { local, remote, drives: vec![], collisions: vec![], request: Some(plan) }
+        Compare { local, remote, drives: vec![], request: Some(plan) }
     }
 
-    fn options(&self, with_renames: bool) -> Options {
+    fn options(&self) -> Options {
         let mut o = Options::default();
         for d in &self.drives {
             if (1..=d.options.len()).contains(&d.selected) {
                 o.volume_map.insert(d.name.clone(), d.options[d.selected - 1].clone());
             }
         }
-        if with_renames {
-            o.rename = self.collisions.iter().filter(|c| c.1 == 1).map(|c| c.0.clone()).collect();
-        }
         o
-    }
-
-    /// Kollisionen ohne Umbenennungen bestimmen, damit Zeilen nach der Wahl „Umbenennen“ nicht verschwinden.
-    pub fn refresh_collisions(&mut self) {
-        if self.request.is_some() {
-            return;
-        }
-        let base = plan::plan(&self.local, &self.remote, &self.options(false), &yymmdd(now_secs()));
-        let old = std::mem::take(&mut self.collisions);
-        self.collisions = base.collisions.into_iter().map(|id| {
-            let choice = old.iter().find(|c| c.0 == id).map_or(-1, |c| c.1);
-            (id, choice)
-        }).collect();
     }
 
     pub fn plan(&self) -> Plan {
         if let Some(p) = &self.request {
             return p.clone();
         }
-        plan::plan(&self.local, &self.remote, &self.options(true), &yymmdd(now_secs()))
+        plan::plan(&self.local, &self.remote, &self.options())
     }
 
     pub fn ready(&self) -> bool {
-        self.drives.iter().all(|d| d.selected != 0) && self.collisions.iter().all(|c| c.1 >= 0)
+        self.drives.iter().all(|d| d.selected != 0)
     }
 
     pub fn remember(&self, m: &mut Mappings) {
@@ -146,6 +126,10 @@ pub struct Incoming {
     pub delivery: Delivery,
     /// Volumes der Lieferung; options = eingehängte Laufwerke
     pub drives: Vec<Choice>,
+    /// per drive: None = as on the other side, Some(i) = separated, render files to option i (0 = not chosen yet)
+    pub renders: Vec<Option<usize>>,
+    /// folders of the delivery ("Volume/Folder"), true = into a folder of its own ("<sender>_<Folder>")
+    pub folders: Vec<(String, bool)>,
 }
 
 impl Incoming {
@@ -154,13 +138,19 @@ impl Incoming {
         let found: Vec<String> = scan::find_volumes().iter().map(|p| scan::volume_name(p)).collect();
         let saved = saved.receive.get(&delivery.from);
         let mut names: Vec<String> = vec![];
+        let mut folders: Vec<(String, bool)> = vec![];
         for f in &delivery.files {
-            let vol = f.path.split('/').next().unwrap_or_default().to_string();
+            let mut parts = f.path.split('/');
+            let vol = parts.next().unwrap_or_default().to_string();
+            let id = format!("{vol}/{}", parts.next().unwrap_or_default());
             if !names.contains(&vol) {
                 names.push(vol);
             }
+            if !folders.iter().any(|x| x.0 == id) {
+                folders.push((id, false));
+            }
         }
-        let drives = names
+        let drives: Vec<Choice> = names
             .into_iter()
             .map(|name| {
                 let pick = |want: &str| found.iter().position(|f| key(f) == key(want)).map(|i| i + 1);
@@ -168,20 +158,22 @@ impl Incoming {
                 Choice { name, options: found.clone(), selected }
             })
             .collect();
-        Ok(Incoming { dir, delivery, drives })
+        let renders = vec![None; drives.len()];
+        Ok(Incoming { dir, delivery, drives, renders, folders })
     }
 
     pub fn ready(&self) -> bool {
-        self.drives.iter().all(|d| d.selected != 0)
+        self.drives.iter().all(|d| d.selected != 0) && self.renders.iter().all(|r| *r != Some(0))
     }
 
-    /// Volume der Lieferung -> Einhängepunkt
-    pub fn map(&self) -> HashMap<String, String> {
-        self.drives
-            .iter()
-            .filter(|d| d.selected != 0)
-            .map(|d| (d.name.clone(), format!("/Volumes/{}", d.options[d.selected - 1])))
-            .collect()
+    /// Where everything goes: drives per volume of the delivery, render drives, folders of their own.
+    pub fn targets(&self) -> collect::Targets {
+        let at = |d: &Choice, i: usize| PathBuf::from(format!("/Volumes/{}", d.options[i - 1]));
+        collect::Targets {
+            media: self.drives.iter().filter(|d| d.selected != 0).map(|d| (d.name.clone(), at(d, d.selected))).collect(),
+            render: self.drives.iter().zip(&self.renders).filter_map(|(d, r)| r.filter(|i| *i != 0).map(|i| (d.name.clone(), at(d, i)))).collect(),
+            own_folder: self.folders.iter().filter(|f| f.1).map(|f| f.0.clone()).collect(),
+        }
     }
 
     pub fn remember(&self, m: &mut Mappings) {
@@ -242,20 +234,6 @@ mod tests {
         let mut m = Mappings::default();
         c.remember(&mut m);
         assert_eq!(Compare::new(local, remote, &m).drives[0].selected, 2);
-    }
-
-    #[test]
-    fn collision_rows_stay_after_choosing_rename() {
-        let local = Manifest { system: "A".into(), volumes: vec![vol("V", &[("1", &["a", "b"])])], ..Default::default() };
-        let remote = Manifest { system: "B".into(), volumes: vec![vol("V", &[("1", &["c"])])], ..Default::default() };
-        let mut c = Compare::new(local, remote, &Mappings::default());
-        assert_eq!(c.collisions, [("V/1".to_string(), -1)]);
-        assert!(!c.ready());
-        c.collisions[0].1 = 1;
-        c.refresh_collisions();
-        assert_eq!(c.collisions, [("V/1".to_string(), 1)]);
-        assert!(c.ready());
-        assert!(c.plan().copies.iter().all(|x| x.to_folder != "1"), "renamed folder gets a new name");
     }
 
     #[test]

@@ -17,6 +17,12 @@ export struct HelpBlock {
     picture: image,
 }
 
+export struct VolumeRow {
+    name: string,
+    files: string,
+    online: bool,
+    selected: bool,
+}
 export struct DriveRow {
     name: string,
     selected: bool,
@@ -57,11 +63,16 @@ export struct ReportRow {
     level: int,
 }
 
-// Fehlende Medien: level 0 Bin, 1 Mediendatei (aufklappbar, index für toggle-group), 2 Verwendung im Bin
-export struct MissingRow {
+// Ordnerbaum im Fenster „Fehlende Medien“: Ebene 0 = Projekt
+export struct BinFolderRow {
     level: int,
-    text: string,
+    name: string,
     note: string,
+    checked: bool,
+    // weiter oben ausgeschaltet: der eigene Haken bleibt, die Bins sind trotzdem ausgeblendet
+    dim: bool,
+    // hat Unterordner (Dreieck), aufgeklappt
+    branch: bool,
     open: bool,
     index: int,
 }
@@ -73,6 +84,8 @@ export global Metrics {
     out property <length> line: 18px;
     // umbrechende Texte brauchen eine feste Breite, sonst rechnet Slint sie als eine Zeile
     out property <length> content-width: 960px - 205px - 2 * 36px;
+    // Höhe der Inhaltsspalte ohne Scrollen: Fenster 620 − Reiterleiste 80 = 540, minus 28 oben und 36 unten
+    out property <length> page-height: 540px - 28px - 36px;
 }
 
 export global Theme {
@@ -138,8 +151,35 @@ component StatusLine inherits Text {
     vertical-alignment: center;
 }
 
+// Fortschrittszeile: was gerade gelesen wird, rechts die Restzeit (Sekunden: -1 keine, 0 wird geschätzt)
+component WorkLine inherits HorizontalLayout {
+    in property <string> text;
+    in property <int> eta: -1;
+    in property <bool> paused;
+    spacing: 12px;
+    // the path gives way (elided), the time left keeps its place
+    StatusLine {
+        text: root.text;
+        horizontal-stretch: 1;
+        min-width: 0;
+        color: Theme.muted;
+    }
+    StatusLine {
+        horizontal-stretch: 0;
+        min-width: self.preferred-width;
+        horizontal-alignment: right;
+        color: Theme.muted;
+        text: root.paused ? @tr("Paused")
+            : root.eta < 0 ? ""
+            : root.eta == 0 ? @tr("Estimating time left…")
+            : root.eta < 60 ? @tr("Less than a minute left")
+            : root.eta < 3600 ? @tr("About {} min left", Math.ceil(root.eta / 60))
+            : @tr("About {} h {} min left", Math.floor(root.eta / 3600), Math.ceil(Math.mod(root.eta, 3600) / 60));
+    }
+}
+
 component Para inherits Text {
-    width: Metrics.content-width - 12px;
+    width: Metrics.content-width;
     wrap: word-wrap;
     font-size: 12px;
     color: Theme.muted;
@@ -387,10 +427,12 @@ component ScrollThumb inherits Rectangle {
     in property <length> view;
     in property <length> content;
     in property <length> offset;
+    // height the thumb runs along (a card with padding: the whole card, not only its scrolling part)
+    in property <length> track: root.view;
     visible: root.content > root.view;
     width: 6px;
-    height: max(24px, (root.view - 4px) * root.view / max(root.content, 1px));
-    y: 2px + (root.content > root.view ? -root.offset / (root.content - root.view) * (root.view - 4px - self.height) : 0px);
+    height: max(24px, (root.track - 4px) * root.view / max(root.content, 1px));
+    y: 2px + (root.content > root.view ? -root.offset / (root.content - root.view) * (root.track - 4px - self.height) : 0px);
     border-radius: 3px;
     background: Theme.dark ? #ffffff59 : #00000059;
 }
@@ -411,6 +453,65 @@ component ScrollBox inherits Rectangle {
         }
     }
     ScrollThumb { x: parent.width - self.width - 2px; view: flick.height; content: inner.preferred-height; offset: flick.content-y; }
+}
+
+// Liste, die den Rest einer Seite fester Höhe nimmt (nie mehr als ihr Inhalt) und darin scrollt – so scrollt die Seite
+// selbst nie; nur in einem Layout mit fester Höhe benutzen
+component FillScroll inherits Rectangle {
+    property <bool> scrolls: inner.preferred-height > root.height;
+    vertical-stretch: 1;
+    min-height: 0px;
+    preferred-height: inner.preferred-height;
+    max-height: inner.preferred-height;
+    flick := Flickable {
+        content-height: inner.preferred-height;
+        inner := VerticalLayout {
+            x: 0;
+            width: flick.width - (root.scrolls ? 12px : 0px);
+            @children
+        }
+    }
+    ScrollThumb { x: parent.width - self.width - 2px; view: flick.height; content: inner.preferred-height; offset: flick.content-y; }
+}
+
+// Laufwerke mit Schaltern – überall gleich (Austausch, Prüfen, Medien teilen dieselben Schalter):
+// grüner Punkt, Name, Dateien aus dem letzten Austausch-Scan, Schalter
+component DriveList inherits Card {
+    in property <[VolumeRow]> rows;
+    in property <int> visible-rows: 6;
+    callback toggled(int);
+    ScrollBox {
+        limit: root.visible-rows * 38px;
+        for v[i] in root.rows: ToggleRow {
+            first: i == 0;
+            enabled: v.online;
+            toggled => { root.toggled(i); }
+            spacing: 10px;
+            Dot { color: v.online ? Theme.online : Theme.line; }
+            Text {
+                text: v.name;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+                color: v.online && v.selected ? Theme.text : Theme.muted;
+            }
+            Text {
+                text: !v.online ? @tr("not connected") : v.files == "" ? @tr("not scanned yet") : @tr("{} files", v.files);
+                font-size: 12px;
+                vertical-alignment: center;
+                color: v.files == "" ? Theme.faint : Theme.muted;
+            }
+            VerticalLayout {
+                alignment: center;
+                width: 34px;
+                if v.online: Switch {
+                    on: v.selected;
+                    label: v.name;
+                    toggled => { root.toggled(i); }
+                }
+            }
+        }
+    }
 }
 
 // Ergebnisliste mit eigener Scrollfläche; level: 0 Überschrift, 1 Befund (Warnfarbe), 2 Detail (eingerückt)
@@ -447,69 +548,7 @@ component RowList inherits Rectangle {
             }
         }
     }
-    ScrollThumb { x: parent.width - self.width - 3px; view: flick.height; content: list.preferred-height; offset: flick.content-y; }
-}
-
-// Fehlende Mediendateien pro Bin, Klick auf eine Datei klappt auf, wo sie im Bin steckt
-component MissingList inherits Rectangle {
-    in property <[MissingRow]> rows;
-    in property <length> limit: 360px;
-    callback toggle(int);
-    height: min(list.preferred-height + 20px, root.limit);
-    background: Theme.card;
-    border-width: 1px;
-    border-color: Theme.card-line;
-    border-radius: 9px;
-    clip: true;
-    flick := Flickable {
-        x: 14px;
-        y: 10px;
-        width: parent.width - 28px;
-        height: parent.height - 20px;
-        content-height: list.preferred-height;
-        list := VerticalLayout {
-            x: 0;
-            width: flick.width - 10px;
-            for r[i] in root.rows: Rectangle {
-                height: line.preferred-height;
-                line := HorizontalLayout {
-                    padding-top: r.level == 0 && i > 0 ? 14px : 3px;
-                    padding-bottom: 3px;
-                    padding-left: r.level == 2 ? 34px : r.level == 1 ? 8px : 0;
-                    spacing: 8px;
-                    if r.level == 1: VerticalLayout {
-                        alignment: center;
-                        Path {
-                            width: 8px;
-                            height: 8px;
-                            viewbox-width: 8;
-                            viewbox-height: 8;
-                            commands: r.open ? "M 0 1 L 8 1 L 4 7 Z" : "M 1 0 L 7 4 L 1 8 Z";
-                            fill: Theme.muted;
-                        }
-                    }
-                    Text {
-                        text: r.text;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                        font-size: 12px;
-                        font-weight: r.level == 0 ? 600 : 400;
-                        color: r.level == 2 ? Theme.muted : Theme.text;
-                    }
-                    Text {
-                        text: r.note;
-                        font-size: 12px;
-                        color: Theme.faint;
-                    }
-                }
-                if r.level == 1: TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { root.toggle(r.index); }
-                }
-            }
-        }
-    }
-    ScrollThumb { x: parent.width - self.width - 3px; view: flick.height; content: list.preferred-height; offset: flick.content-y; }
+    ScrollThumb { x: parent.width - self.width - 3px; view: flick.height; track: parent.height; content: list.preferred-height; offset: flick.content-y; }
 }
 
 component ProgressBar inherits Rectangle {
@@ -526,6 +565,16 @@ component ProgressBar inherits Rectangle {
 }
 
 // Gemeinsam für alle Fenster: auf dem Mac gehört die Menüleiste zum aktiven Fenster.
+// Laufwerke/Ordner, die macOS (Datenschutz) nicht lesen lässt – ein Scan bricht dann ab
+export global Access {
+    in property <string> denied;
+    // „Erneut anfragen“ läuft (macOS fragt gerade)
+    in property <bool> asking;
+    // auch danach gesperrt: Systemeinstellungen wurden geöffnet
+    in property <bool> asked;
+    callback ask();
+}
+
 export global Shared {
     // Größe des Fensters hat sich geändert (jedes Fenster hat sein eigenes Shared)
     callback resized();
@@ -703,6 +752,11 @@ export global Projects {
     in property <string> error;
     in property <string> work-text;
     in property <float> work-value;
+    in property <int> work-eta: -1;
+    // Pause/Abbrechen des laufenden Scans (ScanButtons)
+    in-out property <bool> paused;
+    callback pause(bool);
+    callback cancel();
     in property <int> missing;
     in property <int> unmanaged;
     in property <int> no-media;
@@ -715,12 +769,12 @@ export global Projects {
     in property <int> relink;
     in property <int> ama;
     in property <int> ama-covered;
-    in property <[MissingRow]> rows;
-    in property <[MissingRow]> ama-rows;
+    // the result has bins with missing files / with AMA clips
+    in property <bool> has-rows;
+    in property <bool> has-ama-rows;
     callback choose-folder();
     callback toggle(int);
     callback scan();
-    callback save-list();
     callback save-request();
     callback toggle-group(int);
     callback toggle-ama(int);
@@ -729,9 +783,52 @@ export global Projects {
 }
 
 // Seitenkopf wie im Entwurf: Titel links, Knöpfe der Seite rechts
+// Pause/Fortsetzen und Abbrechen eines laufenden Scans, rechts unter der Fortschrittszeile
+component ScanButtons inherits HorizontalLayout {
+    in property <bool> paused;
+    callback pause(bool);
+    callback cancel();
+    spacing: 8px;
+    alignment: end;
+    CheckButton {
+        text: root.paused ? @tr("Resume") : @tr("Pause");
+        small: true;
+        clicked => { root.pause(!root.paused); }
+    }
+    CheckButton {
+        text: @tr("Cancel");
+        small: true;
+        clicked => { root.cancel(); }
+    }
+}
+
+// „macOS lässt … nicht lesen“ mit Knopf zum erneuten Anfragen (überall, wo ein Scan startet)
+component AccessNote inherits VerticalLayout {
+    spacing: 8px;
+    Para {
+        text: @tr("macOS does not let MediaFiles Check read: {}", Access.denied);
+        color: Theme.error;
+    }
+    if Access.asked: Para {
+        text: @tr("Still blocked. System Settings is open: under Privacy & Security › Files & Folders, switch on the drives for MediaFiles Check (or give it Full Disk Access), then click Ask for access again.");
+        color: Theme.faint;
+    }
+    HorizontalLayout {
+        alignment: start;
+        CheckButton {
+            text: Access.asking ? @tr("Waiting for macOS…") : @tr("Ask for access again");
+            small: true;
+            enabled: !Access.asking;
+            clicked => { Access.ask(); }
+        }
+    }
+}
+
 component PageHead inherits HorizontalLayout {
     in property <string> title;
     spacing: 8px;
+    // as high as a button, so the title sits at the same height with or without buttons
+    min-height: 32px;
     Text {
         text: root.title;
         horizontal-stretch: 1;
@@ -826,6 +923,7 @@ ScrollBox {
         Para {
             text: @tr("Reads every bin of the switched-on projects and lists the media files their clips, subclips and sequences need that are on none of the connected drives. Nothing is changed.");
         }
+        if Access.denied != "": AccessNote { }
         StatusLine {
             text: Projects.error;
             color: Theme.error;
@@ -836,9 +934,11 @@ ScrollBox {
     if Projects.step == 1: Section {
         title: @tr("READING BINS");
         ProgressBar { value: Projects.work-value; }
-        StatusLine {
-            text: Projects.work-text;
-            color: Theme.muted;
+        WorkLine { text: Projects.work-text; eta: Projects.work-eta; paused: Projects.paused; }
+        ScanButtons {
+            paused: Projects.paused;
+            pause(on) => { Projects.paused = on; Projects.pause(on); }
+            cancel => { Projects.cancel(); }
         }
         Text {
             text: @tr("Please wait{}", root.dot-count == 1 ? ".  " : root.dot-count == 2 ? ".. " : root.dot-count == 3 ? "..." : "   ");
@@ -852,10 +952,6 @@ ScrollBox {
         spacing: 14px;
         PageHead {
             title: Projects.missing == 0 ? @tr("All media files are on the drives") : @tr("{n} media file missing" | "{n} media files missing" % Projects.missing);
-            CheckButton {
-                text: @tr("Save list…");
-                clicked => { Projects.save-list(); }
-            }
         }
         VerticalLayout {
             spacing: 10px;
@@ -865,26 +961,26 @@ ScrollBox {
                 color: Theme.muted;
             }
             if Projects.unknown > 0: Para {
-                width: Metrics.content-width - 12px;
+                width: Metrics.content-width;
                 text: @tr("{n} MXF file on the drives could not be identified: it is in no Avid database and its header is unreadable – clips using it are listed as missing. The file may be damaged or still being written." | "{n} MXF files on the drives could not be identified: they are in no Avid database and their headers are unreadable – clips using them are listed as missing. The files may be damaged or still being written." % Projects.unknown);
                 color: Theme.warning;
             }
             if Projects.skipped != "": Para {
-                width: Metrics.content-width - 12px;
+                width: Metrics.content-width;
                 text: @tr("These drives did not answer and were skipped – media on them count as missing: {}. If macOS asks whether MediaFiles Check may access files on a volume, allow it and scan again.", Projects.skipped);
                 color: Theme.warning;
             }
             if Projects.failed > 0: Para {
-                width: Metrics.content-width - 12px;
+                width: Metrics.content-width;
                 text: @tr("{n} bin could not be read – see the saved list." | "{n} bins could not be read – see the saved list." % Projects.failed);
                 color: Theme.warning;
             }
             if Projects.renders > 0: Para {
-                width: Metrics.content-width - 12px;
+                width: Metrics.content-width;
                 text: @tr("{n} render file is missing too – not requested, Media Composer renders it again." | "{n} render files are missing too – not requested, Media Composer renders them again." % Projects.renders);
             }
             if Projects.relink > 0: Para {
-                width: Metrics.content-width - 12px;
+                width: Metrics.content-width;
                 text: @tr("{n} missing file is on the drives as another media file of the same source (camera clip or tape) – the clip only lost its link: relink it in Media Composer. Not requested." | "{n} missing files are on the drives as other media files of the same source (camera clip or tape) – the clips only lost their link: relink them in Media Composer. Not requested." % Projects.relink);
             }
             if Projects.ama > 0: HorizontalLayout {
@@ -902,19 +998,19 @@ ScrollBox {
                 }
             }
             if Projects.ama-covered > 0: Para {
-                width: Metrics.content-width - 12px;
+                width: Metrics.content-width;
                 text: @tr("{n} AMA-linked file has a master clip of the same name with its media on the drives – left out." | "{n} AMA-linked files have a master clip of the same name with its media on the drives – left out." % Projects.ama-covered);
             }
             if Projects.no-media > 0: Para {
-                width: Metrics.content-width - 12px;
+                width: Metrics.content-width;
                 text: @tr("{n} reference without a media file left out – e.g. camera sound that was never imported; Media Composer shows such clips online." | "{n} references without a media file left out – e.g. camera sound that was never imported; Media Composer shows such clips online." % Projects.no-media);
             }
             if Projects.unmanaged > 0: Para {
-                width: Metrics.content-width - 12px;
+                width: Metrics.content-width;
                 text: @tr("{n} of the missing files has no Avid media reference – e.g. imported via AAF. the exchange only finds it if the other system has it in Avid MediaFiles." | "{n} of the missing files have no Avid media reference – e.g. imported via AAF. the exchange only finds them if the other system has them in Avid MediaFiles." % Projects.unmanaged);
             }
                 }
-        if Projects.rows.length > 0: HorizontalLayout {
+        if Projects.has-rows: HorizontalLayout {
             alignment: start;
             CheckButton {
                 text: @tr("Show media…");
@@ -937,7 +1033,7 @@ ScrollBox {
         Para {
             text: @tr("Where the AMA-linked clips are used. Click a clip to see its master clips, subclips and sequences. AMA files are not requested.");
         }
-        if Projects.ama-rows.length > 0: HorizontalLayout {
+        if Projects.has-ama-rows: HorizontalLayout {
             alignment: start;
             CheckButton {
                 text: @tr("Show clips…");
@@ -992,21 +1088,24 @@ ScrollBox {
 }
 
 // Austausch (früher MediaFiles Ferry): Rust füllt diesen Zustand, die Seite zeigt ihn je Schritt (view)
-export struct VolumeRow {
-    name: string,
-    files: string,
-    online: bool,
-    selected: bool,
-}
 // Zuordnung eines Laufwerks: options[0] = „Wählen…“ (noch offen)
 export struct MapRow {
     name: string,
     options: [string],
     selected: int,
 }
-// Ordner auf beiden Seiten: -1 offen, 0 zusammenführen, 1 umbenennen
+// Ordner einer Lieferung: 0 zusammenführen, 1 eigener Ordner (own = dessen Name)
+// Laufwerk einer Lieferung: wie drüben (split false) oder getrennt in Medien (selected) und Render-Dateien (render)
+export struct DeliveryDrive {
+    name: string,
+    options: [string],
+    selected: int,
+    split: bool,
+    render: int,
+}
 export struct ChoiceRow {
     name: string,
+    own: string,
     choice: int,
 }
 
@@ -1019,6 +1118,11 @@ export global Exchange {
     in property <int> minutes-since-scan: -1;
     in property <bool> scanning;
     in property <string> progress;
+    in property <int> scan-eta: -1;
+    // Pause/Abbrechen des laufenden Scans (ScanButtons)
+    in-out property <bool> paused;
+    callback pause(bool);
+    callback cancel();
     in property <int> warnings;
     in property <string> error;
     in property <bool> has-manifest;
@@ -1028,7 +1132,8 @@ export global Exchange {
     in property <string> remote-date;
     in property <bool> is-request;
     in property <[MapRow]> maps;
-    in property <[ChoiceRow]> collisions;
+    // eigene Laufwerke mit gleichnamigem Gegenstück drüben (automatisch zugeordnet)
+    in property <[string]> matched;
     in property <int> copy-files;
     in property <string> copy-size;
     in property <[string]> tasks;
@@ -1048,20 +1153,26 @@ export global Exchange {
     in property <string> delivery-from;
     in property <int> delivery-files;
     in property <string> delivery-size;
-    in property <[MapRow]> delivery-maps;
+    in property <[DeliveryDrive]> delivery-maps;
+    in property <[ChoiceRow]> delivery-folders;
     in property <bool> can-import;
     callback scan();
     callback toggle-volume(int);
     callback save-manifest();
     callback open-manifest();
     callback map-changed(int, int);
-    callback choice-changed(int, int);
     callback collect();
     callback choose-delivery();
     callback delivery-map-changed(int, int);
+    callback delivery-split-changed(int, bool);
+    callback delivery-render-changed(int, int);
+    // Zeile, Wahl; Zeile -1 = alle
+    callback delivery-folder-changed(int, int);
     callback start-import();
     callback show-result();
     callback close-result();
+    // Aufgaben des Vergleichs in eigenem Fenster
+    callback show-tasks();
     // Rust intern: Laufwerksliste neu aufbauen (nach dem Scannen)
     callback rescanned();
 }
@@ -1172,45 +1283,18 @@ component ExchangePane inherits VerticalLayout {
                 color: Theme.faint;
             }
             if Exchange.volumes.length > 0: SectionLabel { text: @tr("DRIVES"); }
-            if Exchange.volumes.length > 0: Card {
-ScrollBox {
-                limit: 6 * 38px;
-                for v[i] in Exchange.volumes: ToggleRow {
- first: i == 0;
-                    enabled: v.online;
-                    toggled => { Exchange.toggle-volume(i); }
-                    spacing: 10px;
-                    Dot { color: v.online ? Theme.online : Theme.line; }
-                    Text {
-                        text: v.name;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                        vertical-alignment: center;
-                        color: v.online && v.selected ? Theme.text : Theme.muted;
-                    }
-                    Text {
-                        text: !v.online ? @tr("not connected") : v.files == "" ? @tr("not scanned yet") : @tr("{} files", v.files);
-                        font-size: 12px;
-                        vertical-alignment: center;
-                        color: v.files == "" ? Theme.faint : Theme.muted;
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        width: 34px;
-                        if v.online: Switch {
-                            on: v.selected;
-                            label: v.name;
-                            toggled => { Exchange.toggle-volume(i); }
-                        }
-                    }
-                }
+            if Exchange.volumes.length > 0: DriveList {
+                rows: Exchange.volumes;
+                toggled(i) => { Exchange.toggle-volume(i); }
             }
-}
         }
-        StatusLine {
-            text: root.scan-status;
-            color: Theme.muted;
+        WorkLine { text: root.scan-status; eta: Exchange.scanning ? Exchange.scan-eta : -1; paused: Exchange.scanning && Exchange.paused; }
+        if Exchange.scanning: ScanButtons {
+            paused: Exchange.paused;
+            pause(on) => { Exchange.paused = on; Exchange.pause(on); }
+            cancel => { Exchange.cancel(); }
         }
+        if Access.denied != "": AccessNote { }
         if Exchange.error != "" || (Exchange.warnings > 0 && !Exchange.scanning): Para {
             text: Exchange.error != "" ? Exchange.error : @tr("{n} warning" | "{n} warnings" % Exchange.warnings);
             color: Exchange.error != "" ? Theme.error : Theme.warning;
@@ -1248,45 +1332,37 @@ ScrollBox {
             font-size: 12px;
             color: Theme.muted;
         }
-        if Exchange.has-compare && Exchange.maps.length > 0: Section {
+        if Exchange.has-compare && Exchange.maps.length + Exchange.matched.length > 0: Section {
             title: @tr("ASSIGN DRIVES");
-            Para { text: @tr("These drives have no drive with the same name on the other system."); }
-            MapList {
+            if Exchange.matched.length > 0: Para { text: @tr("Assigned: same name on both systems."); }
+            if Exchange.matched.length > 0: Card {
+                for m[i] in Exchange.matched: CardRow {
+                    first: i == 0;
+                    Text {
+                        text: m;
+                        width: 220px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        color: Theme.text;
+                    }
+                    Text {
+                        text: "→";
+                        vertical-alignment: center;
+                        color: Theme.muted;
+                    }
+                    Text {
+                        text: m;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        color: Theme.muted;
+                    }
+                }
+            }
+            if Exchange.maps.length > 0: Para { text: @tr("Not assigned: these drives have another name on the other system. Choose the drive they go to."); }
+            if Exchange.maps.length > 0: MapList {
                 rows: Exchange.maps;
                 changed(i, v) => { Exchange.map-changed(i, v); }
-            }
-        }
-        if Exchange.has-compare && Exchange.collisions.length > 0: Section {
-            title: @tr("FOLDERS ON BOTH SIDES");
-            Para { text: @tr("These folders exist on both systems with files of their own."); }
-            Card {
-            for c[i] in Exchange.collisions: CardRow {
-                first: i == 0;
-                Text {
-                    text: c.name;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                    vertical-alignment: center;
-                    color: Theme.text;
-                }
-                VerticalLayout { alignment: center; CheckButton {
-                    text: @tr("Merge");
-                    small: true;
-                    primary: c.choice == 0;
-                    clicked => { Exchange.choice-changed(i, 0); }
-                } }
-                VerticalLayout { alignment: center; CheckButton {
-                    text: @tr("Rename");
-                    small: true;
-                    primary: c.choice == 1;
-                    clicked => { Exchange.choice-changed(i, 1); }
-                } }
-            }
-            }
-            Para {
-                text: @tr("Merge: same folder, the database must be rebuilt. Rename: new folder with a unique name.");
-                font-size: 11px;
-                color: Theme.faint;
             }
         }
         if Exchange.has-compare: Section {
@@ -1297,10 +1373,13 @@ ScrollBox {
                 font-size: 13px;
                 color: Theme.text;
             }
-        }
-        if Exchange.has-compare && Exchange.tasks.length > 0: Section {
-            title: @tr("TASKS");
-            LineList { lines: Exchange.tasks; }
+            if Exchange.tasks.length > 0: HorizontalLayout {
+                alignment: start;
+                CheckButton {
+                    text: @tr("Show {n} task…" | "Show {n} tasks…" % Exchange.tasks.length);
+                    clicked => { Exchange.show-tasks(); }
+                }
+            }
         }
         if Exchange.error != "": Para {
             text: Exchange.error;
@@ -1407,10 +1486,119 @@ ScrollBox {
         }
         if Exchange.has-delivery: Section {
             title: @tr("ASSIGN DRIVES");
-            MapList {
-                rows: Exchange.delivery-maps;
-                changed(i, v) => { Exchange.delivery-map-changed(i, v); }
+            Para { text: @tr("Per drive of the other system: as it was there, or separated – media files to one drive, render files to another."); }
+            Card {
+                for r[i] in Exchange.delivery-maps: VerticalLayout {
+                    CardRow {
+                        first: i == 0;
+                        Text {
+                            text: r.name;
+                            width: 170px;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: r.split ? @tr("Media") + " →" : "→";
+                            width: 165px;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            color: Theme.muted;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Dropdown {
+                                items: r.options;
+                                current: r.selected;
+                                selected(index) => { Exchange.delivery-map-changed(i, index); }
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text {
+                            text: @tr("Separate");
+                            vertical-alignment: center;
+                            color: Theme.muted;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Switch {
+                                on: r.split;
+                                label: @tr("Separate");
+                                toggled => { Exchange.delivery-split-changed(i, !r.split); }
+                            }
+                        }
+                    }
+                    if r.split: CardRow {
+                        Rectangle { width: 170px; }
+                        Text {
+                            text: @tr("Render files") + " →";
+                            width: 165px;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            color: Theme.muted;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Dropdown {
+                                items: r.options;
+                                current: r.render;
+                                selected(index) => { Exchange.delivery-render-changed(i, index); }
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
             }
+        }
+        if Exchange.has-delivery: Section {
+            title: @tr("FOLDERS");
+            Para { text: @tr("Merge: into the folder of the same name. Own folder: “<sender>_<folder>” – if it exists already, the files go into it. A folder that ends up different from the other side needs its database rebuilt (task)."); }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 8px;
+                CheckButton {
+                    text: @tr("All merge");
+                    small: true;
+                    clicked => { Exchange.delivery-folder-changed(-1, 0); }
+                }
+                CheckButton {
+                    text: @tr("All in own folders");
+                    small: true;
+                    clicked => { Exchange.delivery-folder-changed(-1, 1); }
+                }
+            }
+            Card { ScrollBox {
+                limit: 240px;
+                for c[i] in Exchange.delivery-folders: CardRow {
+                    first: i == 0;
+                    Text {
+                        text: c.name;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        color: Theme.text;
+                    }
+                    if c.choice == 1: Text {
+                        text: "→ " + c.own;
+                        max-width: 260px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        color: Theme.muted;
+                    }
+                    VerticalLayout { alignment: center; CheckButton {
+                        text: @tr("Merge");
+                        small: true;
+                        primary: c.choice == 0;
+                        clicked => { Exchange.delivery-folder-changed(i, 0); }
+                    } }
+                    VerticalLayout { alignment: center; CheckButton {
+                        text: @tr("Own folder");
+                        small: true;
+                        primary: c.choice == 1;
+                        clicked => { Exchange.delivery-folder-changed(i, 1); }
+                    } }
+                }
+            } }
         }
         if Exchange.has-delivery: Para {
             text: @tr("Quit Media Composer before importing. Every file is verified first, and only a complete delivery is imported. A media file is never overwritten.");
@@ -1599,6 +1787,10 @@ export global Inventory {
     in property <float> work-value;
     // Restzeit des Scans in Sekunden: -1 keine, 0 wird geschätzt
     in property <int> work-eta: -1;
+    // Pause/Abbrechen des laufenden Scans (ScanButtons)
+    in-out property <bool> paused;
+    callback pause(bool);
+    callback cancel();
     in property <string> error;
     // Übersicht: 0 Medien benutzt, 1 Renders benutzt, 2 Medien unbenutzt, 3 Renders unbenutzt, 4 unbekannt,
     // 5 Medien gesamt, 6 Renders gesamt (Anzahl und Größe)
@@ -1613,7 +1805,6 @@ export global Inventory {
     in property <int> unreadable;
     callback toggle-drive(int);
     callback scan();
-    callback stop();
     callback show-table();
     // Rust intern: das Lesen ist fertig (Ergebnis liegt in Rust bereit)
     callback scanned();
@@ -1735,11 +1926,13 @@ component ActionRow inherits CardRow {
 component InventoryPane inherits VerticalLayout {
     spacing: Metrics.spacing;
 
-    // ── Auswahl ──
+    // ── Auswahl ── (feste Höhe: die letzten Scans nehmen den Rest und scrollen in ihrer Karte)
     if Inventory.view == 0 && Inventory.step != 1 && Inventory.task < 0: VerticalLayout {
         spacing: 14px;
+        height: Metrics.page-height;
+        alignment: start;
         PageHead {
-            title: @tr("Drives and projects");
+            title: @tr("Drives & projects");
             CheckButton {
                 text: @tr("Scan");
                 primary: true;
@@ -1760,19 +1953,10 @@ component InventoryPane inherits VerticalLayout {
                     font-size: 12px;
                     color: Theme.muted;
                 }
-                if Inventory.drives.length > 0: Card {
-                    ScrollBox {
-                        limit: 4 * 38px;
-                        for d[i] in Inventory.drives: ToggleRow {
-                            first: i == 0;
-                            toggled => { Inventory.toggle-drive(i); }
-                            Text { text: d.name; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; color: d.selected ? Theme.text : Theme.muted; }
-                            VerticalLayout {
-                                alignment: center;
-                                Switch { on: d.selected; label: d.name; toggled => { Inventory.toggle-drive(i); } }
-                            }
-                        }
-                    }
+                if Inventory.drives.length > 0: DriveList {
+                    rows: Exchange.volumes;
+                    visible-rows: 4;
+                    toggled(i) => { Inventory.toggle-drive(i); }
                 }
             }
             VerticalLayout {
@@ -1805,6 +1989,7 @@ component InventoryPane inherits VerticalLayout {
         Para {
             text: @tr("Lists every media file on the switched-on drives with its clip, codec and size, and sorts out render files. A file the switched-on projects do not use is unused – media of other projects on the same drives would count as unused too. Nothing is changed.");
         }
+        if Access.denied != "": AccessNote { }
         if Inventory.error != "": Text {
             text: Inventory.error;
             wrap: word-wrap;
@@ -1813,6 +1998,9 @@ component InventoryPane inherits VerticalLayout {
         }
         if Inventory.scans.length > 0: SectionLabel { text: @tr("RECENT SCANS"); }
         if Inventory.scans.length > 0: Card {
+            vertical-stretch: 1;
+            min-height: 0px;
+            FillScroll {
             for sc[i] in Inventory.scans: CardRow {
                 first: i == 0;
                 VerticalLayout {
@@ -1862,6 +2050,7 @@ component InventoryPane inherits VerticalLayout {
                 }
             }
         }
+            }
     }
 
     // ── liest ──
@@ -1869,28 +2058,13 @@ component InventoryPane inherits VerticalLayout {
         spacing: 14px;
         PageHead {
             title: @tr("Reading media files…");
-            CheckButton {
-                text: @tr("Stop");
-                clicked => { Inventory.stop(); }
-            }
         }
         ProgressBar { value: Inventory.work-value; }
-        HorizontalLayout {
-            spacing: 12px;
-            StatusLine {
-                text: Inventory.work-text;
-                color: Theme.muted;
-            }
-            StatusLine {
-                horizontal-stretch: 0;
-                horizontal-alignment: right;
-                color: Theme.muted;
-                text: Inventory.work-eta < 0 ? ""
-                    : Inventory.work-eta == 0 ? @tr("Estimating time left…")
-                    : Inventory.work-eta < 60 ? @tr("Less than a minute left")
-                    : Inventory.work-eta < 3600 ? @tr("About {} min left", Math.ceil(Inventory.work-eta / 60))
-                    : @tr("About {} h {} min left", Math.floor(Inventory.work-eta / 3600), Math.ceil(Math.mod(Inventory.work-eta, 3600) / 60));
-            }
+        WorkLine { text: Inventory.work-text; eta: Inventory.work-eta; paused: Inventory.paused; }
+        ScanButtons {
+            paused: Inventory.paused;
+            pause(on) => { Inventory.paused = on; Inventory.pause(on); }
+            cancel => { Inventory.cancel(); }
         }
         Para {
             text: @tr("The first scan reads the header of every media file; later scans only read new or changed files.");
@@ -1935,7 +2109,12 @@ component InventoryPane inherits VerticalLayout {
             text: @tr("{n} file could not be read." | "{n} files could not be read." % Inventory.unreadable);
             color: Theme.warning;
         }
-        SectionLabel { text: @tr("ACTIONS"); }
+    }
+
+    // ── Aktionen (eigener Schritt, damit die Übersicht nie scrollt) ──
+    if Inventory.view == 2 && Inventory.step == 2 && Inventory.task < 0: VerticalLayout {
+        spacing: 14px;
+        PageHead { title: @tr("Actions"); }
         Card {
         ActionRow {
             first: true;
@@ -1961,6 +2140,9 @@ component InventoryPane inherits VerticalLayout {
             enabled: Inventory.counts[6] > 0 || Inventory.counts[2] + Inventory.counts[3] > 0;
             clicked => { Inventory.prepare(0); }
         }
+        }
+        Para {
+            text: @tr("Each action first shows a preview; nothing moves before you confirm it.");
         }
     }
 
@@ -2250,7 +2432,7 @@ ScrollBox {
     }
 
     // ── Verlauf ──
-    if Inventory.view == 2 && Inventory.task < 0: VerticalLayout {
+    if Inventory.view == 3 && Inventory.task < 0: VerticalLayout {
         spacing: 14px;
         PageHead { title: @tr("History"); }
         if Inventory.runs.length == 0: Para { text: @tr("No runs yet."); }
@@ -2307,11 +2489,12 @@ component SideItem {
         padding-bottom: 9px;
         spacing: 2px;
         Text {
-            // Seitenleiste 204 px − 2 × 12 px Rand − 22 px Innenrand: lange Namen brechen um
+            // Seitenleiste 204 px − 2 × 12 px Rand − 22 px Innenrand: immer EINE Zeile (Regel, geprüft von
+            // scripts/translations.py: Name ≤ 20, Status ≤ 23 Zeichen in jeder Sprache)
             width: 158px;
             text: root.step.name;
             font-size: 13px;
-            wrap: word-wrap;
+            overflow: elide;
             color: root.selected ? Theme.text : root.step.enabled ? Theme.muted : Theme.disabled;
         }
         if root.step.status != "": Text {
@@ -2439,7 +2622,7 @@ export component AppWindow inherits CheckWindow {
             { name: @tr("Import"), status: Exchange.busy && Exchange.work-kind > 0 ? @tr("importing…") : Exchange.has-delivery ? Exchange.delivery-from : "", enabled: true },
         ] : root.tab == 1 ? [
             { name: @tr("Drives"), status: @tr("{} of {} on", root.selected-count, root.drives.length), enabled: true },
-            { name: @tr("Result"), status: !root.has-result ? "" : root.bad-folders == 0 ? @tr("all match") : @tr("{n} folder differs" | "{n} folders differ" % root.bad-folders), enabled: root.has-result },
+            { name: @tr("Result"), status: !root.has-result ? "" : root.checked-folders == 0 ? @tr("no folders") : root.bad-folders == 0 ? @tr("all match") : @tr("{n} folder differs" | "{n} folders differ" % root.bad-folders), enabled: root.has-result },
         ] : root.tab == 2 ? [
             { name: @tr("Choose projects"), status: Projects.projects.length == 0 ? "" : @tr("{} of {} on", Projects.selected-count, Projects.projects.length), enabled: true },
             { name: @tr("Missing media"), status: Projects.step != 2 ? "" : @tr("{n} file" | "{n} files" % Projects.missing), enabled: Projects.step == 2 },
@@ -2451,8 +2634,9 @@ export component AppWindow inherits CheckWindow {
             { name: @tr("Duplicates"), status: root.dup-pending > 0 ? @tr("databases pending") : "", enabled: true },
             { name: @tr("History"), status: root.rebalanced.length + root.dup-runs.length == 0 ? "" : @tr("{n} run" | "{n} runs" % (root.rebalanced.length + root.dup-runs.length)), enabled: true },
         ] : root.tab == 5 ? [
-            { name: @tr("Drives and projects"), status: @tr("{} of {} on", Inventory.drive-count, Inventory.drives.length), enabled: true },
+            { name: @tr("Drives & projects"), status: @tr("{} of {} on", Inventory.drive-count, Inventory.drives.length), enabled: true },
             { name: @tr("Overview"), status: Inventory.step == 1 ? @tr("reading…") : Inventory.step != 2 ? "" : @tr("{n} file" | "{n} files" % Inventory.files), enabled: Inventory.step == 2 },
+            { name: @tr("Actions"), status: "", enabled: Inventory.step == 2 },
             { name: @tr("History"), status: Inventory.runs.length == 0 ? "" : @tr("{n} run" | "{n} runs" % Inventory.runs.length), enabled: true },
         ] : [
             { name: @tr("Open"), status: Tasks.open.length == 0 ? "" : Tasks.open.length, enabled: true },
@@ -2465,6 +2649,12 @@ export component AppWindow inherits CheckWindow {
     // Fortschritt
     in property <string> work-text;
     in property <float> work-value;
+    in property <int> work-eta: -1;
+    // nur Scans lassen sich pausieren/abbrechen (nicht Rebalancing oder Beiseitelegen auf derselben Seite)
+    in property <bool> work-can-pause;
+    in-out property <bool> work-paused;
+    callback work-pause(bool);
+    callback work-cancel();
     // Ergebnis
     in property <int> checked-folders;
     in property <int> bad-folders;
@@ -2514,6 +2704,7 @@ export component AppWindow inherits CheckWindow {
     out property <string> txt-task-for: @tr("Delivery for {}", "{}");
     out property <string> txt-task-from: @tr("Delivery from {}", "{}");
     out property <string> txt-reading-drives: @tr("Reading the media databases of the drives…");
+    out property <string> txt-tasks-for: @tr("Tasks – {}", "{}"); // Rust fills in the system
     out property <string> txt-one-file: @tr("1 file");
     out property <string> txt-relink: @tr("on the drives – relink");
     out property <string> txt-files-n: @tr("{} files", "{}"); // Rust fills in the number
@@ -2566,6 +2757,21 @@ export component AppWindow inherits CheckWindow {
         triggered => { root.dot-count = Math.mod(root.dot-count + 1, 4); }
     }
 
+    // only measured (Check › Result sizes its list by them), never shown
+    note-height := Text {
+        visible: false;
+        width: Metrics.content-width;
+        wrap: word-wrap;
+        font-size: 11px;
+        text: @tr("Files not in the database may be missing in Media Composer; entries without a file show up as offline media. To rebuild a database: quit Media Composer, move msmMMOB.mdb and msmFMID.pmr out of the folder and start Media Composer again.");
+    }
+    rename-height := Text {
+        visible: false;
+        width: Metrics.content-width;
+        wrap: word-wrap;
+        font-size: 12px;
+        text: @tr("{n} of these folders has a name Media Composer does not update. MediaFiles Check can rename it so that Media Composer rebuilds its database, and rename it back afterwards." | "{n} of these folders have names Media Composer does not update. MediaFiles Check can rename them so that Media Composer rebuilds their databases, and rename them back afterwards." % root.rename-count);
+    }
     frame := VerticalLayout {
         // Titelleiste (28) + Reiter (52) wie im Einstellungsfenster
         Rectangle {
@@ -2682,6 +2888,8 @@ export component AppWindow inherits CheckWindow {
         Rectangle {
             horizontal-stretch: 1;
             vertical-stretch: 1;
+            // short pages: without this the row ends below the content and the sidebar stops halfway
+            max-height: 100000px;
     page-flick := Flickable {
         content-height: main.preferred-height;
     main := VerticalLayout {
@@ -2722,36 +2930,15 @@ export component AppWindow inherits CheckWindow {
                 color: Theme.faint;
             }
             if root.drives.length > 0: SectionLabel { text: @tr("DRIVES"); }
-            if root.drives.length > 0: Card {
-ScrollBox {
-                limit: 6 * 38px;
-                for d[i] in root.drives: ToggleRow {
- first: i == 0;
-                    toggled => { root.toggle-drive(i); }
-                    spacing: 10px;
-                    Dot { color: Theme.online; }
-                    Text {
-                        text: d.name;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                        vertical-alignment: center;
-                        color: d.selected ? Theme.text : Theme.muted;
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        Switch {
-                            on: d.selected;
-                            label: d.name;
-                            toggled => { root.toggle-drive(i); }
-                        }
-                    }
-                }
+            if root.drives.length > 0: DriveList {
+                rows: Exchange.volumes;
+                toggled(i) => { root.toggle-drive(i); }
             }
-}
             Para {
                 text: @tr("The switches apply to Exchange › Scan too.");
                 color: Theme.faint;
             }
+            if Access.denied != "": AccessNote { }
             StatusLine {
                 text: root.error;
                 color: Theme.error;
@@ -2893,9 +3080,11 @@ ScrollBox {
         if root.page == Page.working: Section {
             title: @tr("CHECKING");
             ProgressBar { value: root.work-value; }
-            StatusLine {
-                text: root.work-text;
-                color: Theme.muted;
+            WorkLine { text: root.work-text; eta: root.work-eta; paused: root.work-paused; }
+            if root.work-can-pause: ScanButtons {
+                paused: root.work-paused;
+                pause(on) => { root.work-paused = on; root.work-pause(on); }
+                cancel => { root.work-cancel(); }
             }
             Text {
                 text: @tr("Please wait{}", root.dots);
@@ -2921,9 +3110,15 @@ ScrollBox {
                     clicked => { root.back(); }
                 }
             }
+            if root.checked-folders == 0: Para {
+                text: @tr("The chosen place holds no MXF files and no Avid database. Choose a drive, its “Avid MediaFiles/MXF” folder or one of the folders in it.");
+            }
             if root.rows.length > 0: Section {
                 title: @tr("DIFFERENCES");
-                RowList { rows: root.rows; }
+                // the page never scrolls: fixed window 620 − 80 tab bar = 540, minus 28 top and 36 bottom (= the
+                // left margin), the head, section titles, gaps and the texts below (measured, they differ per language)
+                RowList { rows: root.rows; limit: 540px - 28px - 36px - 32px - 24px - 26px - 10px - note-height.preferred-height
+                    - (root.rename-count > 0 ? 24px + 26px + rename-height.preferred-height + 10px + 32px : 0px); }
                 Para {
                     text: @tr("Files not in the database may be missing in Media Composer; entries without a file show up as offline media. To rebuild a database: quit Media Composer, move msmMMOB.mdb and msmFMID.pmr out of the folder and start Media Composer again.");
                     font-size: 11px;
@@ -3385,6 +3580,7 @@ ScrollBox {
                     limit: 360px;
                     spacing: 10px;
                     for r in root.notice: Text {
+                        // room for the scroll bar of the box
                         width: Metrics.content-width - 12px;
                         wrap: word-wrap;
                         font-size: 12px;
@@ -4202,23 +4398,23 @@ export component SettingsWindow inherits CheckWindow {
 // step: 0 Auswahl, 1 läuft, 2 Ergebnis
 
 // Fehlende Medien bzw. AMA-Clips pro Bin (Projekte › Medien anzeigen…): eigenes, größeres Fenster, das Hauptfenster bleibt gleich groß
-export component MediaWindow inherits CheckWindow {
-    title: root.kind == 0 ? @tr("Missing media") : @tr("AMA clips");
-    width: 900px;
-    height: 680px;
-    in property <int> kind;
-    in property <int> count;
-    in property <[MissingRow]> rows;
-    callback toggle-group(int);
-    callback save-list();
+// Textzeilen in eigenem, frei skalierbarem Fenster (Aufgaben eines Vergleichs)
+export component LinesWindow inherits CheckWindow {
+    in property <string> heading;
+    in property <[string]> lines;
     callback close();
+    title: root.heading;
+    preferred-width: 820px;
+    preferred-height: 560px;
+    min-width: 480px;
+    min-height: 300px;
     VerticalLayout {
         padding: 24px;
         spacing: 14px;
         HorizontalLayout {
             spacing: 8px;
             Text {
-                text: root.kind == 0 ? @tr("{n} media file missing" | "{n} media files missing" % root.count) : @tr("{n} AMA-linked file" | "{n} AMA-linked files" % root.count);
+                text: root.heading;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
                 overflow: elide;
@@ -4227,29 +4423,158 @@ export component MediaWindow inherits CheckWindow {
                 color: Theme.text;
             }
             CheckButton {
-                text: @tr("Save list…");
-                clicked => { root.save-list(); }
-            }
-            CheckButton {
                 text: @tr("Done");
                 primary: true;
                 clicked => { root.close(); }
             }
         }
-        Text {
-            text: root.kind == 0 ? @tr("Click a file to see where it is used: master clips, subclips and sequences.") : @tr("Where the AMA-linked clips are used. Click a clip to see its master clips, subclips and sequences. AMA files are not requested.");
-            font-size: 12px;
-            color: Theme.muted;
-        }
-        list-area := Rectangle {
+        Rectangle {
             vertical-stretch: 1;
-            MissingList {
-                y: 0;
-                rows: root.rows;
-                limit: list-area.height;
-                toggle(i) => { root.toggle-group(i); }
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.card-line;
+            border-radius: 9px;
+            clip: true;
+            flick := Flickable {
+                x: 14px;
+                y: 10px;
+                width: parent.width - 28px;
+                height: parent.height - 20px;
+                content-height: col.preferred-height;
+                col := VerticalLayout {
+                    x: 0;
+                    width: flick.width - 12px;
+                    spacing: 8px;
+                    for l in root.lines: Text {
+                        // a fixed width (not from the layout), or Slint measures wrapped lines one too few
+                        width: flick.width - 12px;
+                        text: l;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                        color: Theme.text;
+                    }
+                }
+            }
+            ScrollThumb { x: parent.width - self.width - 3px; view: flick.height; track: parent.height; content: col.preferred-height; offset: flick.content-y; }
+        }
+    }
+}
+
+// Checkbox (kein Schalter): 14 px, Haken in Akzentfarbe
+component CheckBox inherits Rectangle {
+    in property <bool> checked;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border-width: root.checked ? 0 : 1px;
+    border-color: Theme.muted;
+    background: root.checked ? Theme.accent : transparent;
+    if root.checked: Path {
+        width: 10px;
+        height: 10px;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        commands: "M 1.5 5.2 L 4 7.7 L 8.6 2.3";
+        stroke: #ffffff;
+        stroke-width: 1.8px;
+    }
+}
+
+// Ordnerbaum der geprüften Projekte; ausgeschaltete Ordner blenden ihre Bins in allen Ansichten aus
+component FolderTree inherits VerticalLayout {
+    in property <[BinFolderRow]> rows;
+    callback toggle(int);
+    // Ordner auf- oder zuklappen
+    callback open(int);
+    // 0 alle, 1 keine, 2 umkehren
+    callback select(int);
+    spacing: 10px;
+    HorizontalLayout {
+        height: 28px;
+        spacing: 6px;
+        SectionLabel {
+            text: @tr("FOLDERS");
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+        CheckButton { text: @tr("All"); small: true; clicked => { root.select(0); } }
+        CheckButton { text: @tr("None"); small: true; clicked => { root.select(1); } }
+        CheckButton { text: @tr("Invert"); small: true; clicked => { root.select(2); } }
+    }
+    card := Rectangle {
+        vertical-stretch: 1;
+        background: Theme.card;
+        border-width: 1px;
+        border-color: Theme.card-line;
+        border-radius: 9px;
+        clip: true;
+        flick := Flickable {
+            x: 10px;
+            y: 8px;
+            width: parent.width - 20px;
+            height: parent.height - 16px;
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                x: 0;
+                width: flick.width - 8px;
+                for r in root.rows: Rectangle {
+                    height: line.preferred-height;
+                    background: touch.has-hover ? Theme.selection.with-alpha(0.5) : transparent;
+                    border-radius: 4px;
+                    accessible-role: checkbox;
+                    accessible-label: r.name;
+                    accessible-checked: r.checked;
+                    accessible-action-default => { root.toggle(r.index); }
+                    line := HorizontalLayout {
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+                        padding-left: 4px + r.level * 14px;
+                        padding-right: 4px;
+                        spacing: 6px;
+                        Rectangle {
+                            width: 12px;
+                            if r.branch: Path {
+                                width: 8px;
+                                height: 8px;
+                                viewbox-width: 8;
+                                viewbox-height: 8;
+                                commands: r.open ? "M 0 1 L 8 1 L 4 7 Z" : "M 1 0 L 7 4 L 1 8 Z";
+                                fill: Theme.muted;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            CheckBox { checked: r.checked; opacity: r.dim ? 0.4 : 1; }
+                        }
+                        Text {
+                            text: r.name;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            font-size: 12px;
+                            font-weight: r.level == 0 ? 600 : 400;
+                            color: r.checked && !r.dim ? Theme.text : Theme.faint;
+                        }
+                        Text {
+                            text: r.note;
+                            font-size: 11px;
+                            color: Theme.faint;
+                        }
+                    }
+                    touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.toggle(r.index); }
+                    }
+                    // Dreieck über dem Haken-Bereich: klappt auf statt umzuschalten
+                    if r.branch: TouchArea {
+                        x: 0;
+                        width: 4px + r.level * 14px + 18px;
+                        mouse-cursor: pointer;
+                        clicked => { root.open(r.index); }
+                    }
+                }
             }
         }
+        ScrollThumb { x: parent.width - self.width - 3px; view: flick.height; track: parent.height; content: list.preferred-height; offset: flick.content-y; }
     }
 }
 
@@ -4264,12 +4589,15 @@ component ColumnHead inherits Rectangle {
     in-out property <length> w;
     // Breite für Doppelklick auf den Rand: so breit wie der längste Eintrag (Zeichen; Schrift ist monospaced)
     in property <int> fit-chars;
+    // false: nur Überschrift mit ziehbarem Rand, kein Sortieren
+    in property <bool> sortable: true;
     callback clicked(int);
     width: root.w;
     accessible-role: button;
     accessible-label: root.text;
     accessible-action-default => { root.clicked(root.column); }
     TouchArea {
+        enabled: root.sortable;
         mouse-cursor: pointer;
         clicked => { root.clicked(root.column); }
     }
@@ -4336,6 +4664,283 @@ component Col inherits Rectangle {
         font-size: 12px;
         font-weight: root.bold ? 600 : 400;
         color: root.ink;
+    }
+}
+
+// Fehlende Medien / AMA: eine Zeile pro Mediendatei. level 0 Bin (clip = „Projekt / Bin“), 1 Datei (first: erste Datei
+// ihrer Gruppe, trägt das Dreieck), 2 Verwendung im Bin (clip = Clip, note = Art)
+export struct MediaFileRow {
+    level: int,
+    clip: string,
+    mxf: string,
+    original: string,
+    note: string,
+    open: bool,
+    first: bool,
+    index: int,
+}
+
+// Name in einer Spalte: Klick kopiert ihn in die Zwischenablage
+component CopyCell inherits Rectangle {
+    in property <length> w;
+    in property <string> text;
+    in property <color> ink: Theme.text;
+    in property <length> indent;
+    callback copy(string);
+    width: root.w;
+    Rectangle {
+        x: root.indent;
+        y: 2px;
+        width: parent.width - root.indent - 4px;
+        height: parent.height - 4px;
+        border-radius: 4px;
+        background: touch.has-hover && root.text != "" ? Theme.selection.with-alpha(0.6) : transparent;
+    }
+    Text {
+        x: root.indent + 4px;
+        width: parent.width - root.indent - 12px;
+        text: root.text == "" ? "–" : root.text;
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: 12px;
+        color: root.text == "" ? Theme.faint : root.ink;
+    }
+    touch := TouchArea {
+        enabled: root.text != "";
+        mouse-cursor: pointer;
+        clicked => { root.copy(root.text); }
+    }
+}
+
+export component MediaWindow inherits CheckWindow {
+    title: root.kind == 0 ? @tr("Missing media") : @tr("AMA clips");
+    preferred-width: 1240px;
+    preferred-height: 720px;
+    min-width: 900px;
+    min-height: 440px;
+    in property <int> kind;
+    in property <int> count;
+    in property <[BinFolderRow]> folders;
+    // Ordner ausgeschaltet: Zahlen und Listen gelten nur für die übrigen
+    in property <bool> folders-off;
+    callback toggle-folder(int);
+    callback open-folder(int);
+    callback select-folders(int);
+    in property <[MediaFileRow]> rows;
+    // missing media: 0 all, 1 to relink only, 2 missing only, 3 the missing files alone (counts per filter)
+    in-out property <int> filter;
+    in property <[int]> filter-counts: [0, 0, 0, 0];
+    callback filter-changed(int);
+    callback toggle-group(int);
+    // Name in die Zwischenablage; `copied` zeigt ihn kurz in der Fußzeile
+    callback copy(string);
+    in-out property <string> copied;
+    callback close();
+    // Steg zwischen Baum und Liste und die Spaltenbreiten lassen sich ziehen
+    in-out property <length> tree-width: 320px;
+    in-out property <length> w-clip: 280px;
+    in-out property <length> w-mxf: 300px;
+    in-out property <length> w-orig: 260px;
+    property <length> w-lead: 22px;
+    property <length> w-note: 110px;
+    property <length> table-width: root.w-lead + root.w-clip + root.w-mxf + root.w-orig + root.w-note + 16px;
+    Timer {
+        interval: 2s;
+        running: root.copied != "";
+        triggered => { root.copied = ""; }
+    }
+    VerticalLayout {
+        padding: 24px;
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.kind == 0 ? @tr("{n} media file missing" | "{n} media files missing" % root.count) : @tr("{n} AMA-linked file" | "{n} AMA-linked files" % root.count);
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                overflow: elide;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+            }
+            CheckButton {
+                text: @tr("Done");
+                primary: true;
+                clicked => { root.close(); }
+            }
+        }
+        // links Baum, rechts Liste: gleiche Kopf-, Karten- und Fußzeilenhöhe, damit beide Karten gleich hoch sind
+        HorizontalLayout {
+            vertical-stretch: 1;
+            VerticalLayout {
+                width: root.tree-width;
+                spacing: 10px;
+                FolderTree {
+                    vertical-stretch: 1;
+                    rows: root.folders;
+                    toggle(i) => { root.toggle-folder(i); }
+                    open(i) => { root.open-folder(i); }
+                    select(m) => { root.select-folders(m); }
+                }
+                Text {
+                    height: 32px;
+                    text: root.folders-off ? @tr("Some folders are switched off: numbers and lists count only the bins in the others.") : "";
+                    wrap: word-wrap;
+                    overflow: elide;
+                    font-size: 12px;
+                    color: Theme.warning;
+                }
+            }
+            Rectangle {
+                width: 20px;
+                Rectangle {
+                    width: 1px;
+                    background: drag.has-hover || drag.pressed ? Theme.primary : Theme.line;
+                }
+                drag := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => { root.tree-width = clamp(root.tree-width + self.mouse-x - self.pressed-x, 200px, root.width - 48px - 20px - 420px); }
+                }
+            }
+            VerticalLayout {
+                spacing: 10px;
+                Rectangle {
+                    height: 28px;
+                    if root.kind == 0: HorizontalLayout {
+                        spacing: 6px;
+                        for f[i] in [@tr("All"), @tr("To relink"), @tr("Missing"), @tr("Files only")]: Rectangle {
+                            width: label.preferred-width + 20px;
+                            border-radius: 6px;
+                            background: root.filter == i ? Theme.selection : touch.has-hover ? Theme.selection.with-alpha(0.5) : transparent;
+                            accessible-role: tab;
+                            accessible-label: f;
+                            accessible-checked: root.filter == i;
+                            accessible-action-default => { root.filter = i; root.filter-changed(i); }
+                            label := Text {
+                                text: f + "  " + root.filter-counts[i];
+                                font-size: 12px;
+                                color: root.filter == i ? Theme.text : Theme.muted;
+                            }
+                            touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.filter = i; root.filter-changed(i); }
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+                table-area := Rectangle {
+                    vertical-stretch: 1;
+                    background: Theme.card;
+                    border-width: 1px;
+                    border-color: Theme.card-line;
+                    border-radius: 9px;
+                    clip: true;
+                    Flickable {
+                        x: 1px;
+                        y: 1px;
+                        width: table-area.width - 2px;
+                        height: table-area.height - 2px;
+                        content-width: max(root.table-width, self.width);
+                        content-height: self.height;
+                        VerticalLayout {
+                            width: max(root.table-width, table-area.width - 2px);
+                            height: table-area.height - 2px;
+                            Rectangle {
+                                height: 30px;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    Rectangle { width: root.w-lead; }
+                                    ColumnHead { w <=> root.w-clip; text: @tr("Clip in the bin"); column: 0; sortable: false; sorted: -1; }
+                                    ColumnHead { w <=> root.w-mxf; text: @tr("MXF file"); column: 1; sortable: false; sorted: -1; }
+                                    ColumnHead { w <=> root.w-orig; text: @tr("Original file"); column: 2; sortable: false; sorted: -1; }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                            }
+                            Rectangle { height: 1px; background: Theme.line; }
+                            ListView {
+                                vertical-stretch: 1;
+                                for r in root.rows: Rectangle {
+                                    height: r.level == 0 ? 32px : 24px;
+                                    if r.level == 0: HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 16px;
+                                        padding-top: 8px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: r.clip;
+                                            horizontal-stretch: 1;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            font-size: 12px;
+                                            font-weight: 600;
+                                            color: Theme.text;
+                                        }
+                                        Text {
+                                            text: r.note;
+                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                            color: Theme.faint;
+                                        }
+                                    }
+                                    if r.level != 0: HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        Rectangle {
+                                            width: root.w-lead;
+                                            if r.level == 1 && r.first && r.index >= 0: Path {
+                                                x: 6px;
+                                                width: 8px;
+                                                height: 8px;
+                                                viewbox-width: 8;
+                                                viewbox-height: 8;
+                                                commands: r.open ? "M 0 1 L 8 1 L 4 7 Z" : "M 1 0 L 7 4 L 1 8 Z";
+                                                fill: Theme.muted;
+                                            }
+                                            if r.level == 1 && r.first && r.index >= 0: TouchArea {
+                                                mouse-cursor: pointer;
+                                                clicked => { root.toggle-group(r.index); }
+                                            }
+                                        }
+                                        CopyCell {
+                                            w: root.w-clip;
+                                            text: r.clip;
+                                            indent: r.level == 2 ? 16px : 0;
+                                            // Folgedateien derselben Gruppe: Name blasser, bleibt aber kopierbar
+                                            ink: r.level == 2 || !r.first ? Theme.muted : Theme.text;
+                                            copy(t) => { root.copy(t); }
+                                        }
+                                        if r.level == 1: CopyCell { w: root.w-mxf; text: r.mxf; copy(t) => { root.copy(t); } }
+                                        if r.level == 1: CopyCell { w: root.w-orig; text: r.original; copy(t) => { root.copy(t); } }
+                                        if r.level == 2: Rectangle { width: root.w-mxf + root.w-orig; }
+                                        Text {
+                                            width: root.w-note;
+                                            text: r.note;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            font-size: 12px;
+                                            color: Theme.faint;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Text {
+                    height: 32px;
+                    text: root.copied != "" ? @tr("Copied: {}", root.copied)
+                        : root.kind == 0 && root.filter == 3 ? @tr("Every missing media file once, by name – without the ones to relink.")
+                        : root.kind == 0 ? @tr("Click the arrow to see where a file is used, click a name to copy it.") : @tr("AMA files are not requested. Click the arrow to see where a clip is used, click a name to copy it.");
+                    wrap: word-wrap;
+                    overflow: elide;
+                    font-size: 12px;
+                    color: root.copied != "" ? Theme.text : Theme.muted;
+                }
+            }
+        }
     }
 }
 

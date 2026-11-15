@@ -14,7 +14,7 @@ fn main() -> ExitCode {
     if roots.is_empty() {
         roots = find_volumes();
     }
-    let reports = check(&roots, &mut |i, n, p| eprint!("\r{}/{n} {p}\x1b[K", i + 1));
+    let reports = check(&roots, &mut |i, n, p| eprint!("\r{}/{n} {p}\x1b[K", i + 1), &Default::default());
     eprintln!();
     print!("{}", report_text(&reports, lang));
     if reports.iter().any(|r| !r.findings.is_empty()) { ExitCode::FAILURE } else { ExitCode::SUCCESS }
@@ -32,11 +32,11 @@ fn projects(args: &[String]) -> ExitCode {
         Ok(d) => d.split(':').map(PathBuf::from).collect(),
         Err(_) => find_volumes(),
     };
-    let a = projects::available_media(&drives, std::time::Duration::from_secs(30));
+    let a = projects::available_media(&drives, std::time::Duration::from_secs(30), &Default::default());
     eprintln!("{} media files on {} drives ({} MXF files in no database identified by their header, {} unidentified, skipped: {:?})", a.ids.len(), drives.len(), a.from_header, a.unknown, a.skipped);
     let available = a.ids;
     let found = projects::find_projects(root.as_ref());
-    let r = projects::scan(&found, &available, &mut |i, n, b| eprint!("\r{}/{n} {}\x1b[K", i + 1, b.chars().take(60).collect::<String>()));
+    let r = projects::scan(&found, &available, &mut |i, n, b| eprint!("\r{}/{n} {}\x1b[K", i + 1, b.chars().take(60).collect::<String>()), &Default::default());
     eprintln!();
     print!("{}", projects::list_text(&r, "en"));
     if let Some(out) = args.get(1) {

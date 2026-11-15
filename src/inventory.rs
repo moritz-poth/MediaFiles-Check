@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::UNIX_EPOCH;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -160,13 +160,17 @@ fn modified(m: &fs::Metadata) -> u128 {
 }
 
 /// Lists and reads every MXF file in the MXF folders of `drives` (see crate::folders). `cache` (a JSON file) keeps
-/// the headers for the next scan. progress gets (files done, files total); `stop` ends the scan early (the items
-/// read so far are returned). Kind and use are set by `classify`.
-pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, usize) + Sync), stop: &AtomicBool) -> Vec<Item> {
+/// the headers for the next scan. progress gets (files done, files total); `gate` pauses or cancels the scan
+/// (cancelled: an incomplete list the caller throws away; the headers read so far stay in the cache). Kind and use
+/// are set by `classify`.
+pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, usize) + Sync), gate: &crate::Gate) -> Vec<Item> {
     let mut items = vec![];
     for drive in drives {
         let drive_name = drive.file_name().map_or_else(|| drive.display().to_string(), |n| n.to_string_lossy().into_owned());
         for (_, dir) in crate::folders(drive) {
+            if gate.cancelled() {
+                return vec![];
+            }
             let folder = dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
             let db: HashMap<String, (MobId, MobId, String)> = fs::read(dir.join(PMR))
                 .ok()
@@ -227,7 +231,7 @@ pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, 
     // saved (at most once a minute), so a long first scan that is stopped keeps what it read.
     let mut saved = std::time::Instant::now();
     for chunk in todo.chunks(500) {
-        if stop.load(Ordering::Relaxed) {
+        if gate.cancelled() {
             break;
         }
         let next = AtomicUsize::new(0);
@@ -236,7 +240,7 @@ pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, 
             for _ in 0..4 {
                 s.spawn(|| {
                     loop {
-                        if stop.load(Ordering::Relaxed) {
+                        if gate.cancelled() {
                             break;
                         }
                         let n = next.fetch_add(1, Ordering::Relaxed);
@@ -262,8 +266,12 @@ pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, 
             saved = std::time::Instant::now();
         }
     }
-    if stop.load(Ordering::Relaxed) {
-        items.retain(|it| it.info.is_some() || it.error.is_some());
+    if gate.is_cancelled() {
+        // the cache keeps what was read; forgetting files would drop the ones not reached yet
+        if let Some(c) = cache {
+            save_cache(c, &cached);
+        }
+        return vec![];
     }
     for it in &mut items {
         if let Some(info) = &it.info {

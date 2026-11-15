@@ -61,13 +61,37 @@ fn entries(dir: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(v)
 }
 
+fn cancelled() -> io::Error {
+    io::Error::new(io::ErrorKind::Interrupted, "cancelled")
+}
+
+/// Like `hash_file`, but a big file on a slow drive does not hold up Pause and Cancel.
+fn hash_gated(path: &Path, gate: &crate::Gate) -> io::Result<String> {
+    use std::io::Read;
+    let (mut f, mut h, mut buf) = (File::open(path)?, blake3::Hasher::new(), vec![0u8; 1 << 20]);
+    loop {
+        if gate.cancelled() {
+            return Err(cancelled());
+        }
+        match f.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => h.update(&buf[..n]),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+    }
+    Ok(h.finalize().to_hex().to_string())
+}
+
 fn file_name(p: &Path) -> String {
     p.file_name().unwrap_or_default().to_string_lossy().into_owned()
 }
 
 /// Erfasst alle MXF-Dateien. Ohne `full` wird nur neu gehasht, was sich laut Größe/Änderungsdatum verändert hat;
 /// mit `full` wird alles gehasht und stille Veränderungen (Beschädigung) werden gemeldet.
-pub fn scan(volumes: &[PathBuf], full: bool, cache_dir: Option<&Path>, progress: &mut dyn FnMut(&str)) -> io::Result<ScanResult> {
+/// progress gets (bytes hashed, bytes to hash, "Volume/Ordner") – hashing is what takes the time.
+/// Cancelled through `gate`: error of kind Interrupted, no manifest (the checksums so far stay in the cache).
+pub fn scan(volumes: &[PathBuf], full: bool, cache_dir: Option<&Path>, progress: &mut dyn FnMut(u64, u64, &str), gate: &crate::Gate) -> io::Result<ScanResult> {
     let mut manifest = Manifest {
         format: FORMAT.into(),
         version: 1,
@@ -76,15 +100,31 @@ pub fn scan(volumes: &[PathBuf], full: bool, cache_dir: Option<&Path>, progress:
         volumes: vec![],
     };
     let mut warnings = vec![];
+    let cache_of = |name: &str| -> Cache {
+        cache_dir.map(|d| d.join(format!("{name}.json"))).and_then(|p| fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    };
+    let is_mxf = |p: &Path| !file_name(p).starts_with('.') && file_name(p).to_lowercase().ends_with(".mxf");
+    // first only list: how many bytes need hashing, for the progress and the time left (unreadable = counted later)
+    let mut to_hash = 0u64;
+    for vol in volumes {
+        let cache = cache_of(&volume_name(vol));
+        for dir in entries(&mxf_dir(vol)).unwrap_or_default().into_iter().filter(|d| d.is_dir() && !file_name(d).starts_with('.')) {
+            for path in entries(&dir).unwrap_or_default().into_iter().filter(|p| is_mxf(p)) {
+                let Ok(meta) = fs::metadata(&path) else { continue };
+                let mtime = meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+                let known = cache.get(&format!("{}/{}", file_name(&dir), file_name(&path))).is_some_and(|c| c.size == meta.len() && c.mtime == mtime);
+                if full || !known {
+                    to_hash += meta.len();
+                }
+            }
+        }
+    }
+    let mut hashed = 0u64;
 
     for vol in volumes {
         let name = volume_name(vol);
         let cache_path = cache_dir.map(|d| d.join(format!("{name}.json")));
-        let mut cache: Cache = cache_path
-            .as_ref()
-            .and_then(|p| fs::read(p).ok())
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let mut cache: Cache = cache_of(&name);
         let mut seen = std::collections::HashSet::new();
         let mut last_save = std::time::Instant::now();
         let mut folders = vec![];
@@ -94,7 +134,8 @@ pub fn scan(volumes: &[PathBuf], full: bool, cache_dir: Option<&Path>, progress:
             if !dir.is_dir() || folder_name.starts_with('.') {
                 continue;
             }
-            progress(&format!("{name}/{folder_name}"));
+            let place = format!("{name}/{folder_name}");
+            progress(hashed, to_hash, &place);
             let mut folder = Folder { name: folder_name.clone(), has_db: false, files: vec![] };
             let mut db = [false; 2];
 
@@ -117,6 +158,12 @@ pub fn scan(volumes: &[PathBuf], full: bool, cache_dir: Option<&Path>, progress:
                     continue;
                 }
                 let rel = format!("{folder_name}/{n}");
+                if gate.cancelled() {
+                    if let Some(p) = &cache_path {
+                        save_cache(p, &cache)?;
+                    }
+                    return Err(cancelled());
+                }
                 let meta = match fs::metadata(&path) {
                     Ok(m) => m,
                     Err(e) => {
@@ -129,13 +176,20 @@ pub fn scan(volumes: &[PathBuf], full: bool, cache_dir: Option<&Path>, progress:
                 let cached = cache.get(&rel).filter(|c| c.size == size && c.mtime == mtime);
                 let hash = match cached {
                     Some(c) if !full => c.hash.clone(),
-                    _ => match hash_file(&path) {
+                    _ => match {
+                        let h = hash_gated(&path, gate);
+                        hashed = (hashed + size).min(to_hash);
+                        progress(hashed, to_hash, &place);
+                        h
+                    } {
                         Ok(h) => {
                             if cached.is_some_and(|c| c.hash != h) {
                                 warnings.push(format!("{name}/{rel}: content changed without a new modification date – file is probably damaged"));
                             }
                             h
                         }
+                        // cancelled in the middle of a file: the next round of the loop stops
+                        Err(_) if gate.is_cancelled() => continue,
                         Err(e) => {
                             warnings.push(format!("{name}/{rel}: unreadable ({e})"));
                             continue;

@@ -9,7 +9,6 @@ PLURAL = {"de": "nplurals=2; plural=(n != 1);", "fr": "nplurals=2; plural=(n > 1
 
 # English: (German, French, Spanish). Plural entries: (singular, plural) -> ((de1, de2), (fr1, fr2), (es1, es2))
 T = {
-    'ACTIONS': ('AKTIONEN', 'ACTIONS', 'ACCIONES'),
     'Files copied': ('Dateien kopiert', 'Fichiers copiés', 'Archivos copiados'),
     'Choose bin…': ('Bin wählen…', 'Choisir un chutier…', 'Elegir bin…'),
     'Media of a bin': ('Medien eines Bins', 'Médias d’un chutier', 'Medios de un bin'),
@@ -41,7 +40,6 @@ T = {
     'Moving files…': ('Dateien werden verschoben…', 'Déplacement des fichiers…', 'Moviendo archivos…'),
     'Render drive': ('Render-Laufwerk', 'Disque de rendu', 'Unidad de render'),
     'Import drive': ('Import-Laufwerk', 'Disque d’import', 'Unidad de importación'),
-    'Swap…': ('Tauschen…', 'Échanger…', 'Intercambiar…'),
     'Swap': ('Tauschen', 'Échanger', 'Intercambiar'),
     'Media › History': ('Medien › Verlauf', 'Médias › Historique', 'Medios › Historial'),
     'Render files go into folders like “Mac Studio-renderfiles-1” next to their folder, at most {} files each (Settings → Rebalancing). Within a drive nothing is copied.': ('Render-Dateien kommen in Ordner wie „Mac Studio-renderfiles-1“ neben ihrem Ordner, höchstens {} je Ordner (Einstellungen → Rebalancing). Innerhalb eines Laufwerks wird nichts kopiert.', 'Les fichiers de rendu vont dans des dossiers comme « Mac Studio-renderfiles-1 » à côté de leur dossier, {} au plus par dossier (Réglages → Rééquilibrage). Sur un même disque, rien n’est copié.', 'Los archivos de render van a carpetas como «Mac Studio-renderfiles-1» junto a su carpeta, {} como máximo por carpeta (Ajustes → Reequilibrado). Dentro de una unidad no se copia nada.'),
@@ -51,7 +49,6 @@ T = {
     'Set aside…': ('Beiseitelegen…', 'Mettre de côté…', 'Apartar…'),
     'Cancel leaves the databases as they are – you can start it later under Media › History.': ('Abbrechen lässt die Datenbanken, wie sie sind – du kannst es später unter Medien › Verlauf starten.', 'Annuler laisse les bases de données telles quelles – vous pourrez lancer cela plus tard sous Médias › Historique.', 'Cancelar deja las bases de datos como están; puedes iniciarlo más tarde en Medios › Historial.'),
     'Separate': ('Trennen', 'Séparer', 'Separar'),
-    'Separate…': ('Trennen…', 'Séparer…', 'Separar…'),
     'Choose two different drives.': ('Wähle zwei verschiedene Laufwerke.', 'Choisissez deux disques différents.', 'Elige dos unidades distintas.'),
     'Each file goes into a folder of the same name on the other drive. Unknown files stay where they are.': ('Jede Datei kommt in einen Ordner mit demselben Namen auf dem anderen Laufwerk. Unbekannte Dateien bleiben, wo sie sind.', 'Chaque fichier va dans un dossier du même nom sur l’autre disque. Les fichiers inconnus restent où ils sont.', 'Cada archivo va a una carpeta con el mismo nombre en la otra unidad. Los archivos desconocidos se quedan donde están.'),
     'Files moved': ('Dateien verschoben', 'Fichiers déplacés', 'Archivos movidos'),
@@ -60,14 +57,10 @@ T = {
     'DRIVES': ('LAUFWERKE', 'DISQUES', 'UNIDADES'),
     'PROJECTS': ('PROJEKTE', 'PROJETS', 'PROYECTOS'),
     'Media': ('Medien', 'Médias', 'Medios'),
-    'Renders': ('Renders', 'Rendus', 'Renders'),
     'Render': ('Render', 'Rendu', 'Render'),
     'Unknown': ('Unbekannt', 'Inconnu', 'Desconocido'),
     'reading…': ('liest…', 'lecture…', 'leyendo…'),
     'Size': ('Größe', 'Taille', 'Tamaño'),
-    'Choose the folder with your Avid projects under Projects. Without projects, the files are only sorted into media and renders – nothing can be called unused.': ('Wähle den Ordner mit deinen Avid-Projekten unter Projekte. Ohne Projekte werden die Dateien nur in Medien und Renders sortiert – nichts kann als unbenutzt gelten.', 'Choisissez le dossier de vos projets Avid sous Projets. Sans projets, les fichiers sont seulement triés en médias et rendus – rien ne peut être dit inutilisé.', 'Elige la carpeta con tus proyectos de Avid en Proyectos. Sin proyectos, los archivos solo se separan en medios y renders: nada puede considerarse sin usar.'),
-    'Renders in use': ('Renders benutzt', 'Rendus utilisés', 'Renders en uso'),
-    'Renders not used': ('Renders unbenutzt', 'Rendus inutilisés', 'Renders sin usar'),
     'Media in use': ('Medien benutzt', 'Médias utilisés', 'Medios en uso'),
     'Media not used': ('Medien unbenutzt', 'Médias inutilisés', 'Medios sin usar'),
     'header': ('Dateikopf', 'en-tête', 'cabecera'),
@@ -89,7 +82,18 @@ T = {
     'Picture': ('Bild', 'Image', 'Imagen'),
     'Clear selection': ('Auswahl aufheben', 'Désélectionner', 'Quitar selección'),
     'Kind': ('Art', 'Type', 'Tipo'),
-    'Stop': ('Anhalten', 'Arrêter', 'Detener'),
+    'macOS does not let MediaFiles Check read: {}': ('macOS lässt MediaFiles Check nicht lesen: {}', 'macOS ne permet pas à MediaFiles Check de lire : {}', 'macOS no deja que MediaFiles Check lea: {}'),
+    'Still blocked. System Settings is open: under Privacy & Security › Files & Folders, switch on the drives for MediaFiles Check (or give it Full Disk Access), then click Ask for access again.': ('Immer noch gesperrt. Die Systemeinstellungen sind offen: Unter Datenschutz & Sicherheit › Dateien & Ordner die Laufwerke für MediaFiles Check einschalten (oder ihm Festplattenvollzugriff geben), dann auf „Zugriff erneut anfragen“ klicken.', 'Toujours bloqué. Réglages Système est ouvert : sous Confidentialité et sécurité › Fichiers et dossiers, activez les disques pour MediaFiles Check (ou donnez-lui l’accès complet au disque), puis cliquez sur Redemander l’accès.', 'Sigue bloqueado. Ajustes del Sistema está abierto: en Privacidad y seguridad › Archivos y carpetas, activa las unidades para MediaFiles Check (o dale acceso total al disco) y pulsa Volver a pedir acceso.'),
+    'Waiting for macOS…': ('Warte auf macOS…', 'En attente de macOS…', 'Esperando a macOS…'),
+    'Ask for access again': ('Zugriff erneut anfragen', 'Redemander l’accès', 'Volver a pedir acceso'),
+    'Actions': ('Aktionen', 'Actions', 'Acciones'),
+    'Each action first shows a preview; nothing moves before you confirm it.': ('Jede Aktion zeigt zuerst eine Vorschau; nichts wird verschoben, bevor du es bestätigst.', 'Chaque action montre d’abord un aperçu ; rien n’est déplacé avant votre confirmation.', 'Cada acción muestra primero una vista previa; nada se mueve antes de que lo confirmes.'),
+    'None': ('Keine', 'Aucun', 'Ninguna'),
+    'Invert': ('Umkehren', 'Inverser', 'Invertir'),
+    'Some folders are switched off: numbers and lists count only the bins in the others.': ('Einige Ordner sind ausgeschaltet: Zahlen und Listen zählen nur die Bins in den übrigen.', 'Certains dossiers sont désactivés : les nombres et les listes ne comptent que les chutiers des autres.', 'Algunas carpetas están desactivadas: los números y las listas solo cuentan los bins de las demás.'),
+    'Pause': ('Pause', 'Pause', 'Pausa'),
+    'Resume': ('Fortsetzen', 'Reprendre', 'Reanudar'),
+    'Paused': ('Pausiert', 'En pause', 'En pausa'),
     'Lists every media file on the switched-on drives with its clip, codec and size, and sorts out render files. A file the switched-on projects do not use is unused – media of other projects on the same drives would count as unused too. Nothing is changed.': ('Listet jede Mediendatei der eingeschalteten Laufwerke mit Clip, Codec und Größe auf und sortiert Render-Dateien aus. Eine Datei, die die eingeschalteten Projekte nicht benutzen, gilt als unbenutzt – Medien anderer Projekte auf denselben Laufwerken zählen also auch dazu. Es wird nichts verändert.', 'Liste chaque fichier média des disques activés avec son clip, son codec et sa taille, et met à part les fichiers de rendu. Un fichier que les projets activés n’utilisent pas est inutilisé – les médias d’autres projets sur les mêmes disques compteraient aussi. Rien n’est modifié.', 'Muestra cada archivo de medios de las unidades activadas con su clip, códec y tamaño, y separa los archivos de render. Un archivo que los proyectos activados no usan está sin usar; los medios de otros proyectos en las mismas unidades también contarían. No se cambia nada.'),
     'All': ('Alle', 'Tous', 'Todos'),
     'Project': ('Projekt', 'Projet', 'Proyecto'),
@@ -97,7 +101,7 @@ T = {
     'Codec': ('Codec', 'Codec', 'Códec'),
     'Select all shown': ('Alle gezeigten auswählen', 'Sélectionner tout l’affiché', 'Seleccionar todo lo mostrado'),
     'Show table…': ('Tabelle öffnen…', 'Afficher le tableau…', 'Mostrar tabla…'),
-    'Drives and projects': ('Laufwerke und Projekte', 'Disques et projets', 'Unidades y proyectos'),
+    'Drives & projects': ('Laufwerke & Projekte', 'Disques et projets', 'Unidades y proyectos'),
     ('{n} bin could not be read – what only it uses counts as unused.', '{n} bins could not be read – what only they use counts as unused.'): (('{n} Bin war nicht lesbar – was nur es benutzt, gilt als unbenutzt.', '{n} Bins waren nicht lesbar – was nur sie benutzen, gilt als unbenutzt.'), ('{n} chutier illisible – ce que lui seul utilise compte comme inutilisé.', '{n} chutiers illisibles – ce qu’eux seuls utilisent compte comme inutilisé.'), ('{n} bin no se pudo leer: lo que solo él usa cuenta como sin usar.', '{n} bins no se pudieron leer: lo que solo ellos usan cuenta como sin usar.')),
     ('{n} selected', '{n} selected'): (('{n} ausgewählt', '{n} ausgewählt'), ('{n} sélectionné', '{n} sélectionnés'), ('{n} seleccionado', '{n} seleccionados')),
     ('{n} file shown', '{n} files shown'): (('{n} Datei gezeigt', '{n} Dateien gezeigt'), ('{n} fichier affiché', '{n} fichiers affichés'), ('{n} archivo mostrado', '{n} archivos mostrados')),
@@ -106,7 +110,12 @@ T = {
     ('{n} media file', '{n} media files'): (('{n} Mediendatei', '{n} Mediendateien'), ('{n} fichier média', '{n} fichiers média'), ('{n} archivo de medios', '{n} archivos de medios')),
     'Show media…': ('Medien anzeigen…', 'Afficher les médias…', 'Mostrar medios…'),
     'Show clips…': ('Clips anzeigen…', 'Afficher les clips…', 'Mostrar clips…'),
-    'Click a file to see where it is used: master clips, subclips and sequences.': ('Klick auf eine Datei zeigt, wo sie verwendet wird: Master-Clips, Subclips und Sequenzen.', 'Cliquez sur un fichier pour voir où il est utilisé : master clips, sous-clips et séquences.', 'Haz clic en un archivo para ver dónde se usa: master clips, subclips y secuencias.'),
+    'Click the arrow to see where a file is used, click a name to copy it.': ('Klick auf den Pfeil zeigt, wo eine Datei verwendet wird; Klick auf einen Namen kopiert ihn.', 'Cliquez sur la flèche pour voir où un fichier est utilisé, sur un nom pour le copier.', 'Haz clic en la flecha para ver dónde se usa un archivo; en un nombre, para copiarlo.'),
+    'AMA files are not requested. Click the arrow to see where a clip is used, click a name to copy it.': ('AMA-Dateien werden nicht angefordert. Klick auf den Pfeil zeigt, wo ein Clip verwendet wird; Klick auf einen Namen kopiert ihn.', 'Les fichiers AMA ne sont pas demandés. Cliquez sur la flèche pour voir où un clip est utilisé, sur un nom pour le copier.', 'Los archivos AMA no se solicitan. Haz clic en la flecha para ver dónde se usa un clip; en un nombre, para copiarlo.'),
+    'Copied: {}': ('Kopiert: {}', 'Copié : {}', 'Copiado: {}'),
+    'Clip in the bin': ('Clip im Bin', 'Clip dans le chutier', 'Clip en el bin'),
+    'MXF file': ('MXF-Datei', 'Fichier MXF', 'Archivo MXF'),
+    'Original file': ('Originaldatei', 'Fichier original', 'Archivo original'),
     'Welcome to MediaFiles Check': ('Willkommen bei MediaFiles Check', 'Bienvenue dans MediaFiles Check', 'Te damos la bienvenida a MediaFiles Check'),
     'Get started': ('Los geht’s', 'Commencer', 'Empezar'),
     'MediaFiles Check never deletes or overwrites a media file. Still, keep a backup of your media – you use it at your own risk.': ('MediaFiles Check löscht und überschreibt nie eine Mediendatei. Trotzdem: Halte ein Backup deiner Medien bereit – die Nutzung erfolgt auf eigenes Risiko.', 'MediaFiles Check ne supprime ni n’écrase jamais un fichier média. Gardez quand même une sauvegarde de vos médias – l’utilisation est à vos risques.', 'MediaFiles Check nunca borra ni sobrescribe un archivo de medios. Aun así, guarda una copia de seguridad de tus medios: lo usas bajo tu propia responsabilidad.'),
@@ -155,11 +164,7 @@ T = {
     'Manifest from {}': ('Manifest vom {}', 'Manifeste du {}', 'Manifiesto del {}'),
     'Request from {}': ('Anforderung von {}', 'Demande de {}', 'Solicitud de {}'),
     'ASSIGN DRIVES': ('LAUFWERKE ZUORDNEN', 'ASSOCIER LES DISQUES', 'ASIGNAR UNIDADES'),
-    'These drives have no drive with the same name on the other system.': ('Zu diesen Laufwerken gibt es auf dem anderen System kein gleichnamiges.', 'Ces disques n’ont pas de disque du même nom sur l’autre système.', 'Estas unidades no tienen ninguna con el mismo nombre en el otro sistema.'),
-    'FOLDERS ON BOTH SIDES': ('ORDNER AUF BEIDEN SEITEN', 'DOSSIERS DES DEUX CÔTÉS', 'CARPETAS EN AMBOS LADOS'),
-    'These folders exist on both systems with files of their own.': ('Diese Ordner gibt es auf beiden Systemen mit eigenen Dateien.', 'Ces dossiers existent sur les deux systèmes, chacun avec ses propres fichiers.', 'Estas carpetas existen en los dos sistemas, cada una con sus propios archivos.'),
     'Merge': ('Zusammenführen', 'Fusionner', 'Unir'),
-    'Merge: same folder, the database must be rebuilt. Rename: new folder with a unique name.': ('Zusammenführen: gleicher Ordner, die Datenbank muss neu geschrieben werden. Umbenennen: neuer Ordner mit eindeutigem Namen.', 'Fusionner : même dossier, la base de données doit être reconstruite. Renommer : nouveau dossier avec un nom unique.', 'Unir: la misma carpeta, hay que reconstruir la base de datos. Renombrar: carpeta nueva con un nombre único.'),
     'FOR {}': ('FÜR {}', 'POUR {}', 'PARA {}'),
     'Nothing to collect – the other system has everything.': ('Nichts zu sammeln – das andere System hat alles.', 'Rien à rassembler – l’autre système a tout.', 'Nada que reunir: el otro sistema lo tiene todo.'),
     ('{n} file to collect ({})', '{n} files to collect ({})'): (('{n} Datei zu sammeln ({})', '{n} Dateien zu sammeln ({})'), ('{n} fichier à rassembler ({})', '{n} fichiers à rassembler ({})'), ('{n} archivo para reunir ({})', '{n} archivos para reunir ({})')),
@@ -542,6 +547,31 @@ T = {
         "Estos discos no respondieron y se omitieron; sus medios cuentan como faltantes: {}. Si macOS pregunta si MediaFiles Check puede acceder a los archivos de un volumen, permítelo y vuelve a analizar."),
     "Save list…": ("Liste sichern…", "Enregistrer la liste…", "Guardar lista…"),
     "Save request…": ("Anforderung sichern…", "Enregistrer la demande…", "Guardar solicitud…"),
+    'Estimating time left…': ('Restzeit wird geschätzt…', 'Estimation du temps restant…', 'Calculando el tiempo restante…'),
+    'Less than a minute left': ('Noch weniger als eine Minute', 'Moins d’une minute restante', 'Queda menos de un minuto'),
+    'About {} min left': ('Noch ca. {} Min.', 'Environ {} min restantes', 'Quedan unos {} min'),
+    'About {} h {} min left': ('Noch ca. {} Std. {} Min.', 'Environ {} h {} min restantes', 'Quedan unas {} h {} min'),
+    'no folders': ('keine Ordner', 'aucun dossier', 'ninguna carpeta'),
+    'The chosen place holds no MXF files and no Avid database. Choose a drive, its “Avid MediaFiles/MXF” folder or one of the folders in it.': ('Am gewählten Ort liegen keine MXF-Dateien und keine Avid-Datenbank. Wähle ein Laufwerk, seinen Ordner „Avid MediaFiles/MXF“ oder einen der Ordner darin.', 'L’emplacement choisi ne contient ni fichiers MXF ni base de données Avid. Choisissez un disque, son dossier « Avid MediaFiles/MXF » ou l’un de ses dossiers.', 'El lugar elegido no contiene archivos MXF ni base de datos de Avid. Elige una unidad, su carpeta «Avid MediaFiles/MXF» o una de sus carpetas.'),
+    'Assigned: same name on both systems.': ('Zugeordnet: gleicher Name auf beiden Systemen.', 'Associés : même nom sur les deux systèmes.', 'Asignadas: mismo nombre en ambos sistemas.'),
+    'Not assigned: these drives have another name on the other system. Choose the drive they go to.': ('Nicht zugeordnet: Diese Laufwerke heißen auf dem anderen System anders. Wähle, wohin sie gehören.', 'Non associés : ces disques portent un autre nom sur l’autre système. Choisissez leur destination.', 'Sin asignar: estas unidades tienen otro nombre en el otro sistema. Elige a cuál van.'),
+    'Choose the folder with your Avid projects under Projects. Without projects, the files are only sorted into media and render files – nothing can be called unused.': ('Wähle den Ordner mit deinen Avid-Projekten unter Projekte. Ohne Projekte werden die Dateien nur in Medien und Render-Dateien sortiert – nichts kann als unbenutzt gelten.', 'Choisissez le dossier de vos projets Avid sous Projets. Sans projets, les fichiers sont seulement triés en médias et fichiers de rendu – rien ne peut être dit inutilisé.', 'Elige la carpeta con tus proyectos de Avid en Proyectos. Sin proyectos, los archivos solo se separan en medios y archivos de render: nada puede considerarse sin usar.'),
+    'Preview…': ('Vorschau…', 'Aperçu…', 'Vista previa…'),
+    'Render files': ('Render-Dateien', 'Fichiers de rendu', 'Archivos de render'),
+    'Render files not used': ('Render-Dateien unbenutzt', 'Fichiers de rendu inutilisés', 'Archivos de render sin usar'),
+    'Render files in use': ('Render-Dateien benutzt', 'Fichiers de rendu utilisés', 'Archivos de render en uso'),
+    'Merge: into the folder of the same name. Own folder: “<sender>_<folder>” – if it exists already, the files go into it. A folder that ends up different from the other side needs its database rebuilt (task).': ('Zusammenführen: in den Ordner mit demselben Namen. Eigener Ordner: „<Absender>_<Ordner>“ – gibt es ihn schon, kommen die Dateien hinein. Ein Ordner, der danach anders aussieht als drüben, braucht eine neu geschriebene Datenbank (Aufgabe).', 'Fusionner : dans le dossier du même nom. Dossier propre : « <expéditeur>_<dossier> » – s’il existe déjà, les fichiers y vont. Un dossier qui diffère ensuite de l’autre côté doit avoir sa base de données reconstruite (tâche).', 'Combinar: en la carpeta con el mismo nombre. Carpeta propia: «<remitente>_<carpeta>»; si ya existe, los archivos van ahí. Una carpeta que después no coincide con la del otro lado necesita reconstruir su base de datos (tarea).'),
+    'All in own folders': ('Alle in eigene Ordner', 'Tous dans des dossiers propres', 'Todas en carpetas propias'),
+    'All merge': ('Alle zusammenführen', 'Tout fusionner', 'Combinar todas'),
+    'Own folder': ('Eigener Ordner', 'Dossier propre', 'Carpeta propia'),
+    'FOLDERS': ('ORDNER', 'DOSSIERS', 'CARPETAS'),
+    'Per drive of the other system: as it was there, or separated – media files to one drive, render files to another.': ('Pro Laufwerk des anderen Systems: so wie dort, oder getrennt – Mediendateien auf ein Laufwerk, Render-Dateien auf ein anderes.', 'Pour chaque disque de l’autre système : comme là-bas, ou séparé – les fichiers média sur un disque, les fichiers de rendu sur un autre.', 'Por cada unidad del otro sistema: como estaba allí, o separada: los archivos de medios a una unidad y los de render a otra.'),
+    'Tasks – {}': ('Aufgaben – {}', 'Tâches – {}', 'Tareas – {}'),
+    'Files only': ('Nur Dateien', 'Fichiers seuls', 'Solo archivos'),
+    ('Show {n} task…', 'Show {n} tasks…'): (('{n} Aufgabe anzeigen…', '{n} Aufgaben anzeigen…'), ('Afficher {n} tâche…', 'Afficher {n} tâches…'), ('Mostrar {n} tarea…', 'Mostrar {n} tareas…')),
+    'To relink': ('Neu verlinken', 'À relier', 'Para volver a vincular'),
+    'Every missing media file once, by name – without the ones to relink.': ('Jede fehlende Mediendatei einmal, nach Namen – ohne die neu zu verlinkenden.', 'Chaque fichier média manquant une fois, par nom – sans ceux à relier.', 'Cada archivo de medios que falta una vez, por nombre, sin los que hay que volver a vincular.'),
+    'Missing': ('Fehlend', 'Manquants', 'Faltan'),
 }
 
 def q(s):
@@ -551,6 +581,26 @@ used = set()
 for m in re.finditer(r'@tr\("((?:[^"\\]|\\.)*)"(?:\s*\|\s*"((?:[^"\\]|\\.)*)")?', (ROOT / "ui/app.slint").read_text()):
     used.add((m[1], m[2]) if m[2] else m[1])
 missing = [u for u in used if u not in T]
+
+# Sidebar rule (user, 2026-11-15): every step is ONE line of name and ONE line of status in every language.
+# SideItem: 158 px, JetBrains Mono 0.6 em -> name (13 px) at most 20 characters, status (11 px) at most 23.
+slint = (ROOT / "ui/app.slint").read_text()
+steps = slint[slint.index("property <[SideStep]> steps:"):]
+steps = steps[:steps.index("];", steps.index('name: @tr("Completed")'))]
+too_long = []
+for kind, limit in (("name", 20), ("status", 23)):
+    for m in re.finditer(kind + r': (.*?)(?:, (?:status|enabled):)', steps):
+        for a, b in re.findall(r'@tr\("((?:[^"\\]|\\.)*)"(?:\s*\|\s*"((?:[^"\\]|\\.)*)")?', m[1]):
+            key = (a, b) if b else a
+            forms = [a] + ([b] if b else [])
+            for x in T.get(key, ()):
+                forms += list(x) if isinstance(x, tuple) else [x]
+            forms = [f.replace("{n}", "99").replace("{}", "99") for f in forms]
+            if max(map(len, forms)) > limit:
+                too_long.append((kind, limit, forms))
+if too_long:
+    print("sidebar texts too long (one line each):", *too_long, sep="\n  ")
+    sys.exit(1)
 unused = [k for k in T if k not in used]
 if missing or unused:
     print("missing:", missing, "\nunused:", unused)

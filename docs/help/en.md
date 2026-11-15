@@ -17,6 +17,10 @@ MediaFiles Check **never deletes** a media file and **never overwrites** one. Ch
 
 The tabs at the top are the areas. Inside each tab, the sidebar on the left lists its steps in the order you do them; under each step a short line says where it stands. A small orange dot on a tab means something waits there.
 
+Every scan (Exchange, Check, Rebalancing, Duplicates, Projects, Media) shows the time left and two buttons under its bar: **Pause** stops reading until you click **Resume**; **Cancel** ends the scan at once and goes back – nothing of it is kept (checksums and headers already read are remembered for the next scan).
+
+If macOS was told not to let MediaFiles Check read a drive, a scan stops with “macOS does not let MediaFiles Check read: …”. **Ask for access again** makes macOS ask once more – click Allow. If it stays blocked, System Settings opens at Privacy & Security › Files & Folders: switch the drives on there.
+
 ## What it expects
 
 On every drive, including network drives:
@@ -40,9 +44,8 @@ Exchange › **Scan** records every MXF file of the switched-on drives with a ch
 
 1. Scan this system first, so that your own manifest is up to date.
 2. Exchange › **Compare** → **Open manifest…** and choose the manifest of the other system – or a request saved under Projects › Request.
-3. **Assign drives:** drives without a drive of the same name on the other side need a target – or **Don't send**. The choice is remembered.
-4. **Folders on both sides:** choose **Merge** or **Rename** for every folder (see below).
-5. Check the number of files and the tasks, then click **Collect…** and choose where the delivery folder should be created.
+3. **Assign drives:** first the drives with the same name on the other side (assigned), then those with another name there: they need a target – or **Don't send**. The choice is remembered.
+4. Check the number of files – **Show … tasks…** opens the tasks in a window of their own – then click **Collect…** and choose where the delivery folder should be created.
 
 Every file is copied with a checksum check into a new folder like `261102-1830_Mac Studio_to_MacBook`, together with `Tasks.txt` (instructions for importing by hand). Collecting again after an interruption continues where it stopped.
 
@@ -52,9 +55,10 @@ Every file is copied with a checksum check into a new folder like `261102-1830_M
 
 1. Quit Media Composer.
 2. Exchange › **Import** → **Choose delivery…**.
-3. Every drive of the delivery needs a drive on this system; drives with the same name are assigned automatically.
-4. **Verify & import** first verifies every file. Only a complete, undamaged delivery is imported – files are only added, a media file is never overwritten. Replaced databases are kept in `Avid MediaFiles/Ferry-Backup/`.
-5. Scan again afterwards, so that the manifest is up to date.
+3. Every drive of the delivery needs a drive on this system; drives with the same name are assigned automatically. With **Separate**, media files go to one drive and render files to another (recognised by their MXF header).
+4. **Folders:** for every folder **Merge** (into the folder of the same name) or **Own folder** (`<sender>_<folder>`, e.g. `Mac Studio_1`; if it exists already, the files go into it). **All merge** / **All in own folders** sets every folder.
+5. **Verify & import** first verifies every file. Only a complete, undamaged delivery is imported – files are only added, a media file is never overwritten. Replaced databases are kept in `Avid MediaFiles/Ferry-Backup/`.
+6. Scan again afterwards, so that the manifest is up to date.
 
 ## When is something copied?
 
@@ -66,7 +70,7 @@ A file counts as **present** if it exists anywhere on the other system with the 
 - **Both sides have files of their own:** only the files are copied – task “Rebuild database”.
 - **Same file name, different content:** not copied – a task asks you to check it.
 
-A database is only delivered if the target folder ends up exactly like the source folder; a database is never deleted. Folders like `1` exist on every system: **Merge** puts the files into the same folder (the database must be rebuilt), **Rename** into a new folder like `261031_MacStudio_1`.
+A database is only delivered if the target folder ends up exactly like the source folder; a database is never deleted. The same holds when importing: a folder that ends up different from the other side – merged, copied into an own folder that already exists, or separated into media and render files – keeps its database, and Tasks lists “Rebuild database”.
 
 ## Check drives
 
@@ -124,7 +128,7 @@ Maintain › **History** lists every rebalancing and duplicates run: **Rewrite d
 ## Projects
 
 1. Projects › **Choose projects** → **Choose folder…**: the folder with your Avid projects (every folder with an `.avp` file; `Attic` is left out). It is remembered. Switch on the projects to check and click **Scan**.
-2. **Missing media** lists per bin each missing media file once, named after its master clip. Click a file to see where it is used. **Save list…** writes the whole list.
+2. **Missing media** lists per bin every missing media file in three columns: the clip as it is named in the bin, the MXF file name and the original file (camera clip, tape or imported file). The MXF name is only known while an Avid database on the drives still lists the file, otherwise it shows “–”. Click the arrow to see where a file is used; click any name to copy it to the clipboard. Drag the column edges in the header to make a column wider, and the divider between the tree and the list to give the tree more room. The window can be resized; at the top choose **All**, **To relink**, **Missing** or **Files only** (every missing file once, without bins). To pass it on, save a request (see below). On the left is the folder tree of the scanned projects (closed at first – click the arrow to open a folder): untick a folder (or a whole project) and its bins drop out of every view and every count – a file used only there is no longer listed. **All**, **None** and **Invert** at the top right of the tree change every tick at once. The request still holds every missing file.
 3. **AMA clips** shows where AMA-linked files are used. They are not requested.
 4. **Request** → **Save request…** writes a `…_Request.ferry` file. Send it to the system that has the media; there: Exchange › Compare, open it, then Collect. Here: Exchange › Import the delivery.
 
@@ -138,7 +142,7 @@ Good to know:
 
 ## Media
 
-1. Media › **Drives and projects**: switch on the drives and the projects whose bins count, then **Scan**. The first scan reads the header of every media file; later ones only new or changed files. After a few seconds the time left shows on the right under the bar. The last five scans are kept: **Load…** shows one again without scanning, after asking whether nothing changed since.
+1. Media › **Drives & projects**: switch on the drives and the projects whose bins count, then **Scan**. The first scan reads the header of every media file; later ones only new or changed files. After a few seconds the time left shows on the right under the bar. The last five scans are kept: **Load…** shows one again without scanning, after asking whether nothing changed since.
 2. **Overview** counts media and render files, in use or not, and how many files the projects use that are on none of the scanned drives. **Show table…** opens the media table: every file with clip, kind, codec, picture, fps, duration, sound, size, project and folder – filter, search, sort by a column, double-click a column edge to fit it to its longest entry, select files, **Save list…**.
 
 ![Media overview](images/en/media.png)
@@ -149,7 +153,7 @@ How a file is sorted:
 - **Media**: everything else Media Composer or another program wrote. A file nothing tells apart stays **Unknown** and is never moved by a rule.
 - **Not used**: no clip, sequence or effect of the switched-on projects uses it. Media of other projects on the same drives count as unused too – switch on every project that uses these drives.
 
-Actions (Media Composer must be closed):
+Media › **Actions** (its own step, Media Composer must be closed; each one shows a preview first):
 
 - **Render files into folders of their own**: render files go into folders like `Mac Studio-renderfiles-1` next to their folder, at most as many as the rebalancing limit allows.
 - **Swap**: choose the import drive and the render drive. Render files on the import drive go to the render drive, media on the render drive to the import drive, each into a folder of the same name. Every file is copied and the copy checked by checksum; then the original is deleted or put into `MediaFiles Check Aside` – you choose each time.

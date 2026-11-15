@@ -17,6 +17,10 @@ MediaFiles Check **löscht nie** eine Mediendatei und **überschreibt nie** eine
 
 Die Reiter oben sind die Bereiche. In jedem Reiter stehen links in der Seitenleiste seine Schritte in der Reihenfolge, in der man sie macht; unter jedem Schritt steht kurz sein Stand. Ein kleiner oranger Punkt auf einem Reiter heißt: Dort wartet etwas.
 
+Jeder Scan (Austausch, Prüfen, Rebalancing, Duplikate, Projekte, Medien) zeigt unter seinem Balken die Restzeit und zwei Knöpfe: **Pause** hält das Lesen an, bis du **Fortsetzen** klickst; **Abbrechen** beendet den Scan sofort und geht zurück – von ihm bleibt nichts (schon gelesene Prüfsummen und Dateiköpfe werden für den nächsten Scan gemerkt).
+
+Wurde macOS gesagt, dass MediaFiles Check ein Laufwerk nicht lesen darf, bricht ein Scan mit „macOS lässt MediaFiles Check nicht lesen: …“ ab. **Zugriff erneut anfragen** lässt macOS noch einmal fragen – dann Erlauben klicken. Bleibt es gesperrt, öffnen sich die Systemeinstellungen bei Datenschutz & Sicherheit › Dateien & Ordner: Dort die Laufwerke einschalten.
+
 ## Was erwartet wird
 
 Auf jedem Laufwerk, auch auf Netzlaufwerken:
@@ -40,9 +44,8 @@ Austausch › **Scannen** erfasst jede MXF-Datei der eingeschalteten Laufwerke m
 
 1. Zuerst diesen Schnittplatz scannen, damit das eigene Manifest aktuell ist.
 2. Austausch › **Vergleichen** → **Manifest öffnen…** und das Manifest des anderen Schnittplatzes wählen – oder eine Anforderung aus Projekte › Anfordern.
-3. **Laufwerke zuordnen:** Laufwerke ohne gleichnamiges Laufwerk auf der anderen Seite brauchen ein Ziel – oder **Nicht senden**. Die Wahl wird gemerkt.
-4. **Ordner auf beiden Seiten:** für jeden Ordner **Zusammenführen** oder **Umbenennen** wählen (siehe unten).
-5. Anzahl der Dateien und die Aufgaben prüfen, dann **Sammeln…** und wählen, wo der Lieferordner entstehen soll.
+3. **Laufwerke zuordnen:** Oben stehen die Laufwerke, die drüben genauso heißen (zugeordnet). Darunter die, die drüben anders heißen: Sie brauchen ein Ziel – oder **Nicht senden**. Die Wahl wird gemerkt.
+4. Anzahl der Dateien prüfen – **… Aufgaben anzeigen…** öffnet die Aufgaben in einem eigenen Fenster –, dann **Sammeln…** und wählen, wo der Lieferordner entstehen soll.
 
 Jede Datei wird mit Prüfsumme in einen neuen Ordner wie `261102-1830_Mac Studio_to_MacBook` kopiert, zusammen mit `Aufgaben.txt` (Anleitung zum Importieren von Hand). Nochmal Sammeln nach einer Unterbrechung macht dort weiter, wo es aufgehört hat.
 
@@ -52,9 +55,10 @@ Jede Datei wird mit Prüfsumme in einen neuen Ordner wie `261102-1830_Mac Studio
 
 1. Media Composer beenden.
 2. Austausch › **Importieren** → **Lieferung wählen…**.
-3. Jedes Laufwerk der Lieferung braucht ein Laufwerk auf diesem Schnittplatz; gleichnamige werden automatisch zugeordnet.
-4. **Prüfen & importieren** prüft zuerst jede Datei. Nur eine vollständige, unbeschädigte Lieferung wird importiert – Dateien kommen nur dazu, eine Mediendatei wird nie überschrieben. Ersetzte Datenbanken bleiben in `Avid MediaFiles/Ferry-Backup/`.
-5. Danach noch einmal scannen, damit das Manifest aktuell ist.
+3. Jedes Laufwerk der Lieferung braucht ein Laufwerk auf diesem Schnittplatz; gleichnamige werden automatisch zugeordnet. Mit **Trennen** gehen die Mediendateien auf ein Laufwerk und die Render-Dateien auf ein anderes (erkannt am MXF-Header).
+4. **Ordner:** für jeden Ordner **Zusammenführen** (in den Ordner mit demselben Namen) oder **Eigener Ordner** (`<Absender>_<Ordner>`, z. B. `Mac Studio_1`; gibt es ihn schon, kommen die Dateien hinein). **Alle zusammenführen** / **Alle in eigene Ordner** wählt für alle.
+5. **Prüfen & importieren** prüft zuerst jede Datei. Nur eine vollständige, unbeschädigte Lieferung wird importiert – Dateien kommen nur dazu, eine Mediendatei wird nie überschrieben. Ersetzte Datenbanken bleiben in `Avid MediaFiles/Ferry-Backup/`.
+6. Danach noch einmal scannen, damit das Manifest aktuell ist.
 
 ## Wann wird etwas kopiert?
 
@@ -66,7 +70,7 @@ Eine Datei gilt als **vorhanden**, wenn sie irgendwo auf dem anderen Schnittplat
 - **Beide Seiten haben eigene Dateien:** nur die Dateien werden kopiert – Aufgabe „Datenbank neu bauen“.
 - **Gleicher Dateiname, anderer Inhalt:** nicht kopiert – eine Aufgabe bittet um Prüfung.
 
-Eine Datenbank wird nur geliefert, wenn der Zielordner danach genau wie der Quellordner aussieht; eine Datenbank wird nie gelöscht. Ordner wie `1` gibt es auf jedem Schnittplatz: **Zusammenführen** legt die Dateien in denselben Ordner (die Datenbank muss neu gebaut werden), **Umbenennen** in einen neuen Ordner wie `261031_MacStudio_1`.
+Eine Datenbank wird nur geliefert, wenn der Zielordner danach genau wie der Quellordner aussieht; eine Datenbank wird nie gelöscht. Beim Importieren gilt dasselbe: Sieht ein Ordner danach anders aus als drüben – weil zusammengeführt, in einen schon vorhandenen eigenen Ordner kopiert oder in Medien und Render-Dateien getrennt –, bleibt seine Datenbank, und unter Aufgaben steht „Datenbank neu schreiben“.
 
 ## Laufwerke prüfen
 
@@ -124,7 +128,7 @@ Pflegen › **Verlauf** listet jeden Lauf von Rebalancing und Duplikaten: **Date
 ## Projekte
 
 1. Projekte › **Projekte wählen** → **Ordner wählen…**: der Ordner mit deinen Avid-Projekten (jeder Ordner mit einer `.avp`-Datei; `Attic` bleibt außen vor). Er wird gemerkt. Die zu prüfenden Projekte einschalten und **Scannen** klicken.
-2. **Fehlende Medien** listet pro Bin jede fehlende Mediendatei einmal, benannt nach ihrem Master-Clip. Ein Klick zeigt, wo sie verwendet wird. **Liste sichern…** schreibt die ganze Liste.
+2. **Fehlende Medien** listet pro Bin jede fehlende Mediendatei in drei Spalten: der Clip, wie er im Bin heißt, der MXF-Dateiname und die Originaldatei (Kamera-Clip, Band oder importierte Datei). Den MXF-Namen kennt die App nur, solange eine Avid-Datenbank auf den Laufwerken die Datei noch führt, sonst steht dort „–“. Ein Klick auf den Pfeil zeigt, wo eine Datei verwendet wird; ein Klick auf einen Namen kopiert ihn in die Zwischenablage. Die Spaltenränder im Kopf und den Steg zwischen Baum und Liste kannst du ziehen. Das Fenster lässt sich frei vergrößern; oben wählst du **Alle**, **Neu verlinken**, **Fehlend** oder **Nur Dateien** (jede fehlende Datei einmal, ohne Bins). Zum Weitergeben gibt es die Anforderung (siehe unten). Links steht der Ordnerbaum der geprüften Projekte (anfangs zugeklappt – der Pfeil klappt einen Ordner auf): Nimmst du bei einem Ordner (oder einem ganzen Projekt) den Haken weg, fallen seine Bins aus jeder Ansicht und jeder Zahl – eine Datei, die nur dort benutzt wird, steht nicht mehr in der Liste. **Alle**, **Keine** und **Umkehren** oben rechts im Baum ändern alle Haken auf einmal. Die Anforderung enthält weiterhin jede fehlende Datei.
 3. **AMA-Clips** zeigt, wo AMA-verknüpfte Dateien verwendet werden. Sie werden nicht angefordert.
 4. **Anfordern** → **Anforderung sichern…** schreibt eine `…_Request.ferry`-Datei. Schick sie an den Schnittplatz, der die Medien hat; dort: Austausch › Vergleichen, Datei öffnen, dann Sammeln. Hier: Austausch › Importieren der Lieferung.
 
@@ -138,7 +142,7 @@ Gut zu wissen:
 
 ## Medien
 
-1. Medien › **Laufwerke und Projekte**: Laufwerke und die Projekte einschalten, deren Bins zählen, dann **Scannen**. Der erste Durchlauf liest den Kopf jeder Mediendatei, spätere nur neue oder geänderte Dateien. Nach ein paar Sekunden steht rechts unter dem Balken die Restzeit. Die letzten fünf Scans werden gemerkt: **Laden…** zeigt einen davon ohne neuen Scan, nach der Rückfrage, ob sich seitdem nichts geändert hat.
+1. Medien › **Laufwerke & Projekte**: Laufwerke und die Projekte einschalten, deren Bins zählen, dann **Scannen**. Der erste Durchlauf liest den Kopf jeder Mediendatei, spätere nur neue oder geänderte Dateien. Nach ein paar Sekunden steht rechts unter dem Balken die Restzeit. Die letzten fünf Scans werden gemerkt: **Laden…** zeigt einen davon ohne neuen Scan, nach der Rückfrage, ob sich seitdem nichts geändert hat.
 2. **Übersicht** zählt Medien und Render-Dateien, benutzt oder nicht, und wie viele Dateien die Projekte benutzen, die auf keinem gelesenen Laufwerk liegen. **Tabelle öffnen…** zeigt die Medientabelle: jede Datei mit Clip, Art, Codec, Bild, fps, Dauer, Ton, Größe, Projekt und Ordner – filtern, suchen, nach einer Spalte sortieren, Doppelklick auf einen Spaltenrand passt die Spalte an ihren längsten Eintrag an, Dateien auswählen, **Liste sichern…**.
 
 ![Medienübersicht](images/de/media.png)
@@ -149,7 +153,7 @@ So wird eine Datei eingeordnet:
 - **Medium**: alles andere, was Media Composer oder ein anderes Programm geschrieben hat. Eine Datei, die nichts davon verrät, bleibt **Unbekannt** und wird nie nach einer Regel verschoben.
 - **Unbenutzt**: kein Clip, keine Sequenz und kein Effekt der eingeschalteten Projekte benutzt sie. Medien anderer Projekte auf denselben Laufwerken gelten auch als unbenutzt – schalte jedes Projekt ein, das diese Laufwerke nutzt.
 
-Aktionen (Media Composer muss beendet sein):
+Medien › **Aktionen** (eigener Schritt, Media Composer muss beendet sein; jede zeigt zuerst eine Vorschau):
 
 - **Render-Dateien in eigene Ordner**: Render-Dateien kommen in Ordner wie `Mac Studio-renderfiles-1` neben ihrem Ordner, höchstens so viele, wie die Rebalancing-Grenze erlaubt.
 - **Tauschen**: Import- und Render-Laufwerk wählen. Render-Dateien auf dem Import-Laufwerk kommen aufs Render-Laufwerk, Medien auf dem Render-Laufwerk aufs Import-Laufwerk, jeweils in einen Ordner mit demselben Namen. Jede Datei wird kopiert und die Kopie per Prüfsumme geprüft; danach wird das Original gelöscht oder nach `MediaFiles Check Aside` gelegt – das wählst du jedes Mal.

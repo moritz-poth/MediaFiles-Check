@@ -118,7 +118,8 @@ pub struct Found {
 }
 
 /// Looks through the MXF folders below `roots` (drives, see `crate::folders`); progress gets (done, total, place).
-pub fn find(roots: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str)) -> Found {
+/// Cancelled through `gate`: an incomplete result the caller throws away.
+pub fn find(roots: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str), gate: &crate::Gate) -> Found {
     let mut out = Found::default();
     let mut folders = vec![];
     for r in roots {
@@ -141,6 +142,9 @@ pub fn find(roots: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str)) -> 
             .unwrap_or_default();
         let Ok(rd) = fs::read_dir(dir) else { continue };
         for e in rd.flatten() {
+            if gate.cancelled() {
+                return out;
+            }
             let name = e.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') || !name.to_lowercase().ends_with(".mxf") {
                 continue;
@@ -177,6 +181,9 @@ pub fn find(roots: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str)) -> 
     for copies in by_name.into_values().filter(|c| c.len() > 1) {
         let mut by_hash: HashMap<[u8; 32], Vec<Copy>> = HashMap::new();
         for c in copies {
+            if gate.cancelled() {
+                return out;
+            }
             match sha256(&c.path) {
                 Ok(h) => by_hash.entry(h).or_default().push(c),
                 Err(e) => out.unreadable.push((c.path.clone(), e.to_string())),
@@ -413,7 +420,7 @@ mod tests {
         fs::write(fb.join("plain.mxf"), b"no header here").unwrap();
         fs::write(fa.join("same.mxf"), b"aaaa").unwrap(); // same name + size, other content: not a copy
         fs::write(fb.join("same.mxf"), b"bbbb").unwrap();
-        let found = find(&[a.clone(), b.clone()], &mut |_, _, _| {});
+        let found = find(&[a.clone(), b.clone()], &mut |_, _, _| {}, &crate::Gate::default());
         assert_eq!(found.files, 7);
         assert_eq!(found.groups.len(), 2);
         let by_id = found.groups.iter().find(|g| g.by_id).unwrap();
@@ -430,7 +437,7 @@ mod tests {
         assert!(run.moved[0].1.starts_with(b.join("MediaFiles Check Duplicates")), "on the same drive");
         assert_eq!(load::<Journal>(&jp).unwrap().entries, vec![run.clone()]);
         assert_eq!(run.changed, vec![fb.clone()]);
-        assert!(find(&[a.clone(), b.clone()], &mut |_, _, _| {}).groups.is_empty());
+        assert!(find(&[a.clone(), b.clone()], &mut |_, _, _| {}, &crate::Gate::default()).groups.is_empty());
 
         // undo: back, never over a file that is there again
         fs::write(fb.join("plain.mxf"), b"new one").unwrap();

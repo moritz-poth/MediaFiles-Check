@@ -10,8 +10,6 @@ pub const MAX_FILES: usize = 5000;
 pub struct Options {
     /// lokaler Volume-Name -> Volume-Name auf der Gegenseite (ohne Eintrag: gleicher Name)
     pub volume_map: HashMap<String, String>,
-    /// "Volume/Ordner" (lokal), die auf der Gegenseite einen eindeutigen Namen bekommen statt zusammengeführt zu werden
-    pub rename: HashSet<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -66,14 +64,11 @@ impl fmt::Display for Task {
 pub struct Plan {
     pub copies: Vec<Copy>,
     pub tasks: Vec<Task>,
-    /// lokale "Volume/Ordner", deren Gegenstück eigene Dateien hat: User fragen, ob zusammenführen oder umbenennen
-    pub collisions: Vec<String>,
     /// lokale Volumes ohne Gegenstück: User muss sie zuordnen
     pub unmapped: Vec<String>,
 }
 
 struct Proposal<'a> {
-    id: String,
     from_volume: &'a str,
     from: &'a Folder,
     to_volume: String,
@@ -84,7 +79,7 @@ struct Proposal<'a> {
 }
 
 /// Was von `local` auf `remote` fehlt. Beide Seiten rechnen das unabhängig voneinander mit dem Manifest der anderen.
-pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options, date: &str) -> Plan {
+pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options) -> Plan {
     let mut p = Plan::default();
 
     // Eine Datei gilt als vorhanden, wenn sie irgendwo auf der Gegenseite mit gleichem Namen und Hash liegt.
@@ -92,8 +87,6 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options, date: &str) -> 
     for e in remote.volumes.iter().flat_map(|v| &v.folders).flat_map(|f| &f.files) {
         remote_files.entry(key(&e.name)).or_default().insert(&e.hash);
     }
-    let renames: HashSet<String> = opts.rename.iter().map(|r| key(r)).collect();
-    let mut taken: HashMap<String, HashSet<String>> = HashMap::new();
     let mut proposals = vec![];
 
     for lv in &local.volumes {
@@ -103,10 +96,6 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options, date: &str) -> 
             p.unmapped.push(lv.name.clone());
             continue;
         };
-        let taken = taken
-            .entry(key(&to_volume))
-            .or_insert_with(|| rv.iter().flat_map(|rv| &rv.folders).map(|f| key(&f.name)).collect());
-
         for f in &lv.folders {
             let mut missing = vec![];
             for e in &f.files {
@@ -124,22 +113,15 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options, date: &str) -> 
             if missing.is_empty() {
                 continue;
             }
-            let id = format!("{}/{}", lv.name, f.name);
             let same = rv.and_then(|rv| rv.folders.iter().find(|rf| key(&rf.name) == key(&f.name)));
-            let (to_folder, existing) = if renames.contains(&key(&id)) {
-                (unique_name(&format!("{date}_{}_{}", safe_name(&local.system).replace('.', "_"), f.name.replace('.', "_")), taken), None)
-            } else {
-                (same.map_or_else(|| f.name.clone(), |s| s.name.clone()), same)
-            };
+            // the receiver decides on import whether a folder merges or goes into a folder of its own
+            let (to_folder, existing) = (same.map_or_else(|| f.name.clone(), |s| s.name.clone()), same);
             let mine: HashSet<(String, &str)> = f.files.iter().map(|e| (key(&e.name), e.hash.as_str())).collect();
             let subset = existing.is_none_or(|x| x.files.iter().all(|e| mine.contains(&(key(&e.name), e.hash.as_str()))));
-            if !subset {
-                p.collisions.push(id.clone());
-            }
             let existing = existing.map_or(0, |x| x.files.len());
             // Die DB passt nur, wenn der Zielordner danach exakt dem Quellordner entspricht.
             let db_ok = f.has_db && subset && existing + missing.len() == f.files.len();
-            proposals.push(Proposal { id, from_volume: &lv.name, from: f, to_volume: to_volume.clone(), to_folder, missing, existing, db_ok });
+            proposals.push(Proposal { from_volume: &lv.name, from: f, to_volume: to_volume.clone(), to_folder, missing, existing, db_ok });
         }
     }
 
@@ -153,9 +135,6 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options, date: &str) -> 
     }
     for pr in &proposals {
         let (sources, added) = incoming[&target(pr)];
-        if sources > 1 && !p.collisions.contains(&pr.id) {
-            p.collisions.push(pr.id.clone());
-        }
         let copy = |name: &str, size, hash| Copy {
             from_volume: pr.from_volume.into(),
             from_folder: pr.from.name.clone(),
@@ -209,17 +188,6 @@ fn push_once(tasks: &mut Vec<Task>, t: Task) {
     }
 }
 
-fn unique_name(base: &str, taken: &mut HashSet<String>) -> String {
-    let mut name = base.to_string();
-    for i in 2.. {
-        if taken.insert(key(&name)) {
-            break;
-        }
-        name = format!("{base}_{i}");
-    }
-    name
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,7 +210,7 @@ mod tests {
     }
 
     fn run(local: &Manifest, remote: &Manifest, opts: &Options) -> (Vec<String>, Plan) {
-        let p = plan(local, remote, opts, "261031");
+        let p = plan(local, remote, opts);
         (p.copies.iter().map(|c| format!("{}/{}/{}", c.to_volume, c.to_folder, c.name)).collect(), p)
     }
 
@@ -254,7 +222,7 @@ mod tests {
     fn identical_folders_copy_nothing() {
         let a = ma("A", vec![("V", vec![fo("1", &["a", "b"])])]);
         let (copies, p) = run(&a, &a.clone(), &Options::default());
-        assert!(copies.is_empty() && p.tasks.is_empty() && p.collisions.is_empty());
+        assert!(copies.is_empty() && p.tasks.is_empty());
     }
 
     #[test]
@@ -272,17 +240,16 @@ mod tests {
         let b = ma("B", vec![("V", vec![fo("1", &["a"])])]);
         let (copies, p) = run(&a, &b, &Options::default());
         assert_eq!(copies, ["V/1/b", "V/1/msmFMID.pmr", "V/1/msmMMOB.mdb"]);
-        assert!(p.tasks.is_empty() && p.collisions.is_empty());
+        assert!(p.tasks.is_empty());
     }
 
     #[test]
-    fn both_sides_unique_means_rebuild_task_and_collision() {
+    fn both_sides_unique_means_rebuild_task() {
         let a = ma("A", vec![("V", vec![fo("1", &["a", "b"])])]);
         let b = ma("B", vec![("V", vec![fo("1", &["a", "c"])])]);
         let (copies, p) = run(&a, &b, &Options::default());
         assert_eq!(copies, ["V/1/b"]);
         assert_eq!(p.tasks, [rebuild("V", "1")]);
-        assert_eq!(p.collisions, ["V/1"]);
     }
 
     #[test]
@@ -304,17 +271,6 @@ mod tests {
     }
 
     #[test]
-    fn renamed_folder_gets_unique_name_without_db() {
-        let a = ma("Mac Studio", vec![("V", vec![fo("1", &["a", "b"])])]);
-        let b = ma("B", vec![("V", vec![fo("1", &["a", "c"]), fo("261031_Mac Studio_1", &[])])]);
-        let opts = Options { rename: ["V/1".to_string()].into(), ..Default::default() };
-        let (copies, p) = run(&a, &b, &opts);
-        assert_eq!(copies, ["V/261031_Mac Studio_1_2/b"]);
-        assert_eq!(p.tasks, [rebuild("V", "261031_Mac Studio_1_2")]);
-        assert!(p.collisions.is_empty());
-    }
-
-    #[test]
     fn two_local_volumes_into_one_remote_volume() {
         let a = ma("A", vec![("V1", vec![fo("1", &["a"])]), ("V2", vec![fo("1", &["b"])])]);
         let b = ma("B", vec![("W", vec![])]);
@@ -322,7 +278,6 @@ mod tests {
         let (copies, p) = run(&a, &b, &opts);
         assert_eq!(copies, ["W/1/a", "W/1/b"]);
         assert_eq!(p.tasks, [rebuild("W", "1")]);
-        assert_eq!(p.collisions, ["V1/1", "V2/1"]);
     }
 
     #[test]

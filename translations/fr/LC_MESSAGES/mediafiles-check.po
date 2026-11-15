@@ -8,9 +8,6 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
-msgid "ACTIONS"
-msgstr "ACTIONS"
-
 msgid "Files copied"
 msgstr "Fichiers copiés"
 
@@ -157,9 +154,6 @@ msgstr "PROJETS"
 msgid "Media"
 msgstr "Médias"
 
-msgid "Render files"
-msgstr "Fichiers de rendu"
-
 msgid "Render"
 msgstr "Rendu"
 
@@ -171,15 +165,6 @@ msgstr "lecture…"
 
 msgid "Size"
 msgstr "Taille"
-
-msgid "Choose the folder with your Avid projects under Projects. Without projects, the files are only sorted into media and render files – nothing can be called unused."
-msgstr "Choisissez le dossier de vos projets Avid sous Projets. Sans projets, les fichiers sont seulement triés en médias et fichiers de rendu – rien ne peut être dit inutilisé."
-
-msgid "Render files in use"
-msgstr "Fichiers de rendu utilisés"
-
-msgid "Render files not used"
-msgstr "Fichiers de rendu inutilisés"
 
 msgid "Media in use"
 msgstr "Médias utilisés"
@@ -244,8 +229,41 @@ msgstr "Désélectionner"
 msgid "Kind"
 msgstr "Type"
 
-msgid "Stop"
-msgstr "Arrêter"
+msgid "macOS does not let MediaFiles Check read: {}"
+msgstr "macOS ne permet pas à MediaFiles Check de lire : {}"
+
+msgid "Still blocked. System Settings is open: under Privacy & Security › Files & Folders, switch on the drives for MediaFiles Check (or give it Full Disk Access), then click Ask for access again."
+msgstr "Toujours bloqué. Réglages Système est ouvert : sous Confidentialité et sécurité › Fichiers et dossiers, activez les disques pour MediaFiles Check (ou donnez-lui l’accès complet au disque), puis cliquez sur Redemander l’accès."
+
+msgid "Waiting for macOS…"
+msgstr "En attente de macOS…"
+
+msgid "Ask for access again"
+msgstr "Redemander l’accès"
+
+msgid "Actions"
+msgstr "Actions"
+
+msgid "Each action first shows a preview; nothing moves before you confirm it."
+msgstr "Chaque action montre d’abord un aperçu ; rien n’est déplacé avant votre confirmation."
+
+msgid "None"
+msgstr "Aucun"
+
+msgid "Invert"
+msgstr "Inverser"
+
+msgid "Some folders are switched off: numbers and lists count only the bins in the others."
+msgstr "Certains dossiers sont désactivés : les nombres et les listes ne comptent que les chutiers des autres."
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Resume"
+msgstr "Reprendre"
+
+msgid "Paused"
+msgstr "En pause"
 
 msgid "Lists every media file on the switched-on drives with its clip, codec and size, and sorts out render files. A file the switched-on projects do not use is unused – media of other projects on the same drives would count as unused too. Nothing is changed."
 msgstr "Liste chaque fichier média des disques activés avec son clip, son codec et sa taille, et met à part les fichiers de rendu. Un fichier que les projets activés n’utilisent pas est inutilisé – les médias d’autres projets sur les mêmes disques compteraient aussi. Rien n’est modifié."
@@ -268,7 +286,7 @@ msgstr "Sélectionner tout l’affiché"
 msgid "Show table…"
 msgstr "Afficher le tableau…"
 
-msgid "Drives and projects"
+msgid "Drives & projects"
 msgstr "Disques et projets"
 
 msgid "{n} bin could not be read – what only it uses counts as unused."
@@ -307,8 +325,23 @@ msgstr "Afficher les médias…"
 msgid "Show clips…"
 msgstr "Afficher les clips…"
 
-msgid "Click a file to see where it is used: master clips, subclips and sequences."
-msgstr "Cliquez sur un fichier pour voir où il est utilisé : master clips, sous-clips et séquences."
+msgid "Click the arrow to see where a file is used, click a name to copy it."
+msgstr "Cliquez sur la flèche pour voir où un fichier est utilisé, sur un nom pour le copier."
+
+msgid "AMA files are not requested. Click the arrow to see where a clip is used, click a name to copy it."
+msgstr "Les fichiers AMA ne sont pas demandés. Cliquez sur la flèche pour voir où un clip est utilisé, sur un nom pour le copier."
+
+msgid "Copied: {}"
+msgstr "Copié : {}"
+
+msgid "Clip in the bin"
+msgstr "Clip dans le chutier"
+
+msgid "MXF file"
+msgstr "Fichier MXF"
+
+msgid "Original file"
+msgstr "Fichier original"
 
 msgid "Welcome to MediaFiles Check"
 msgstr "Bienvenue dans MediaFiles Check"
@@ -464,20 +497,8 @@ msgstr "Demande de {}"
 msgid "ASSIGN DRIVES"
 msgstr "ASSOCIER LES DISQUES"
 
-msgid "These drives have no drive with the same name on the other system."
-msgstr "Ces disques n’ont pas de disque du même nom sur l’autre système."
-
-msgid "FOLDERS ON BOTH SIDES"
-msgstr "DOSSIERS DES DEUX CÔTÉS"
-
-msgid "These folders exist on both systems with files of their own."
-msgstr "Ces dossiers existent sur les deux systèmes, chacun avec ses propres fichiers."
-
 msgid "Merge"
 msgstr "Fusionner"
-
-msgid "Merge: same folder, the database must be rebuilt. Rename: new folder with a unique name."
-msgstr "Fusionner : même dossier, la base de données doit être reconstruite. Renommer : nouveau dossier avec un nom unique."
 
 msgid "FOR {}"
 msgstr "POUR {}"
@@ -1332,17 +1353,79 @@ msgstr "Enregistrer la liste…"
 msgid "Save request…"
 msgstr "Enregistrer la demande…"
 
-msgid "Preview…"
-msgstr "Aperçu…"
-
 msgid "Estimating time left…"
 msgstr "Estimation du temps restant…"
 
 msgid "Less than a minute left"
-msgstr "Moins d'une minute restante"
+msgstr "Moins d’une minute restante"
 
 msgid "About {} min left"
 msgstr "Environ {} min restantes"
 
 msgid "About {} h {} min left"
 msgstr "Environ {} h {} min restantes"
+
+msgid "no folders"
+msgstr "aucun dossier"
+
+msgid "The chosen place holds no MXF files and no Avid database. Choose a drive, its “Avid MediaFiles/MXF” folder or one of the folders in it."
+msgstr "L’emplacement choisi ne contient ni fichiers MXF ni base de données Avid. Choisissez un disque, son dossier « Avid MediaFiles/MXF » ou l’un de ses dossiers."
+
+msgid "Assigned: same name on both systems."
+msgstr "Associés : même nom sur les deux systèmes."
+
+msgid "Not assigned: these drives have another name on the other system. Choose the drive they go to."
+msgstr "Non associés : ces disques portent un autre nom sur l’autre système. Choisissez leur destination."
+
+msgid "Choose the folder with your Avid projects under Projects. Without projects, the files are only sorted into media and render files – nothing can be called unused."
+msgstr "Choisissez le dossier de vos projets Avid sous Projets. Sans projets, les fichiers sont seulement triés en médias et fichiers de rendu – rien ne peut être dit inutilisé."
+
+msgid "Preview…"
+msgstr "Aperçu…"
+
+msgid "Render files"
+msgstr "Fichiers de rendu"
+
+msgid "Render files not used"
+msgstr "Fichiers de rendu inutilisés"
+
+msgid "Render files in use"
+msgstr "Fichiers de rendu utilisés"
+
+msgid "Merge: into the folder of the same name. Own folder: “<sender>_<folder>” – if it exists already, the files go into it. A folder that ends up different from the other side needs its database rebuilt (task)."
+msgstr "Fusionner : dans le dossier du même nom. Dossier propre : « <expéditeur>_<dossier> » – s’il existe déjà, les fichiers y vont. Un dossier qui diffère ensuite de l’autre côté doit avoir sa base de données reconstruite (tâche)."
+
+msgid "All in own folders"
+msgstr "Tous dans des dossiers propres"
+
+msgid "All merge"
+msgstr "Tout fusionner"
+
+msgid "Own folder"
+msgstr "Dossier propre"
+
+msgid "FOLDERS"
+msgstr "DOSSIERS"
+
+msgid "Per drive of the other system: as it was there, or separated – media files to one drive, render files to another."
+msgstr "Pour chaque disque de l’autre système : comme là-bas, ou séparé – les fichiers média sur un disque, les fichiers de rendu sur un autre."
+
+msgid "Tasks – {}"
+msgstr "Tâches – {}"
+
+msgid "Files only"
+msgstr "Fichiers seuls"
+
+msgid "Show {n} task…"
+msgid_plural "Show {n} tasks…"
+msgstr[0] "Afficher {n} tâche…"
+msgstr[1] "Afficher {n} tâches…"
+
+msgid "To relink"
+msgstr "À relier"
+
+msgid "Every missing media file once, by name – without the ones to relink."
+msgstr "Chaque fichier média manquant une fois, par nom – sans ceux à relier."
+
+msgid "Missing"
+msgstr "Manquants"

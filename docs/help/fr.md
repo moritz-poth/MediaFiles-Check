@@ -17,6 +17,10 @@ MediaFiles Check **ne supprime jamais** un fichier média et **n’en écrase ja
 
 Les onglets en haut sont les domaines. Dans chaque onglet, la barre latérale à gauche liste ses étapes dans l’ordre où on les fait ; sous chaque étape, une courte ligne indique où elle en est. Un petit point orange sur un onglet signale que quelque chose y attend.
 
+Chaque analyse (Échange, Vérifier, Rééquilibrage, Doublons, Projets, Médias) affiche sous sa barre le temps restant et deux boutons : **Pause** arrête la lecture jusqu’à ce que vous cliquiez sur **Reprendre** ; **Annuler** termine l’analyse aussitôt et revient en arrière – rien n’en est gardé (les sommes de contrôle et en-têtes déjà lus sont mémorisés pour la prochaine analyse).
+
+Si macOS a reçu l’ordre de ne pas laisser MediaFiles Check lire un disque, une analyse s’arrête avec « macOS ne permet pas à MediaFiles Check de lire : … ». **Redemander l’accès** fait reposer la question par macOS – cliquez sur Autoriser. Si cela reste bloqué, Réglages Système s’ouvre sur Confidentialité et sécurité › Fichiers et dossiers : activez-y les disques.
+
 ## Ce qui est attendu
 
 Sur chaque disque, y compris les disques réseau :
@@ -40,9 +44,8 @@ Les dossiers peuvent porter n’importe quel nom, p. ex. `1`, `Avid8.1` ou `Mac 
 
 1. Analysez d’abord ce poste, pour que votre manifeste soit à jour.
 2. Échange › **Comparer** → **Ouvrir un manifeste…** et choisissez le manifeste de l’autre poste – ou une demande enregistrée sous Projets › Demander.
-3. **Associer les disques :** les disques sans disque du même nom de l’autre côté ont besoin d’une cible – ou de **Ne pas envoyer**. Le choix est mémorisé.
-4. **Dossiers des deux côtés :** choisissez **Fusionner** ou **Renommer** pour chaque dossier (voir plus bas).
-5. Vérifiez le nombre de fichiers et les tâches, puis cliquez sur **Rassembler…** et choisissez où créer le dossier de livraison.
+3. **Associer les disques :** d’abord les disques qui portent le même nom de l’autre côté (associés), puis ceux qui y portent un autre nom : ils ont besoin d’une cible – ou de **Ne pas envoyer**. Le choix est mémorisé.
+4. Vérifiez le nombre de fichiers – **Afficher … tâches…** ouvre les tâches dans une fenêtre à part –, puis cliquez sur **Rassembler…** et choisissez où créer le dossier de livraison.
 
 Chaque fichier est copié avec contrôle de somme dans un nouveau dossier comme `261102-1830_Mac Studio_to_MacBook`, avec `Tasks.txt` (instructions pour importer à la main). Rassembler à nouveau après une interruption reprend là où cela s’est arrêté.
 
@@ -52,9 +55,10 @@ Chaque fichier est copié avec contrôle de somme dans un nouveau dossier comme 
 
 1. Quittez Media Composer.
 2. Échange › **Importer** → **Choisir la livraison…**.
-3. Chaque disque de la livraison a besoin d’un disque sur ce poste ; les disques du même nom sont associés automatiquement.
-4. **Vérifier et importer** vérifie d’abord chaque fichier. Seule une livraison complète et intacte est importée – les fichiers sont seulement ajoutés, un fichier média n’est jamais écrasé. Les bases de données remplacées sont gardées dans `Avid MediaFiles/Ferry-Backup/`.
-5. Analysez à nouveau ensuite, pour que le manifeste soit à jour.
+3. Chaque disque de la livraison a besoin d’un disque sur ce poste ; les disques du même nom sont associés automatiquement. Avec **Séparer**, les fichiers média vont sur un disque et les fichiers de rendu sur un autre (reconnus par leur en-tête MXF).
+4. **Dossiers :** pour chaque dossier **Fusionner** (dans le dossier du même nom) ou **Dossier propre** (`<expéditeur>_<dossier>`, p. ex. `Mac Studio_1` ; s’il existe déjà, les fichiers y vont). **Tout fusionner** / **Tous dans des dossiers propres** règle tous les dossiers.
+5. **Vérifier et importer** vérifie d’abord chaque fichier. Seule une livraison complète et intacte est importée – les fichiers sont seulement ajoutés, un fichier média n’est jamais écrasé. Les bases de données remplacées sont gardées dans `Avid MediaFiles/Ferry-Backup/`.
+6. Analysez à nouveau ensuite, pour que le manifeste soit à jour.
 
 ## Quand quelque chose est-il copié ?
 
@@ -66,7 +70,7 @@ Un fichier est **présent** s’il existe quelque part sur l’autre poste avec 
 - **Les deux côtés ont leurs propres fichiers :** seuls les fichiers sont copiés – tâche « Reconstruire la base de données ».
 - **Même nom de fichier, contenu différent :** pas copié – une tâche demande de vérifier.
 
-Une base de données n’est livrée que si le dossier cible devient exactement comme le dossier source ; une base de données n’est jamais supprimée. Des dossiers comme `1` existent sur chaque poste : **Fusionner** met les fichiers dans le même dossier (la base de données doit être reconstruite), **Renommer** dans un nouveau dossier comme `261031_MacStudio_1`.
+Une base de données n’est livrée que si le dossier cible devient exactement comme le dossier source ; une base de données n’est jamais supprimée. C’est pareil à l’importation : un dossier qui diffère ensuite de l’autre côté – fusionné, copié dans un dossier propre qui existe déjà ou séparé en fichiers média et de rendu – garde sa base de données, et Tâches indique « Reconstruire la base de données ».
 
 ## Vérifier les disques
 
@@ -124,7 +128,7 @@ Entretien › **Historique** liste chaque opération de rééquilibrage et de do
 ## Projets
 
 1. Projets › **Choisir les projets** → **Choisir un dossier…** : le dossier de vos projets Avid (chaque dossier avec un fichier `.avp` ; `Attic` est laissé de côté). Il est mémorisé. Activez les projets à vérifier et cliquez sur **Analyser**.
-2. **Médias manquants** liste par chutier chaque fichier média manquant une fois, nommé d’après son master clip. Un clic montre où il est utilisé. **Enregistrer la liste…** écrit la liste entière.
+2. **Médias manquants** liste par chutier chaque fichier média manquant en trois colonnes : le clip tel qu’il s’appelle dans le chutier, le nom du fichier MXF et le fichier original (clip caméra, bande ou fichier importé). Le nom MXF n’est connu que tant qu’une base de données Avid sur les disques liste encore le fichier, sinon « – » s’affiche. Un clic sur la flèche montre où un fichier est utilisé ; un clic sur un nom le copie dans le presse-papiers. Les bords des colonnes dans l’en-tête et la séparation entre l’arborescence et la liste se déplacent à la souris. La fenêtre se redimensionne librement ; en haut, choisissez **Tous**, **À relier**, **Manquants** ou **Fichiers seuls** (chaque fichier manquant une fois, sans chutiers). Pour la transmettre, enregistrez une demande (voir plus bas). À gauche se trouve l’arborescence des dossiers des projets analysés (fermée au début – la flèche ouvre un dossier) : décochez un dossier (ou un projet entier) et ses chutiers disparaissent de chaque vue et de chaque nombre – un fichier utilisé seulement là n’est plus listé. **Tous**, **Aucun** et **Inverser** en haut à droite de l’arborescence changent toutes les coches d’un coup. La demande contient toujours chaque fichier manquant.
 3. **Clips AMA** montre où sont utilisés les fichiers liés en AMA. Ils ne sont pas demandés.
 4. **Demander** → **Enregistrer la demande…** écrit un fichier `…_Request.ferry`. Envoyez-le au poste qui a les médias ; là-bas : Échange › Comparer, ouvrez-le, puis Rassembler. Ici : Échange › Importer la livraison.
 
@@ -149,7 +153,7 @@ Comment un fichier est classé :
 - **Média** : tout le reste écrit par Media Composer ou un autre programme. Un fichier que rien ne distingue reste **Inconnu** et n’est jamais déplacé par une règle.
 - **Inutilisé** : aucun clip, séquence ou effet des projets activés ne l’utilise. Les médias d’autres projets sur les mêmes disques comptent aussi comme inutilisés – activez chaque projet qui utilise ces disques.
 
-Actions (Media Composer doit être fermé) :
+Médias › **Actions** (étape à part, Media Composer doit être fermé ; chacune montre d’abord un aperçu) :
 
 - **Fichiers de rendu dans leurs propres dossiers** : les fichiers de rendu vont dans des dossiers comme `Mac Studio-renderfiles-1` à côté de leur dossier, au plus autant que la limite de rééquilibrage le permet.
 - **Échanger** : choisissez le disque d’import et le disque de rendu. Les fichiers de rendu du disque d’import vont sur le disque de rendu, les médias du disque de rendu sur le disque d’import, chaque fois dans un dossier du même nom. Chaque fichier est copié et la copie vérifiée par somme de contrôle ; ensuite l’original est supprimé ou mis dans `MediaFiles Check Aside` – vous choisissez à chaque fois.

@@ -57,11 +57,15 @@ pub fn bins(project: &Path) -> Vec<PathBuf> {
 /// Media files of one drive by mob ID: from the Avid databases, counted only if the file is really in the folder;
 /// MXF files that are in no database are identified by their header. Returns (ids, read from a header,
 /// unidentified files). `tick` is called per folder.
-fn drive_media(drive: &Path, tick: &dyn Fn()) -> (HashSet<MobId>, usize, usize) {
+/// `go` is asked between files; false ends the reading early.
+fn drive_media(drive: &Path, go: &dyn Fn() -> bool) -> (HashSet<MobId>, usize, usize, HashMap<MobId, String>) {
     let mut ids = HashSet::new();
+    let mut gone = HashMap::new();
     let (mut from_header, mut unknown) = (0, 0);
     for (_, dir) in folders(drive) {
-        tick();
+        if !go() {
+            break;
+        }
         let on_disk: Vec<String> = fs::read_dir(&dir)
             .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| key(n).ends_with(".mxf") && !n.starts_with('.')).collect())
             .unwrap_or_default();
@@ -69,7 +73,11 @@ fn drive_media(drive: &Path, tick: &dyn Fn()) -> (HashSet<MobId>, usize, usize) 
         let in_db: HashSet<String> = entries.iter().map(|e| key(&e.name)).collect();
         let present: HashSet<String> = on_disk.iter().map(|n| key(n)).collect();
         ids.extend(entries.iter().filter(|e| present.contains(&key(&e.name))).map(|e| e.id));
+        gone.extend(entries.iter().filter(|e| !present.contains(&key(&e.name))).map(|e| (e.id, e.name.clone())));
         for n in on_disk.iter().filter(|n| !in_db.contains(&key(n))) {
+            if !go() {
+                break;
+            }
             match crate::mxf::file_mob_id(&dir.join(n)) {
                 Ok(id) => {
                     ids.insert(id);
@@ -79,7 +87,7 @@ fn drive_media(drive: &Path, tick: &dyn Fn()) -> (HashSet<MobId>, usize, usize) 
             }
         }
     }
-    (ids, from_header, unknown)
+    (ids, from_header, unknown, gone)
 }
 
 pub struct Available {
@@ -90,32 +98,41 @@ pub struct Available {
     pub unknown: usize,
     /// drives that stopped answering and were skipped
     pub skipped: Vec<PathBuf>,
+    /// MXF file names of database entries whose file is gone – the only place a missing file's name is known
+    pub gone: HashMap<MobId, String>,
 }
 
 /// Media files on the given drives. A drive that does not answer for `patience` (a hanging network or macFUSE
-/// mount blocks a read forever) is skipped instead of stopping the scan; its reading thread is left behind.
-pub fn available_media(drives: &[PathBuf], patience: std::time::Duration) -> Available {
+/// mount blocks a read forever) is skipped instead of stopping the scan; its reading thread is left behind. Paused
+/// through `gate`, a drive is not counted as silent; cancelled: an incomplete result the caller throws away.
+pub fn available_media(drives: &[PathBuf], patience: std::time::Duration, gate: &std::sync::Arc<crate::Gate>) -> Available {
     use std::sync::mpsc;
-    let mut a = Available { ids: HashSet::new(), from_header: 0, unknown: 0, skipped: vec![] };
+    let mut a = Available { ids: HashSet::new(), from_header: 0, unknown: 0, skipped: vec![], gone: HashMap::new() };
     for d in drives {
+        if gate.cancelled() {
+            break;
+        }
         let (tx, rx) = mpsc::channel();
-        let drive = d.clone();
+        let (drive, g) = (d.clone(), gate.clone());
         std::thread::spawn(move || {
             let tick = tx.clone();
             let result = drive_media(&drive, &move || {
                 let _ = tick.send(None);
+                !g.cancelled()
             });
             let _ = tx.send(Some(result));
         });
         loop {
             match rx.recv_timeout(patience) {
                 Ok(None) => continue,
-                Ok(Some((ids, from_header, unknown))) => {
+                Ok(Some((ids, from_header, unknown, gone))) => {
                     a.ids.extend(ids);
+                    a.gone.extend(gone);
                     a.from_header += from_header;
                     a.unknown += unknown;
                     break;
                 }
+                Err(_) if gate.is_paused() => continue,
                 Err(_) => {
                     a.skipped.push(d.clone());
                     break;
@@ -166,6 +183,8 @@ pub struct MissingGroup {
     pub relink: bool,
     /// where in the bin they are used
     pub uses: Vec<(String, ClipKind)>,
+    /// the media files themselves (`files` of them)
+    pub ids: Vec<MobId>,
 }
 
 #[derive(Debug, Default)]
@@ -193,6 +212,11 @@ pub struct ScanResult {
     pub by_bin: BTreeMap<(String, String), Vec<MissingGroup>>,
     /// missing render files (precomputed effects) – not requested, Media Composer renders them again
     pub renders: usize,
+    /// missing (and AMA) file -> name of its source: camera clip, tape or imported file (`Bin::source_name`)
+    pub originals: HashMap<MobId, String>,
+    /// missing file -> its MXF file name, if a database on the drives still lists it (set by the caller from
+    /// `Available::gone`; bins don't store it)
+    pub mxf_names: HashMap<MobId, String>,
 }
 
 fn kind_of(kind: MobKind, usage: i32) -> Option<ClipKind> {
@@ -264,8 +288,8 @@ pub struct Refs {
 }
 
 /// Reads every bin of the projects (see `Refs`). Clips stored in another bin of the same project are resolved over
-/// the project. progress gets (bins done, bins total, bin).
-pub fn references(projects: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str)) -> Refs {
+/// the project. progress gets (bins done, bins total, bin). Cancelled through `gate`: an incomplete result.
+pub fn references(projects: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str), gate: &crate::Gate) -> Refs {
     let all: Vec<(usize, PathBuf)> = projects.iter().enumerate().flat_map(|(i, p)| bins(p).into_iter().map(move |b| (i, b))).collect();
     let mut r = Refs { bins: all.len(), ..Default::default() };
     // per project: mob -> its media files; mobs from another bin, waiting for the end of the project (render?)
@@ -280,6 +304,9 @@ pub fn references(projects: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &
     };
     let mut current = usize::MAX;
     for (i, (pi, path)) in all.iter().enumerate() {
+        if gate.cancelled() {
+            break;
+        }
         if *pi != current {
             finish(&mut media_of, &mut waiting, &mut r);
             current = *pi;
@@ -300,8 +327,8 @@ pub fn references(projects: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &
 
 /// Reads every bin of the projects and collects the media files their clips, subclips and sequences need that are
 /// not in `available`. References to clips stored in another bin of the same project are resolved over the project.
-/// progress gets (bins done, bins total, bin).
-pub fn scan(projects: &[PathBuf], available: &HashSet<MobId>, progress: &mut dyn FnMut(usize, usize, &str)) -> ScanResult {
+/// progress gets (bins done, bins total, bin). Cancelled through `gate`: an incomplete result the caller throws away.
+pub fn scan(projects: &[PathBuf], available: &HashSet<MobId>, progress: &mut dyn FnMut(usize, usize, &str), gate: &crate::Gate) -> ScanResult {
     let all: Vec<(usize, PathBuf)> = projects.iter().enumerate().flat_map(|(i, p)| bins(p).into_iter().map(move |b| (i, b))).collect();
     let mut r = ScanResult { projects: projects.len(), bins: all.len(), ..Default::default() };
     let mut missing: HashMap<MobId, Missing> = HashMap::new();
@@ -340,6 +367,9 @@ pub fn scan(projects: &[PathBuf], available: &HashSet<MobId>, progress: &mut dyn
     };
 
     for (i, (pi, path)) in all.iter().enumerate() {
+        if gate.cancelled() {
+            break;
+        }
         if *pi != current {
             finish_project(&mut media_of, &mut waiting, &mut missing, &mut record);
             current = *pi;
@@ -401,6 +431,7 @@ pub fn scan(projects: &[PathBuf], available: &HashSet<MobId>, progress: &mut dyn
     let before = ama_names.len();
     ama_names.retain(|id, name| !online_masters.contains(&(missing[id].first.project.clone(), crate::key(name))));
     r.ama_covered = before - ama_names.len();
+    r.originals = missing.keys().filter_map(|id| Some((*id, files.get(id)?.3.as_ref()?.0.clone()))).collect();
     r.ama = ama_names.len();
     missing.retain(|id, _| !is_ama(id));
     let no_locator = |id: &MobId| files.get(id).is_some_and(|f| f.0.is_none());
@@ -418,14 +449,14 @@ pub fn scan(projects: &[PathBuf], available: &HashSet<MobId>, progress: &mut dyn
         by_bin
             .iter()
             .map(|(k, ids)| {
-                let mut groups: BTreeMap<(String, bool), (usize, BTreeSet<(String, ClipKind)>)> = BTreeMap::new();
+                let mut groups: BTreeMap<(String, bool), (Vec<MobId>, BTreeSet<(String, ClipKind)>)> = BTreeMap::new();
                 for (id, uses) in ids {
                     let Some(key) = info(id) else { continue };
                     let g = groups.entry(key).or_default();
-                    g.0 += 1;
+                    g.0.push(*id);
                     g.1.extend(uses.iter().cloned());
                 }
-                let groups: Vec<MissingGroup> = groups.into_iter().map(|((name, relink), (files, uses))| MissingGroup { name, files, relink, uses: uses.into_iter().collect() }).collect();
+                let groups: Vec<MissingGroup> = groups.into_iter().map(|((name, relink), (ids, uses))| MissingGroup { name, files: ids.len(), relink, uses: uses.into_iter().collect(), ids }).collect();
                 (k.clone(), groups)
             })
             .filter(|(_, g)| !g.is_empty())
@@ -577,7 +608,7 @@ mod tests {
         let b: Vec<String> = bins(&root.join("Avid Projects/A")).iter().map(|p| name_of(p)).collect();
         assert_eq!(b, ["Cuts.avb", "Reel 1.avb"]);
         // unreadable bins are reported, not fatal
-        let r = scan(&[root.join("Avid Projects/A")], &HashSet::new(), &mut |_, _, _| {});
+        let r = scan(&[root.join("Avid Projects/A")], &HashSet::new(), &mut |_, _, _| {}, &crate::Gate::default());
         assert_eq!((r.bins, r.failed.len(), r.missing.len()), (2, 2, 0));
         fs::remove_dir_all(&root).unwrap();
     }

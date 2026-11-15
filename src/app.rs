@@ -9,7 +9,7 @@ use mediafiles_check::ferry::flow::{self as exflow, Choice, Compare, Incoming, M
 use mediafiles_check::ferry::{self as fy, Manifest, collect as fcollect, scan as fscan};
 use mediafiles_check::rebalance::{self, Plan, Rebalanced};
 use mediafiles_check::report::{self, Outcome, Report};
-use mediafiles_check::{FolderReport, UPDATE_APP, check, find_volumes, log, pick, report_text, selftest, update};
+use mediafiles_check::{FolderReport, Gate, UPDATE_APP, check, find_volumes, log, pick, report_text, selftest, update};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -20,6 +20,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 slint::include_modules!();
+
+/// A second window that changes its height does not always repaint the new area (Slint 1.18 on macOS: the frame
+/// is drawn before the resize is done and nothing asks again). Ask a few times while the resize settles.
+/// Every window grows with its content: redraw after each size change, or the new area stays unpainted.
+macro_rules! repaint_on_resize {
+    ($w:expr) => {{
+        let weak = $w.as_weak();
+        $w.global::<Shared>().on_resized(move || weak.upgrade().iter().for_each(repaint_soon));
+    }};
+}
+
 
 /// (code, name in its own language, manual). New language: add it here, translations/<code>/LC_MESSAGES/mediafiles-check.po
 /// and docs/help/<code>.md.
@@ -363,8 +374,9 @@ fn show_compare(app: &AppWindow, c: &Compare) {
     let fmt = if lang == "en" { "%Y-%m-%d %H:%M" } else { "%d.%m.%Y %H:%M" };
     x.set_remote_date(fy::local_time(c.remote.created, fmt).into());
     x.set_maps(map_rows(app, &c.drives, true));
-    let rows: Vec<ChoiceRow> = c.collisions.iter().map(|(id, ch)| ChoiceRow { name: shorten(id, NAME_CHARS + 10).into(), choice: *ch }).collect();
-    x.set_collisions(ModelRc::new(VecModel::from(rows)));
+    // a request (Projects) names files, not drives: nothing to assign
+    let matched: Vec<String> = c.local.volumes.iter().filter(|_| c.request.is_none()).map(|v| v.name.clone()).filter(|n| !c.drives.iter().any(|d| &d.name == n)).collect();
+    x.set_matched(strings(&matched, NAME_CHARS));
     x.set_copy_files(files as i32);
     x.set_copy_size(exflow::format_size(bytes, &lang).into());
     let tasks: Vec<String> = plan.tasks.iter().map(|t| t.describe(&lang)).collect();
@@ -380,10 +392,139 @@ fn show_incoming(app: &AppWindow, i: &Incoming) {
     x.set_delivery_from(shorten(&i.delivery.from, TITLE_CHARS).into());
     x.set_delivery_files(files as i32);
     x.set_delivery_size(exflow::format_size(bytes, &app.get_language()).into());
-    x.set_delivery_maps(map_rows(app, &i.drives, false));
+    let drives: Vec<DeliveryDrive> = map_rows(app, &i.drives, false)
+        .iter()
+        .zip(&i.renders)
+        .map(|(m, r)| DeliveryDrive { name: m.name, options: m.options, selected: m.selected, split: r.is_some(), render: r.unwrap_or(0) as i32 })
+        .collect();
+    x.set_delivery_maps(ModelRc::new(VecModel::from(drives)));
+    let folders: Vec<ChoiceRow> = i
+        .folders
+        .iter()
+        .map(|(id, own)| {
+            let folder = id.split_once('/').map_or(id.as_str(), |x| x.1);
+            ChoiceRow { name: shorten(id, NAME_CHARS + 10).into(), own: shorten(&fcollect::own_folder_name(&i.delivery.from, folder), NAME_CHARS).into(), choice: *own as i32 }
+        })
+        .collect();
+    x.set_delivery_folders(ModelRc::new(VecModel::from(folders)));
     x.set_can_import(i.ready());
     x.set_has_delivery(true);
     x.set_view(3);
+}
+
+/// Time left of a scan, from the rate of the last 20 s. `tick` returns None between updates (at most ten a second,
+/// the last one always), else the seconds left: -1 nothing to show, 0 still estimating. The first count is the
+/// start (e.g. after a cache), so work that was already done does not make the rate look fast.
+#[derive(Default)]
+struct Eta {
+    samples: VecDeque<(std::time::Instant, u64)>,
+    last: Option<std::time::Instant>,
+}
+
+impl Eta {
+    fn tick(&mut self, done: u64, total: u64) -> Option<i32> {
+        let now = std::time::Instant::now();
+        if done < total && self.last.is_some_and(|l| now.duration_since(l) < Duration::from_millis(100)) {
+            return None;
+        }
+        self.last = Some(now);
+        Some(self.at(now, done, total))
+    }
+
+    fn at(&mut self, now: std::time::Instant, done: u64, total: u64) -> i32 {
+        if done >= total {
+            return -1;
+        }
+        self.samples.push_back((now, done));
+        while self.samples.len() > 2 && now.duration_since(self.samples[1].0) >= Duration::from_secs(20) {
+            self.samples.pop_front();
+        }
+        let (t0, d0) = self.samples[0];
+        let span = now.duration_since(t0).as_secs_f64();
+        if span < 5.0 || done <= d0 {
+            return 0;
+        }
+        ((total - done) as f64 * span / (done - d0) as f64).ceil().clamp(1.0, i32::MAX as f64) as i32
+    }
+}
+
+/// Where a scan can be paused and cancelled; each place has the gate of its latest scan.
+#[derive(Clone, Copy)]
+enum ScanAt {
+    /// Check's Working page (check, duplicates, full folders)
+    Work,
+    Exchange,
+    Projects,
+}
+
+thread_local! {
+    static GATES: RefCell<[Arc<Gate>; 3]> = RefCell::default();
+}
+
+/// A fresh gate for a new scan at `at`; the old scan (if still running) keeps its own.
+fn new_gate(at: ScanAt) -> Arc<Gate> {
+    let g = Arc::new(Gate::default());
+    GATES.with(|x| x.borrow_mut()[at as usize] = g.clone());
+    g
+}
+
+fn gate(at: ScanAt) -> Arc<Gate> {
+    GATES.with(|x| x.borrow()[at as usize].clone())
+}
+
+/// Shows Pause/Cancel on Check's Working page for a scan and returns its gate.
+fn work_gate(app: &AppWindow) -> Arc<Gate> {
+    app.set_work_paused(false);
+    app.set_work_can_pause(true);
+    new_gate(ScanAt::Work)
+}
+
+/// The places macOS did not let us read at the last check (for "Ask for access again").
+static DENIED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+fn show_denied(weak: &slint::Weak<AppWindow>, denied: Vec<PathBuf>, asked: bool) {
+    let names = denied.iter().map(|p| volume_name(p)).collect::<Vec<_>>().join(", ");
+    *DENIED.lock().unwrap() = denied;
+    let w = weak.clone();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(a) = w.upgrade() {
+            let x = a.global::<Access>();
+            x.set_asked(asked && !names.is_empty());
+            x.set_denied(names.into());
+            x.set_asking(false);
+        }
+    });
+}
+
+/// In a scan's worker thread, before it reads: if macOS does not let us read one of `places`, the note with
+/// "Ask for access again" shows and the scan is cancelled (it would find nothing there).
+fn check_access(weak: &slint::Weak<AppWindow>, places: &[PathBuf], gate: &Gate) {
+    let denied = mediafiles_check::denied(places);
+    if !denied.is_empty() {
+        log::write(&format!("  no access (macOS privacy): {}", denied.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")));
+        gate.cancel();
+    }
+    show_denied(weak, denied, false);
+}
+
+/// "Ask for access again": macOS asks only once per app, so its answer is reset (tccutil, file access only) and
+/// the places are read again – that brings up the question. Still blocked: System Settings opens.
+fn ask_access(weak: slint::Weak<AppWindow>) {
+    std::thread::spawn(move || {
+        for service in ["SystemPolicyRemovableVolumes", "SystemPolicyNetworkVolumes", "SystemPolicyDocumentsFolder", "SystemPolicyDesktopFolder", "SystemPolicyDownloadsFolder"] {
+            let r = std::process::Command::new("/usr/bin/tccutil").args(["reset", service, UPDATE_APP.bundle_id]).output();
+            if let Err(e) = r {
+                log::write(&format!("tccutil {service}: {e}"));
+            }
+        }
+        let places = DENIED.lock().unwrap().clone();
+        let still = mediafiles_check::denied(&places);
+        log::write(&format!("access asked again: {} of {} still blocked", still.len(), places.len()));
+        if !still.is_empty() {
+            let _ = std::process::Command::new("open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders").spawn();
+        }
+        show_denied(&weak, still, true);
+    });
 }
 
 /// Progress from a worker thread to the page.
@@ -424,7 +565,7 @@ fn start_work(app: &AppWindow, kind: i32) {
 }
 
 /// Wires the "Exchange" tab (scan, compare, collect, import – MediaFiles Ferry's flow).
-fn wire_exchange(app: &AppWindow, drives: &Drives) {
+fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Settings>>) {
     let x = app.global::<Exchange>();
     x.set_system_name(shorten(&fscan::computer_name(), TITLE_CHARS).into());
     show_volumes(app, &drives.borrow());
@@ -448,13 +589,24 @@ fn wire_exchange(app: &AppWindow, drives: &Drives) {
             x.set_error("".into());
             let vols: Vec<PathBuf> = drives.borrow().iter().filter(|d| d.1).map(|d| d.0.clone()).collect();
             log::write(&format!("exchange scan: {}", vols.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")));
-            let weak = weak.clone();
+            x.set_scan_eta(-1);
+            x.set_paused(false);
+            let (weak, gate) = (weak.clone(), new_gate(ScanAt::Exchange));
             let progress = weak.clone();
             std::thread::spawn(move || {
-                let result = fscan::scan(&vols, false, Some(&ferry_dir().join("cache")), &mut |p| {
+                check_access(&progress, &vols, &gate);
+                let mut eta = Eta::default();
+                let result = fscan::scan(&vols, false, Some(&ferry_dir().join("cache")), &mut |done, total, p| {
+                    let Some(left) = eta.tick(done, total) else { return };
                     let (p, w) = (p.to_string(), progress.clone());
-                    let _ = slint::invoke_from_event_loop(move || w.upgrade().into_iter().for_each(|a| a.global::<Exchange>().set_progress(shorten(&p, LINE_CHARS - 20).into())));
-                })
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(a) = w.upgrade() {
+                            let x = a.global::<Exchange>();
+                            x.set_progress(shorten(&p, LINE_CHARS - 40).into());
+                            x.set_scan_eta(left);
+                        }
+                    });
+                }, &gate)
                 .and_then(|r| {
                     let _ = fs::create_dir_all(ferry_dir());
                     r.manifest.save(&manifest_path()).map(|_| r.warnings)
@@ -468,6 +620,8 @@ fn wire_exchange(app: &AppWindow, drives: &Drives) {
                     x.set_scanning(false);
                     match result {
                         Ok(warnings) => x.set_warnings(warnings.len() as i32),
+                        // the manifest stays as it was
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => log::write("  scan cancelled"),
                         Err(e) => {
                             log::write(&format!("  scan failed: {e}"));
                             x.set_error(shorten(&e.to_string(), LINE_CHARS * 2).into())
@@ -479,6 +633,9 @@ fn wire_exchange(app: &AppWindow, drives: &Drives) {
             });
         }
     });
+
+    x.on_pause(|on| gate(ScanAt::Exchange).pause(on));
+    x.on_cancel(|| gate(ScanAt::Exchange).cancel());
 
     x.on_rescanned({
         let (weak, drives) = (app.as_weak(), drives.clone());
@@ -541,18 +698,31 @@ fn wire_exchange(app: &AppWindow, drives: &Drives) {
             let mut c = compare.borrow_mut();
             let Some(c) = c.as_mut() else { return };
             c.drives[row as usize].selected = value as usize;
-            c.refresh_collisions();
             show_compare(&weak.unwrap(), c);
         }
     });
 
-    x.on_choice_changed({
-        let (weak, compare) = (app.as_weak(), compare.clone());
-        move |row, value| {
-            let mut c = compare.borrow_mut();
-            let Some(c) = c.as_mut() else { return };
-            c.collisions[row as usize].1 = value;
-            show_compare(&weak.unwrap(), c);
+    let tasks_win: Win<LinesWindow> = Rc::default();
+    x.on_show_tasks({
+        let (weak, settings) = (app.as_weak(), settings.clone());
+        move || {
+            let app = weak.unwrap();
+            let x = app.global::<Exchange>();
+            if tasks_win.borrow().is_none() {
+                *tasks_win.borrow_mut() = LinesWindow::new().ok();
+                if let Some(t) = tasks_win.borrow().as_ref() {
+                    repaint_on_resize!(t);
+                    forward_menu(&t.global::<Shared>(), &weak);
+                    let tw = t.as_weak();
+                    t.on_close(move || { let _ = tw.unwrap().hide(); });
+                }
+            }
+            if let Some(t) = tasks_win.borrow().as_ref() {
+                t.set_heading(app.get_txt_tasks_for().replace("{}", &x.get_remote_name()).into());
+                t.set_lines(x.get_tasks());
+                apply_menus(&t.global::<Shared>(), &settings.borrow());
+                let _ = t.show();
+            }
         }
     });
 
@@ -613,6 +783,40 @@ fn wire_exchange(app: &AppWindow, drives: &Drives) {
         }
     });
 
+    x.on_delivery_split_changed({
+        let (weak, incoming) = (app.as_weak(), incoming.clone());
+        move |row, on| {
+            let mut i = incoming.borrow_mut();
+            let Some(i) = i.as_mut() else { return };
+            i.renders[row as usize] = on.then_some(0);
+            show_incoming(&weak.unwrap(), i);
+        }
+    });
+
+    x.on_delivery_render_changed({
+        let (weak, incoming) = (app.as_weak(), incoming.clone());
+        move |row, value| {
+            let mut i = incoming.borrow_mut();
+            let Some(i) = i.as_mut() else { return };
+            i.renders[row as usize] = Some(value as usize);
+            show_incoming(&weak.unwrap(), i);
+        }
+    });
+
+    x.on_delivery_folder_changed({
+        let (weak, incoming) = (app.as_weak(), incoming.clone());
+        move |row, value| {
+            let mut i = incoming.borrow_mut();
+            let Some(i) = i.as_mut() else { return };
+            for (n, f) in i.folders.iter_mut().enumerate() {
+                if row < 0 || n == row as usize {
+                    f.1 = value == 1;
+                }
+            }
+            show_incoming(&weak.unwrap(), i);
+        }
+    });
+
     x.on_start_import({
         let (weak, incoming) = (app.as_weak(), incoming.clone());
         move || {
@@ -626,7 +830,7 @@ fn wire_exchange(app: &AppWindow, drives: &Drives) {
             let mut m = Mappings::load(&ferry_dir());
             i.remember(&mut m);
             m.save(&ferry_dir());
-            let (dest, map, from, me) = (i.dir.clone(), i.map(), i.delivery.from.clone(), i.delivery.to.clone());
+            let (dest, targets, from, me, lang) = (i.dir.clone(), i.targets(), i.delivery.from.clone(), i.delivery.to.clone(), app.get_language().to_string());
             log::write(&format!("import {}", dest.display()));
             start_work(&app, 1);
             let (weak, mut progress) = (weak.clone(), progress_to(&weak));
@@ -643,7 +847,7 @@ fn wire_exchange(app: &AppWindow, drives: &Drives) {
                 }
                 let w = weak.clone();
                 let _ = slint::invoke_from_event_loop(move || w.upgrade().into_iter().for_each(|a| { a.global::<Exchange>().set_work_kind(2); a.global::<Exchange>().set_work_value(0.0); }));
-                let result = fcollect::import(&dest, &map, &mut progress);
+                let result = fcollect::import(&dest, &targets, &lang, &mut progress);
                 log::write(&format!("  import: {:?}", result.as_ref().map(|r| (r.problems.len(), r.tasks.len()))));
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(app) = weak.upgrade() else { return };
@@ -1126,20 +1330,29 @@ fn start_check(app: &AppWindow, roots: Vec<PathBuf>, last: Last) {
     app.set_error("".into());
     app.set_work_value(0.0);
     app.set_work_text("".into());
+    app.set_work_eta(-1);
     app.set_page(Page::Working);
-    let weak = app.as_weak();
+    let (weak, gate) = (app.as_weak(), work_gate(app));
     log::write(&format!("check {}", roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ")));
     std::thread::spawn(move || {
-        let progress = weak.clone();
+        check_access(&weak, &roots, &gate);
+        let (progress, mut eta) = (weak.clone(), Eta::default());
         let reports = check(&roots, &mut |i, n, place| {
+            let Some(left) = eta.tick(i as u64, n as u64) else { return };
             let (place, w) = (place.to_string(), progress.clone());
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(a) = w.upgrade() {
                     a.set_work_text(place.into());
                     a.set_work_value(i as f32 / n.max(1) as f32);
+                    a.set_work_eta(left);
                 }
             });
-        });
+        }, &gate);
+        if gate.is_cancelled() {
+            log::write("  check cancelled");
+            let _ = slint::invoke_from_event_loop(move || weak.upgrade().into_iter().for_each(|a| a.invoke_back()));
+            return;
+        }
         let bad: Vec<&FolderReport> = reports.iter().filter(|r| !r.findings.is_empty()).collect();
         log::write(&format!("checked {} folders, {} with differences", reports.len(), bad.len()));
         for r in bad {
@@ -1155,21 +1368,12 @@ fn start_check(app: &AppWindow, roots: Vec<PathBuf>, last: Last) {
             show_candidates(&app, &candidates);
             app.set_checked_folders(reports.len() as i32);
             app.set_bad_folders(reports.iter().filter(|r| !r.findings.is_empty()).count() as i32);
+            app.set_work_can_pause(false);
             app.set_rows(ModelRc::new(VecModel::from(rows(&reports, &lang, &app.get_txt_more()))));
             *last.lock().unwrap() = Checked { reports, candidates };
             app.set_page(Page::Result);
         });
     });
-}
-
-/// A second window that changes its height does not always repaint the new area (Slint 1.18 on macOS: the frame
-/// is drawn before the resize is done and nothing asks again). Ask a few times while the resize settles.
-/// Every window grows with its content: redraw after each size change, or the new area stays unpainted.
-macro_rules! repaint_on_resize {
-    ($w:expr) => {{
-        let weak = $w.as_weak();
-        $w.global::<Shared>().on_resized(move || weak.upgrade().iter().for_each(repaint_soon));
-    }};
 }
 
 // after repaint_on_resize!: macros are visible from their definition on
@@ -1203,6 +1407,79 @@ struct ProjectsState {
     /// the media window (Projects › Show media…) and what it shows: 0 missing media, 1 AMA clips
     media: Win<MediaWindow>,
     media_kind: i32,
+    /// filter of the missing media window (see `MediaWindow.filter`)
+    filter: i32,
+    /// folders switched off in the media window's folder tree: their bins are left out of every view
+    hidden: HashSet<FolderKey>,
+    /// folders opened in that tree (all closed after a scan)
+    folders_open: HashSet<FolderKey>,
+}
+
+/// A folder of a scanned project: (project, folders from the project down; empty = the project itself).
+type FolderKey = (String, Vec<String>);
+
+/// The folders a bin lies in ("A/B/Bin.avb" → ["A", "B"]).
+fn bin_folder(bin: &str) -> Vec<String> {
+    let mut c: Vec<String> = bin.split('/').map(str::to_string).collect();
+    c.pop();
+    c
+}
+
+/// Shown unless the bin's project or one of its folders is switched off.
+fn bin_visible(hidden: &HashSet<FolderKey>, (project, bin): &(String, String)) -> bool {
+    let dir = bin_folder(bin);
+    (0..=dir.len()).all(|n| !hidden.contains(&(project.clone(), dir[..n].to_vec())))
+}
+
+/// Folder tree of the bins with missing files (projects first, then their folders in path order), each with the
+/// number of different files below it; the rows of closed folders are left out, `index` counts over all keys,
+/// which come in the same order.
+fn folder_rows(w: &AppWindow, by_bin: &BTreeMap<(String, String), Vec<MissingGroup>>, hidden: &HashSet<FolderKey>, open: &HashSet<FolderKey>) -> (Vec<BinFolderRow>, Vec<FolderKey>) {
+    let mut below: BTreeMap<FolderKey, HashSet<mediafiles_check::avb::MobId>> = BTreeMap::new();
+    for ((project, bin), groups) in by_bin {
+        let dir = bin_folder(bin);
+        for n in 0..=dir.len() {
+            below.entry((project.clone(), dir[..n].to_vec())).or_default().extend(groups.iter().flat_map(|g| g.ids.iter().copied()));
+        }
+    }
+    let files = |n: usize| if n == 1 { w.get_txt_one_file() } else { w.get_txt_files_n().replace("{}", &n.to_string()).into() };
+    let keys: Vec<FolderKey> = below.keys().cloned().collect();
+    let rows = shown_folders(&keys, open)
+        .into_iter()
+        .map(|(i, branch)| {
+            let (project, dir) = &keys[i];
+            BinFolderRow {
+                level: dir.len() as i32,
+                name: dir.last().unwrap_or(project).clone().into(),
+                note: files(below[&keys[i]].len()),
+                checked: !hidden.contains(&keys[i]),
+                // switched off further up: its own tick stays, the bins are hidden anyway
+                dim: (0..dir.len()).any(|n| hidden.contains(&(project.clone(), dir[..n].to_vec()))),
+                branch,
+                open: open.contains(&keys[i]),
+                index: i as i32,
+            }
+        })
+        .collect();
+    (rows, keys)
+}
+
+/// Of the sorted folder keys: (index, has subfolders) of those whose parents are all open.
+fn shown_folders(keys: &[FolderKey], open: &HashSet<FolderKey>) -> Vec<(usize, bool)> {
+    let is_child = |parent: &FolderKey, k: &FolderKey| k.0 == parent.0 && k.1.len() > parent.1.len() && k.1.starts_with(&parent.1);
+    keys.iter()
+        .enumerate()
+        .filter(|(_, (project, dir))| (0..dir.len()).all(|n| open.contains(&(project.clone(), dir[..n].to_vec()))))
+        .map(|(i, k)| (i, keys.get(i + 1).is_some_and(|next| is_child(k, next))))
+        .collect()
+}
+
+/// Text into the Mac clipboard (pbcopy ships with macOS).
+fn copy_to_clipboard(text: &str) -> bool {
+    use std::io::Write;
+    let Ok(mut child) = std::process::Command::new("/usr/bin/pbcopy").stdin(std::process::Stdio::piped()).spawn() else { return false };
+    let wrote = child.stdin.take().is_some_and(|mut i| i.write_all(text.as_bytes()).is_ok());
+    child.wait().is_ok_and(|s| s.success()) && wrote
 }
 
 fn projects_folder_file() -> Option<PathBuf> {
@@ -1223,49 +1500,91 @@ fn show_projects(w: &AppWindow, st: &ProjectsState) {
     p.set_projects(ModelRc::new(VecModel::from(rows)));
 }
 
-/// The lists of missing media files and of AMA clips (an open file shows where it is used in the bin).
+/// The lists of missing media files and of AMA clips (an open file shows where it is used in the bin). The media
+/// window leaves out the bins of folders switched off in its folder tree – in every view and in its counts.
 fn show_rows(w: &AppWindow, r: &ScanResult, st: &ProjectsState) {
     let p = w.global::<Projects>();
-    p.set_rows(ModelRc::new(VecModel::from(project_rows(w, &r.by_bin, &st.open))));
-    p.set_ama_rows(ModelRc::new(VecModel::from(project_rows(w, &r.ama_by_bin, &st.ama_open))));
+    p.set_has_rows(!r.by_bin.is_empty());
+    p.set_has_ama_rows(!r.ama_by_bin.is_empty());
     if let Some(m) = st.media.borrow().as_ref() {
         let ama = st.media_kind == 1;
+        let by_bin = if ama { &r.ama_by_bin } else { &r.by_bin };
+        let shown = |k: &(String, String)| bin_visible(&st.hidden, k);
         m.set_kind(st.media_kind);
-        m.set_count(if ama { p.get_ama() } else { p.get_missing() });
-        m.set_rows(if ama { p.get_ama_rows() } else { p.get_rows() });
+        m.set_folders(ModelRc::new(VecModel::from(folder_rows(w, by_bin, &st.hidden, &st.folders_open).0)));
+        m.set_folders_off(!st.hidden.is_empty());
+        // different files in the shown bins: (to relink, the rest)
+        let (mut relink, mut rest) = (HashSet::new(), HashSet::new());
+        for g in by_bin.iter().filter(|(k, _)| shown(k)).flat_map(|(_, gs)| gs) {
+            (if g.relink { &mut relink } else { &mut rest }).extend(g.ids.iter().copied());
+        }
+        let (missing, relink) = if st.hidden.is_empty() { (r.missing.len() as i32, r.relink as i32) } else { (rest.len() as i32, relink.len() as i32) };
+        m.set_count(match (ama, st.hidden.is_empty()) {
+            (true, true) => p.get_ama(),
+            (true, false) => rest.len() as i32,
+            (false, _) => missing,
+        });
+        m.set_filter_counts(ModelRc::new(VecModel::from(vec![missing + relink, relink, missing, missing])));
+        m.set_filter(st.filter);
+        let rows = match (ama, st.filter) {
+            (true, _) => media_rows(w, r, by_bin, &st.ama_open, 0, &shown),
+            (false, 3) => {
+                let mut list: Vec<&projects::Missing> = r.missing.iter().filter(|m| st.hidden.is_empty() || rest.contains(&m.id)).collect();
+                list.sort_by(|a, b| a.name.cmp(&b.name));
+                list.iter().map(|m| file_row(r, m.name.clone(), &m.id, SharedString::new(), false, false, -1)).collect()
+            }
+            (false, f) => media_rows(w, r, by_bin, &st.open, f, &shown),
+        };
+        m.set_rows(ModelRc::new(VecModel::from(rows)));
     }
 }
 
-/// Capped at whole bins (the saved list has all); group indexes count over all bins, so they stay stable.
-fn project_rows(w: &AppWindow, by_bin: &BTreeMap<(String, String), Vec<MissingGroup>>, open: &HashSet<usize>) -> Vec<MissingRow> {
-    const MAX_ROWS: usize = 1000;
+/// A media file in the media window: clip name, its MXF file name (if a database still lists it) and its source.
+fn file_row(r: &ScanResult, clip: String, id: &mediafiles_check::avb::MobId, note: SharedString, open: bool, first: bool, index: i32) -> MediaFileRow {
+    let name = |m: &HashMap<_, String>| m.get(id).cloned().unwrap_or_default().into();
+    MediaFileRow { level: 1, clip: clip.into(), mxf: name(&r.mxf_names), original: name(&r.originals), note, open, first, index }
+}
+
+/// The media window's list: per bin its missing files, one row each (the group's first row opens its uses).
+/// Capped at whole bins; group indexes count over all bins, so they stay stable. `filter`: 0 all groups, 1 only
+/// those to relink, 2 only the really missing ones; `shown_bin` leaves out whole bins.
+fn media_rows(w: &AppWindow, r: &ScanResult, by_bin: &BTreeMap<(String, String), Vec<MissingGroup>>, open: &HashSet<usize>, filter: i32, shown_bin: &dyn Fn(&(String, String)) -> bool) -> Vec<MediaFileRow> {
+    const MAX_ROWS: usize = 3000;
     let files = |n: usize| if n == 1 { w.get_txt_one_file() } else { w.get_txt_files_n().replace("{}", &n.to_string()).into() };
-    let row = |level, text: String, note: SharedString, open, index| MissingRow { level, text: text.into(), note, open, index };
+    let other = |level, clip: SharedString, note: SharedString| MediaFileRow { level, clip, note, index: -1, ..Default::default() };
+    let shown = |g: &MissingGroup| match filter {
+        1 => g.relink,
+        2 => !g.relink,
+        _ => true,
+    };
     let mut rows = vec![];
     let mut index = 0;
     for ((project, bin), groups) in by_bin {
         if rows.len() >= MAX_ROWS {
-            rows.push(row(2, w.get_txt_more_rows().into(), "".into(), false, -1));
+            rows.push(other(2, w.get_txt_more_rows(), "".into()));
             break;
         }
-        rows.push(row(0, format!("{project} / {bin}"), files(groups.iter().map(|g| g.files).sum()), false, -1));
+        if !shown_bin(&(project.clone(), bin.clone())) || !groups.iter().any(shown) {
+            index += groups.len();
+            continue;
+        }
+        rows.push(other(0, format!("{project} / {bin}").into(), files(groups.iter().filter(|g| shown(g)).map(|g| g.files).sum())));
         for g in groups {
-            let is_open = open.contains(&index);
-            let count = if g.files > 1 { files(g.files).to_string() } else { String::new() };
-            let note = match (count.is_empty(), g.relink) {
-                (_, false) => count,
-                (true, true) => w.get_txt_relink().to_string(),
-                (false, true) => format!("{count} · {}", w.get_txt_relink()),
-            };
-            rows.push(row(1, g.name.clone(), note.into(), is_open, index as i32));
-            if is_open {
-                for (clip, kind) in &g.uses {
-                    let kind = match kind {
-                        ClipKind::Master => "".into(),
-                        ClipKind::Subclip => w.get_txt_subclip(),
-                        ClipKind::Sequence => w.get_txt_sequence(),
-                    };
-                    rows.push(row(2, clip.clone(), kind, false, -1));
+            if shown(g) {
+                let is_open = open.contains(&index);
+                let note: SharedString = if g.relink { w.get_txt_relink() } else { "".into() };
+                for (j, id) in g.ids.iter().enumerate() {
+                    rows.push(file_row(r, g.name.clone(), id, note.clone(), is_open, j == 0, index as i32));
+                }
+                if is_open {
+                    for (clip, kind) in &g.uses {
+                        let kind = match kind {
+                            ClipKind::Master => "".into(),
+                            ClipKind::Subclip => w.get_txt_subclip(),
+                            ClipKind::Sequence => w.get_txt_sequence(),
+                        };
+                        rows.push(other(2, clip.into(), kind));
+                    }
                 }
             }
             index += 1;
@@ -1276,6 +1595,8 @@ fn project_rows(w: &AppWindow, by_bin: &BTreeMap<(String, String), Vec<MissingGr
 
 fn start_project_scan(w: &AppWindow, st: &mut ProjectsState) {
     st.open.clear();
+    st.hidden.clear();
+    st.folders_open.clear();
     st.ama_open.clear();
     // its list belongs to the previous result
     if let Some(m) = st.media.borrow().as_ref() {
@@ -1288,27 +1609,37 @@ fn start_project_scan(w: &AppWindow, st: &mut ProjectsState) {
     p.set_work_value(0.0);
     p.set_work_text(w.get_txt_reading_drives());
     p.set_step(1);
-    let (weak, result) = (w.as_weak(), st.result.clone());
+    p.set_paused(false);
+    let (weak, result, gate) = (w.as_weak(), st.result.clone(), new_gate(ScanAt::Projects));
     std::thread::spawn(move || {
         let drives = find_volumes();
-        let a = projects::available_media(&drives, Duration::from_secs(30));
+        check_access(&weak, &[drives.clone(), chosen.clone()].concat(), &gate);
+        let a = projects::available_media(&drives, Duration::from_secs(30), &gate);
         log::write(&format!("  {} media files on {} drives, {} in no database identified by their MXF header, {} unidentified", a.ids.len(), drives.len(), a.from_header, a.unknown));
         for d in &a.skipped {
             log::write(&format!("  drive does not answer, skipped: {}", d.display()));
         }
-        let (available, unknown) = (a.ids, a.unknown);
+        let (available, unknown, gone) = (a.ids, a.unknown, a.gone);
         let skipped: Vec<String> = a.skipped.iter().map(|d| volume_name(d)).collect();
-        let progress = weak.clone();
-        let r = projects::scan(&chosen, &available, &mut |i, n, bin| {
+        let (progress, mut eta) = (weak.clone(), Eta::default());
+        let mut r = projects::scan(&chosen, &available, &mut |i, n, bin| {
+            let Some(left) = eta.tick(i as u64, n as u64) else { return };
             let (bin, w) = (bin.to_string(), progress.clone());
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = w.upgrade() {
                     let p = w.global::<Projects>();
                     p.set_work_text(bin.into());
                     p.set_work_value(i as f32 / n.max(1) as f32);
+                    p.set_work_eta(left);
                 }
             });
-        });
+        }, &gate);
+        if gate.is_cancelled() {
+            log::write("  project scan cancelled");
+            let _ = slint::invoke_from_event_loop(move || weak.upgrade().into_iter().for_each(|w| w.global::<Projects>().set_step(0)));
+            return;
+        }
+        r.mxf_names = gone;
         log::write(&format!("  {} bins ({} unreadable), {} clips, {} media files missing, {} to relink, {} AMA left out, {} without media left out, {} renders", r.bins, r.failed.len(), r.clips, r.missing.len(), r.relink, r.ama, r.no_media, r.renders));
         for (p, e) in &r.failed {
             log::write(&format!("  unreadable bin {}: {e}", p.display()));
@@ -1339,6 +1670,8 @@ fn start_project_scan(w: &AppWindow, st: &mut ProjectsState) {
 /// Wires the "Projects" tab; the saved projects folder is loaded at once.
 fn wire_projects(app: &AppWindow, st: &Rc<RefCell<ProjectsState>>, settings: &Rc<RefCell<Settings>>) {
     let p = app.global::<Projects>();
+    p.on_pause(|on| gate(ScanAt::Projects).pause(on));
+    p.on_cancel(|| gate(ScanAt::Projects).cancel());
     let saved = projects_folder_file().and_then(|f| fs::read_to_string(f).ok()).map(|s| PathBuf::from(s.trim()));
     if let Some(folder) = saved.filter(|f| f.is_dir()) {
         load_projects(app, &mut st.borrow_mut(), &folder);
@@ -1401,8 +1734,65 @@ fn wire_projects(app: &AppWindow, st: &Rc<RefCell<ProjectsState>>, settings: &Rc
                         let p = a.global::<Projects>();
                         if st2.borrow().media_kind == 1 { p.invoke_toggle_ama(i) } else { p.invoke_toggle_group(i) }
                     });
-                    let ww3 = ww.clone();
-                    m.on_save_list(move || ww3.unwrap().global::<Projects>().invoke_save_list());
+                    let (ww3, st3) = (ww.clone(), st.clone());
+                    m.on_filter_changed(move |f| {
+                        st3.borrow_mut().filter = f;
+                        let s = st3.borrow();
+                        if let Some(r) = s.result.lock().unwrap().as_ref() {
+                            show_rows(&ww3.unwrap(), r, &s);
+                        }
+                    });
+                    let (ww4, st4) = (ww.clone(), st.clone());
+                    m.on_toggle_folder(move |i| {
+                        let w = ww4.unwrap();
+                        let mut s = st4.borrow_mut();
+                        let result = s.result.clone();
+                        let r = result.lock().unwrap();
+                        let Some(r) = r.as_ref() else { return };
+                        let by_bin = if s.media_kind == 1 { &r.ama_by_bin } else { &r.by_bin };
+                        let Some(key) = folder_rows(&w, by_bin, &s.hidden, &s.folders_open).1.into_iter().nth(i as usize) else { return };
+                        if !s.hidden.remove(&key) {
+                            s.hidden.insert(key);
+                        }
+                        show_rows(&w, r, &s);
+                    });
+                    let (ww5, st5) = (ww.clone(), st.clone());
+                    m.on_select_folders(move |mode| {
+                        let w = ww5.unwrap();
+                        let mut s = st5.borrow_mut();
+                        let result = s.result.clone();
+                        let r = result.lock().unwrap();
+                        let Some(r) = r.as_ref() else { return };
+                        let by_bin = if s.media_kind == 1 { &r.ama_by_bin } else { &r.by_bin };
+                        let keys = folder_rows(&w, by_bin, &s.hidden, &s.folders_open).1;
+                        // 0 all on, 1 all off, 2 every tick the other way
+                        s.hidden = match mode {
+                            0 => HashSet::new(),
+                            1 => keys.into_iter().collect(),
+                            _ => keys.into_iter().filter(|k| !s.hidden.contains(k)).collect(),
+                        };
+                        show_rows(&w, r, &s);
+                    });
+                    let (ww6, st6) = (ww.clone(), st.clone());
+                    m.on_open_folder(move |i| {
+                        let w = ww6.unwrap();
+                        let mut s = st6.borrow_mut();
+                        let result = s.result.clone();
+                        let r = result.lock().unwrap();
+                        let Some(r) = r.as_ref() else { return };
+                        let by_bin = if s.media_kind == 1 { &r.ama_by_bin } else { &r.by_bin };
+                        let Some(key) = folder_rows(&w, by_bin, &s.hidden, &s.folders_open).1.into_iter().nth(i as usize) else { return };
+                        if !s.folders_open.remove(&key) {
+                            s.folders_open.insert(key);
+                        }
+                        show_rows(&w, r, &s);
+                    });
+                    let mw = m.as_weak();
+                    m.on_copy(move |text| {
+                        if copy_to_clipboard(&text) {
+                            mw.unwrap().set_copied(text);
+                        }
+                    });
                     let mw = m.as_weak();
                     m.on_close(move || { let _ = mw.unwrap().hide(); });
                 }
@@ -1417,21 +1807,6 @@ fn wire_projects(app: &AppWindow, st: &Rc<RefCell<ProjectsState>>, settings: &Rc
             if let Some(m) = win.borrow().as_ref() {
                 apply_menus(&m.global::<Shared>(), &settings.borrow());
                 let _ = m.show();
-            }
-        }
-    });
-    p.on_save_list({
-        let (ww, st) = (app.as_weak(), st.clone());
-        move || {
-            let w = ww.unwrap();
-            let lang = w.global::<Shared>().get_language_index();
-            let lang = LANGUAGES.get(lang as usize).map_or("en", |l| l.0);
-            let name = format!("MediaFiles Check Projects {}.txt", chrono::Local::now().format("%Y-%m-%d"));
-            let Some(target) = rfd::FileDialog::new().set_file_name(name).add_filter("Text", &["txt"]).save_file() else { return };
-            let text = st.borrow().result.lock().unwrap().as_ref().map(|r| projects::list_text(r, lang)).unwrap_or_default();
-            if let Err(e) = fs::write(&target, text) {
-                log::write(&format!("save list {}: {e}", target.display()));
-                w.global::<Projects>().set_error(format!("{}: {e}", target.display()).into());
             }
         }
     });
@@ -2502,6 +2877,16 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    app.global::<Access>().on_ask({
+        let weak = app.as_weak();
+        move || {
+            weak.unwrap().global::<Access>().set_asking(true);
+            ask_access(weak.clone());
+        }
+    });
+    app.on_work_pause(|on| gate(ScanAt::Work).pause(on));
+    app.on_work_cancel(|| gate(ScanAt::Work).cancel());
+
     app.on_back({
         let (weak, drives, renames) = (app.as_weak(), drives.clone(), renames.clone());
         move || {
@@ -2524,20 +2909,26 @@ fn main() -> Result<(), slint::PlatformError> {
             let roots: Vec<PathBuf> = drives.borrow().iter().filter(|d| d.1).map(|d| d.0.clone()).collect();
             app.set_work_value(0.0);
             app.set_work_text("".into());
+            app.set_work_eta(-1);
             app.set_page(Page::Working);
             log::write(&format!("duplicates: looking through {}", roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ")));
             let (tx, rx) = std::sync::mpsc::channel::<duplicates::Found>();
-            let progress = app.as_weak();
+            let (progress, gate) = (app.as_weak(), work_gate(&app));
+            let cancelled = gate.clone();
             std::thread::spawn(move || {
+                check_access(&progress, &roots, &gate);
+                let mut eta = Eta::default();
                 let found = duplicates::find(&roots, &mut |i, n, place| {
+                    let Some(left) = eta.tick(i as u64, n as u64) else { return };
                     let (place, w) = (place.to_string(), progress.clone());
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(a) = w.upgrade() {
                             a.set_work_text(place.into());
                             a.set_work_value(i as f32 / n.max(1) as f32);
+                            a.set_work_eta(left);
                         }
                     });
-                });
+                }, &gate);
                 let _ = tx.send(found);
             });
             let (timer, weak, dups, renames) = (Rc::new(slint::Timer::default()), weak.clone(), dups.clone(), renames.clone());
@@ -2546,6 +2937,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 let Ok(found) = rx.try_recv() else { return };
                 t.stop();
                 let Some(app) = weak.upgrade() else { return };
+                app.set_work_can_pause(false);
+                if cancelled.is_cancelled() {
+                    log::write("duplicates: cancelled");
+                    app.invoke_back();
+                    return;
+                }
                 log::write(&format!("duplicates: {} files, {} with copies, {} unreadable, {} workspaces left out", found.files, found.groups.len(), found.unreadable.len(), found.mirrors.len()));
                 let mut d = dups.borrow_mut();
                 // copies with different sizes are never ticked by themselves
@@ -2763,8 +3160,11 @@ fn main() -> Result<(), slint::PlatformError> {
             app.set_page(Page::Working);
             log::write(&format!("rebalance: looking for groups that do not match {limit} files"));
             let (tx, rx) = std::sync::mpsc::channel::<Vec<Plan>>();
+            let (gate, access) = (work_gate(&app), app.as_weak());
+            let cancelled = gate.clone();
             std::thread::spawn(move || {
-                let _ = tx.send(rebalance::full_folders(&roots, limit, &away, &|mxf, name| is_mc_folder(mxf, name, &computer)));
+                check_access(&access, &roots, &gate);
+                let _ = tx.send(rebalance::full_folders(&roots, limit, &away, &|mxf, name| is_mc_folder(mxf, name, &computer), &gate));
             });
             let (timer, weak, rebal) = (Rc::new(slint::Timer::default()), weak.clone(), rebal.clone());
             let t = timer.clone();
@@ -2772,6 +3172,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 let Ok(plans) = rx.try_recv() else { return };
                 t.stop();
                 let Some(app) = weak.upgrade() else { return };
+                app.set_work_can_pause(false);
+                if cancelled.is_cancelled() {
+                    log::write("rebalance: search cancelled");
+                    app.invoke_back();
+                    return;
+                }
                 log::write(&format!("rebalance: {} groups to lay out", plans.len()));
                 let mut r = rebal.borrow_mut();
                 r.plans = plans.into_iter().map(|p| (p, true)).collect();
@@ -2986,7 +3392,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    wire_exchange(&app, &drives);
+    wire_exchange(&app, &drives, &settings);
     let welcome_seen = || app_dir().map(|d| d.join("welcome-seen"));
     app.set_show_welcome(welcome_seen().is_some_and(|p| !p.exists()));
     app.on_welcome_done({
@@ -3131,6 +3537,45 @@ fn main() -> Result<(), slint::PlatformError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bins_of_switched_off_folders_are_hidden() {
+        use super::{FolderKey, HashSet, bin_folder, bin_visible};
+        let hidden: HashSet<FolderKey> = [("P".to_string(), vec!["Old".to_string()])].into();
+        let k = |b: &str| ("P".to_string(), b.to_string());
+        assert_eq!(bin_folder("Old/Cuts/Bin.avb"), ["Old", "Cuts"]);
+        assert!(!bin_visible(&hidden, &k("Old/Cuts/Bin.avb")) && !bin_visible(&hidden, &k("Old/Bin.avb")));
+        assert!(bin_visible(&hidden, &k("Bin.avb")) && bin_visible(&hidden, &k("Older/Bin.avb")));
+        assert!(!bin_visible(&[("P".to_string(), vec![])].into(), &k("Bin.avb")));
+    }
+
+    #[test]
+    fn closed_folders_hide_their_subfolders() {
+        use super::{FolderKey, HashSet, shown_folders};
+        let k = |p: &str, d: &[&str]| -> FolderKey { (p.to_string(), d.iter().map(|s| s.to_string()).collect()) };
+        let keys = [k("P", &[]), k("P", &["A"]), k("P", &["A", "B"]), k("P", &["C"]), k("Q", &[])];
+        assert_eq!(shown_folders(&keys, &HashSet::new()), [(0, true), (4, false)]);
+        assert_eq!(shown_folders(&keys, &[k("P", &[])].into()), [(0, true), (1, true), (3, false), (4, false)]);
+        // a child stays hidden while a parent further up is closed
+        assert_eq!(shown_folders(&keys, &[k("P", &["A"])].into()), [(0, true), (4, false)]);
+        assert_eq!(shown_folders(&keys, &[k("P", &[]), k("P", &["A"])].into()).len(), 5);
+    }
+
+    #[test]
+    fn eta_from_recent_rate() {
+        use super::{Duration, Eta};
+        let (mut e, t) = (Eta::default(), std::time::Instant::now());
+        let at = |secs| t + Duration::from_secs(secs);
+        assert_eq!(e.at(at(0), 400, 1000), 0); // 400 already done (cache)
+        assert_eq!(e.at(at(4), 440, 1000), 0); // too early
+        assert_eq!(e.at(at(10), 500, 1000), 50); // 10 a second, 500 left
+        // after a slower stretch only the last 20 s count: 1 a second
+        for i in 11..=40 {
+            e.at(at(i), 500 + (i - 10), 1000);
+        }
+        assert_eq!(e.at(at(41), 531, 1000), 469);
+        assert_eq!(e.at(at(42), 1000, 1000), -1);
+    }
+
     #[test]
     fn long_names_are_shortened_in_the_middle() {
         assert_eq!(super::shorten("Avid8.1", 10), "Avid8.1");
