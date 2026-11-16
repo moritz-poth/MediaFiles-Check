@@ -110,13 +110,13 @@ As long as folders are renamed, nothing else renames folders or rewrites databas
 
 We recommend no more than 5000 files per MXF folder. The limit (Settings → Rebalancing) counts every file of a folder, the two database files included.
 
-A folder and its rebalanced folders (`<name>-rebalanced-1`, `-2` …) belong together. Rebalancing lays out the whole group: the oldest media files go into `-rebalanced-1`, the next into `-2` …, the youngest stay in the main folder. The video and audio files of a clip stay together, so a folder can end a few files below the limit. Maintain MXFs › **Rebalancing** → **Find full folders…** lists every group on the switched-on drives that does not match the limit.
+A folder and its rebalanced folders (`<name>-rebalanced-1`, `-2` …) belong together. Rebalancing lays out the whole group: the oldest media files go into `-rebalanced-1`, the next into `-2` …, the youngest stay in the main folder. The video and audio files of a clip stay together, so a folder can end a few files below the limit. Maintain MXFs › **Rebalancing** → **Find full MXF folders…** lists every group on the switched-on drives that does not match the limit.
 
 1. Quit Media Composer – on network drives on every workstation – and choose the groups.
 2. Click **Rebalance**. For a folder Media Composer creates itself (`1`, `<computer name>.1`) we recommend giving it a name of its own first. Nothing is copied or deleted; a rebalanced folder left without media files goes into `MediaFiles Check Database Backups` as a whole.
 3. Afterwards the databases of the changed folders have to be rewritten. **Start** puts their database files into `MediaFiles Check Database Backups` on the same drive and renames the folders Media Composer does not update itself; continue under Check DBs › New databases. **Cancel** leaves the databases as they are – it stays in Tasks and History.
 
-Every change of the limit asks first; the next **Find full folders…** lays out every group anew.
+Every change of the limit asks first; the next **Find full MXF folders…** lays out every group anew.
 
 ## Duplicates
 
@@ -128,9 +128,9 @@ The green dot marks the copy that stays (the one its folder's database knows, ot
 
 ## History
 
-Maintain MXFs › **Rewrite DBs** lists every run whose databases are not rewritten yet. **Start** puts the databases of all their changed folders aside, so Media Composer writes new ones, and renames the folders it does not update itself (rename them back under Check DBs › New databases).
+Maintain MXFs › **History** lists every rebalancing and duplicates run, newest first. A run whose databases are not rewritten yet says so and has **Rewrite databases**: it puts the databases of its changed folders aside, so Media Composer writes new ones, and renames the folders it does not update itself (rename them back under Check DBs › New databases).
 
-Maintain MXFs › **History** lists every rebalancing and duplicates run, newest first; a run whose databases are not rewritten yet says so. **Undo** moves everything back (never over an existing file) – rename renamed folders back first. **×** removes one entry, **Delete all…** all of them (asks first); nothing on the drives changes, but the run can then no longer be undone. While a run or an undo is going, its progress shows the folder and file it is working on.
+**Undo** moves everything back (never over an existing file) – rename renamed folders back first. **×** removes one entry, **Delete all…** all of them (asks first); nothing on the drives changes, but the run can then no longer be undone. While a run or an undo is going, its progress shows the folder and file it is working on.
 
 ## Project links
 

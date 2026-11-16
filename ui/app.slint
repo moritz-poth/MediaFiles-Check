@@ -328,8 +328,7 @@ component RunItem inherits CardRow {
     in property <bool> mc-running;
     // umbenannte Ordner offen: „Datenbanken neu schreiben“ gesperrt
     in property <bool> blocked;
-    // Verlauf von MXFs pflegen: neu schreiben im eigenen Schritt, dafür × zum Entfernen (user 2026-11-16)
-    in property <bool> can-rewrite: true;
+    // Verlauf von MXFs pflegen: × zum Entfernen (user 2026-11-16)
     in property <bool> removable;
     callback db();
     callback undo();
@@ -377,7 +376,7 @@ component RunItem inherits CardRow {
         alignment: center;
         HorizontalLayout {
             spacing: 8px;
-            if !root.db-done && root.can-rewrite: CheckButton {
+            if !root.db-done: CheckButton {
                 text: @tr("Rewrite databases");
                 small: true;
                 enabled: !root.mc-running && !root.blocked;
@@ -1698,7 +1697,6 @@ export global Inventory {
     in-out property <int> scan-view;
     in property <string> current;
     // Historie: Rückfrage „Alle löschen“ (-1 keine, 1 offen); einen Scan entfernen (-1 = alle)
-    in-out property <int> delete-ask: -1;
     callback delete-scan(int);
     // „Laden…“: Rust prüft Volumes und Projekte; fehlt etwas, steht es in load-missing (sonst leer)
     callback ask-load(int);
@@ -2046,15 +2044,13 @@ component ScanPane inherits VerticalLayout {
             CheckButton {
                 text: @tr("Delete all…");
                 enabled: Inventory.scans.length > 0;
-                clicked => { Inventory.delete-ask = 1; Inventory.load-ask = -1; }
+                clicked => { Inventory.load-ask = -1; Inventory.delete-scan(-1); }
             }
         }
-        // Rückfrage immer an derselben Stelle, Höhe fest – die Liste darunter springt nicht
+        // Hinweiszeile, Höhe fest; „Alle löschen…“ fragt in einem macOS-Dialog (user 2026-11-16)
         Rectangle {
             height: 40px;
-            border-radius: 6px;
-            background: Inventory.delete-ask >= 0 ? Theme.selection : transparent;
-            if Inventory.delete-ask < 0: Text {
+            Text {
                 x: 0;
                 width: parent.width;
                 text: Inventory.scans.length == 0 ? @tr("No scans yet.") : @tr("The newest 20 scans are kept.");
@@ -2062,27 +2058,6 @@ component ScanPane inherits VerticalLayout {
                 overflow: elide;
                 font-size: 12px;
                 color: Theme.muted;
-            }
-            if Inventory.delete-ask >= 0: HorizontalLayout {
-                padding-left: 10px;
-                padding-right: 6px;
-                spacing: 8px;
-                Text {
-                    horizontal-stretch: 1;
-                    text: @tr("Delete all {n} scan?" | "Delete all {n} scans?" % Inventory.scans.length);
-                    vertical-alignment: center;
-                    overflow: elide;
-                    font-size: 12px;
-                    color: Theme.text;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    CheckButton { text: @tr("Cancel"); small: true; clicked => { Inventory.delete-ask = -1; } }
-                }
-                VerticalLayout {
-                    alignment: center;
-                    CheckButton { text: @tr("Delete"); small: true; primary: true; clicked => { Inventory.delete-scan(-1); } }
-                }
             }
         }
         if Inventory.scans.length > 0: Card {
@@ -2136,7 +2111,7 @@ component ScanPane inherits VerticalLayout {
                             CheckButton {
                                 text: @tr("Load…");
                                 small: true;
-                                clicked => { Inventory.delete-ask = -1; Inventory.ask-load(i); }
+                                clicked => { Inventory.ask-load(i); }
                             }
                         }
                     }
@@ -2598,7 +2573,7 @@ ScrollBox {
 
 
 export enum Page { home, working, result, rename, question, notice, rebalance, rebalanced, runs, askname, dups, dupsdone,
-    maintain, rebalstart, dupsstart, exchange, projects, media, scan, rewrite }
+    maintain, rebalstart, dupsstart, exchange, projects, media, scan }
 
 // Schritt in der Seitenleiste: Name und darunter klein sein Stand (Variante C: keine Ziffern, kein Häkchen)
 export struct SideStep {
@@ -2718,8 +2693,7 @@ export component AppWindow inherits CheckWindow {
         // DBs prüfen: 0 Datenbanken (Ergebnis, Umbenennen), 1 Neue Datenbanken; MXFs pflegen: 0 Rebalancing, 1 Duplikate, 2 Verlauf
         if p == Page.maintain || p == Page.question { return 1; }
         if p == Page.dupsstart || p == Page.dups || p == Page.dupsdone { return 1; }
-        if p == Page.rewrite { return 2; }
-        if p == Page.runs { return 3; }
+        if p == Page.runs { return 2; }
         if p == Page.working || p == Page.notice { return -1; }
         return 0;
     }
@@ -2730,7 +2704,7 @@ export component AppWindow inherits CheckWindow {
         if t == 2 { return Page.projects; }
         if t == 5 { return Page.media; }
         if t == 6 { return Page.scan; }
-        return s == 1 ? Page.dupsstart : s == 2 ? Page.rewrite : s == 3 ? Page.runs : Page.rebalstart;
+        return s == 1 ? Page.dupsstart : s == 2 ? Page.runs : Page.rebalstart;
     }
     // Rust: „zurück zum Anfang“ = Anfang des Schritts, in dem man gerade ist
     public function home() {
@@ -2776,7 +2750,6 @@ export component AppWindow inherits CheckWindow {
         ] : root.tab == 3 ? [
             { name: @tr("Rebalancing"), status: root.rebalance-pending > 0 ? @tr("databases pending") : "", enabled: true },
             { name: @tr("Duplicates"), status: root.dup-pending > 0 ? @tr("databases pending") : "", enabled: true },
-            { name: @tr("Rewrite DBs"), status: root.runs-open == 0 ? "" : @tr("{n} run waiting" | "{n} runs waiting" % root.runs-open), enabled: true },
             { name: @tr("History"), status: root.history.length == 0 ? "" : @tr("{n} run" | "{n} runs" % root.history.length), enabled: true },
         ] : root.tab == 6 ? [
             { name: @tr("Scan"), status: Inventory.step == 1 ? @tr("scanning…") : Inventory.step == 2 ? @tr("{n} file" | "{n} files" % Inventory.files) : @tr("{} of {} volumes on", Inventory.drive-count, Inventory.drives.length), enabled: true },
@@ -2889,10 +2862,7 @@ export component AppWindow inherits CheckWindow {
     callback dup-db(int);
     // Verlauf von MXFs pflegen: beide Journale zusammen, neueste zuerst; entfernen (kind, index; -1 alle)
     in property <[RunRow]> history;
-    in-out property <bool> history-ask;
     callback forget-run(int, int);
-    // DBs neu schreiben: alle offenen Läufe auf einmal
-    callback rewrite-all();
     callback undo-dup(int);
     // Media-Composer-Ordner vor dem Rebalancing umbenennen: Name bestätigen oder ohne Umbenennen weiter
     callback rename-main(string);
@@ -3029,7 +2999,7 @@ export component AppWindow inherits CheckWindow {
                     selected: i == (root.tab == 2 ? Projects.view : root.tab == 0 ? Exchange.view - 1 : root.tab == 5 ? Inventory.view - 1 : root.tab == 6 ? Inventory.scan-view : root.step);
                     clicked => {
                         if root.tab == 5 { Inventory.view = i + 1; Inventory.task = Inventory.task == 4 ? 4 : -1; }
-                        if root.tab == 6 { Inventory.scan-view = i; Inventory.load-ask = -1; Inventory.delete-ask = -1; }
+                        if root.tab == 6 { Inventory.scan-view = i; Inventory.load-ask = -1; }
                         if root.tab == 2 { Projects.view = i; }
                         if root.tab == 0 { Exchange.view = i + 1; }
                         root.page = root.start-of(root.tab, i);
@@ -3153,7 +3123,7 @@ ScrollBox {
             PageHead {
                 title: @tr("Rebalancing");
                 CheckButton {
-                    text: @tr("Find full folders…");
+                    text: @tr("Find full MXF folders…");
                     primary: true;
                     enabled: root.selected-count > 0 && !root.work-busy;
                     clicked => { root.find-full(); }
@@ -3174,9 +3144,9 @@ ScrollBox {
                     color: Theme.warning;
                 }
                 CheckButton {
-                    text: @tr("Rewrite DBs");
+                    text: @tr("History");
                     small: true;
-                    clicked => { root.page = Page.rewrite; }
+                    clicked => { root.page = Page.runs; }
                 }
             }
         }
@@ -3208,9 +3178,9 @@ ScrollBox {
                     color: Theme.warning;
                 }
                 CheckButton {
-                    text: @tr("Rewrite DBs");
+                    text: @tr("History");
                     small: true;
-                    clicked => { root.page = Page.rewrite; }
+                    clicked => { root.page = Page.runs; }
                 }
             }
         }
@@ -3713,37 +3683,11 @@ ScrollBox {
                 CheckButton {
                     text: @tr("Delete all…");
                     enabled: root.history.length > 0;
-                    clicked => { root.history-ask = true; }
+                    clicked => { root.forget-run(0, -1); }
                 }
             }
-            // Rückfrage an derselben Stelle wie der Hinweis, feste Höhe (wie im Verlauf von Scannen)
-            if !root.history-ask: HistoryNote { empty: root.history.length == 0; mc-running: root.mc-running; }
-            if root.history-ask: Rectangle {
-                height: 40px;
-                border-radius: 6px;
-                background: Theme.selection;
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 6px;
-                    spacing: 8px;
-                    Text {
-                        horizontal-stretch: 1;
-                        text: @tr("Remove all {n} entry from the History? Nothing on the drives changes; they can no longer be undone." | "Remove all {n} entries from the History? Nothing on the drives changes; they can no longer be undone." % root.history.length);
-                        vertical-alignment: center;
-                        overflow: elide;
-                        font-size: 12px;
-                        color: Theme.text;
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        CheckButton { text: @tr("Cancel"); small: true; clicked => { root.history-ask = false; } }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        CheckButton { text: @tr("Delete"); small: true; primary: true; clicked => { root.history-ask = false; root.forget-run(0, -1); } }
-                    }
-                }
-            }
+            // „Alle löschen…“ fragt in einem macOS-Dialog (user 2026-11-16)
+            HistoryNote { empty: root.history.length == 0; mc-running: root.mc-running; }
             if root.history.length > 0: Card {
                 vertical-stretch: 1;
                 min-height: 0px;
@@ -3754,7 +3698,7 @@ ScrollBox {
                         detail: r.detail;
                         db-done: r.db-done;
                         mc-running: root.mc-running;
-                        can-rewrite: false;
+                        db => { if r.kind == 0 { root.rebalance-db(r.index); } else { root.dup-db(r.index); } }
                         removable: true;
                         remove => { root.forget-run(r.kind, r.index); }
                         undo => { if r.kind == 0 { root.undo-rebalance(r.index); } else { root.undo-dup(r.index); } }
@@ -3762,48 +3706,6 @@ ScrollBox {
                 }
             }
             if root.history.length == 0: Rectangle { vertical-stretch: 1; }
-        }
-
-        // ── MXFs pflegen › DBs neu schreiben ──
-        if root.page == Page.rewrite: VerticalLayout {
-            spacing: 14px;
-            height: Metrics.page-height;
-            PageHead {
-                title: @tr("Rewrite databases");
-                CheckButton {
-                    text: @tr("Start");
-                    primary: true;
-                    enabled: root.runs-open > 0 && !root.mc-running && root.renamed.length == 0 && !root.work-busy;
-                    clicked => { root.rewrite-all(); }
-                }
-            }
-            if root.mc-running: Para { text: @tr("Quit Media Composer first."); color: Theme.warning; }
-            if root.renamed.length > 0: RenameBlocked { }
-            Para {
-                text: root.runs-open == 0 ? @tr("No databases are waiting. After rebalancing or setting duplicates aside, the changed folders show here.")
-                    : @tr("Rebalancing and setting duplicates aside changed these folders, so their databases no longer fit. Start puts their msmFMID.pmr and msmMMOB.mdb into “MediaFiles Check Database Backups” on the same drive, so Media Composer writes new ones the next time it starts. Folders Media Composer does not update itself are renamed for it – rename them back afterwards under Check DBs › New databases.");
-            }
-            if root.runs-open > 0: Card {
-                vertical-stretch: 1;
-                min-height: 0px;
-                FillScroll {
-                    for r[i] in root.history: VerticalLayout {
-                        if !r.db-done: CardRow {
-                            first: i == 0;
-                            VerticalLayout {
-                                horizontal-stretch: 1;
-                                padding-top: 8px;
-                                padding-bottom: 8px;
-                                alignment: center;
-                                spacing: 2px;
-                                Text { text: r.text; overflow: elide; font-size: 12px; color: Theme.text; }
-                                Text { text: r.detail; overflow: elide; font-size: 11px; color: Theme.muted; }
-                            }
-                        }
-                    }
-                }
-            }
-            Rectangle { vertical-stretch: 1; }
         }
 
         if root.page == Page.notice: VerticalLayout {
@@ -4194,7 +4096,7 @@ export component SettingsWindow inherits CheckWindow {
                     }
                 }
                 Hint { text: @tr("Counts every file of a folder, the two database files included – a folder keeps at most this many minus 2 media files. Rebalancing moves the oldest media files of a fuller folder into new folders. We recommend no more than 5000 (between 100 and 50000)."); }
-                Hint { text: @tr("New folders get the name of the full folder with “-rebalanced-1”, “-2” … (“Mac Studio.1” becomes “Mac Studio-rebalanced-1”). After a change of the limit, the next “Find full folders…” lays them out anew."); }
+                Hint { text: @tr("New folders get the name of the full folder with “-rebalanced-1”, “-2” … (“Mac Studio.1” becomes “Mac Studio-rebalanced-1”). After a change of the limit, the next “Find full MXF folders…” lays them out anew."); }
             }
 
             if root.tab == 1: VerticalLayout {
@@ -4583,7 +4485,7 @@ export component SettingsWindow inherits CheckWindow {
                 Text { text: @tr("Change the limit to {}?", root.limit-new); font-size: 14px; font-weight: 700; color: Theme.text; }
                 Text {
                     width: 460px - 44px;
-                    text: @tr("The next “Find full folders…” lays out every rebalanced folder on the drives anew for this limit: media files move into more folders or back. With many files that can take a long time, and the databases of every changed folder have to be rewritten.");
+                    text: @tr("The next “Find full MXF folders…” lays out every rebalanced folder on the drives anew for this limit: media files move into more folders or back. With many files that can take a long time, and the databases of every changed folder have to be rewritten.");
                     wrap: word-wrap;
                     font-size: 12px;
                     color: Theme.muted;

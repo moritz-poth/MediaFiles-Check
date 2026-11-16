@@ -68,7 +68,6 @@ fn show_scans(app: &AppWindow) {
         .collect();
     let g = app.global::<Inventory>();
     g.set_load_ask(-1);
-    g.set_delete_ask(-1);
     g.set_scans(ModelRc::new(VecModel::from(rows)));
 }
 
@@ -1152,6 +1151,28 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
         let ww = app.as_weak();
         move |which| {
             let app = ww.unwrap();
+            if which < 0 {
+                let lang = app.get_language().to_string();
+                let n = app.global::<Inventory>().get_scans().row_count();
+                let q = if n == 1 {
+                    pick(&lang, [
+                        "Really delete the scan? This cannot be undone.",
+                        "Wirklich den Scan löschen? Das lässt sich nicht rückgängig machen.",
+                        "Vraiment supprimer l’analyse ? C’est irréversible.",
+                        "¿Borrar de verdad el análisis? No se puede deshacer.",
+                    ]).to_string()
+                } else {
+                    pick(&lang, [
+                        "Really delete all {n} scans? This cannot be undone.",
+                        "Wirklich alle {n} Scans löschen? Das lässt sich nicht rückgängig machen.",
+                        "Vraiment supprimer les {n} analyses ? C’est irréversible.",
+                        "¿Borrar de verdad los {n} análisis? No se puede deshacer.",
+                    ]).replace("{n}", &n.to_string())
+                };
+                if !sure_delete_all(&lang, q) {
+                    return;
+                }
+            }
             // the list shows list_scans in the same order (newest first); -1 = all
             for (i, (path, head)) in inventory::list_scans(&scans_dir()).into_iter().enumerate() {
                 if which < 0 || i == which as usize {

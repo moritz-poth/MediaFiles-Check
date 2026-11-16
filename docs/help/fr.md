@@ -110,13 +110,13 @@ Tant que des dossiers sont renommés, rien d’autre ne renomme de dossiers ni n
 
 Nous recommandons au plus 5000 fichiers par dossier MXF. La limite (Réglages → Rééquilibrage) compte chaque fichier d’un dossier, les deux fichiers de base de données compris.
 
-Un dossier et ses dossiers rééquilibrés (`<nom>-rebalanced-1`, `-2` …) vont ensemble. Le rééquilibrage répartit tout le groupe : les fichiers média les plus anciens vont dans `-rebalanced-1`, les suivants dans `-2` …, les plus récents restent dans le dossier principal. Les fichiers vidéo et audio d’un clip restent ensemble ; un dossier peut donc finir quelques fichiers sous la limite. Entretien MXF › **Rééquilibrage** → **Chercher les dossiers pleins…** liste chaque groupe des disques activés qui ne respecte pas la limite.
+Un dossier et ses dossiers rééquilibrés (`<nom>-rebalanced-1`, `-2` …) vont ensemble. Le rééquilibrage répartit tout le groupe : les fichiers média les plus anciens vont dans `-rebalanced-1`, les suivants dans `-2` …, les plus récents restent dans le dossier principal. Les fichiers vidéo et audio d’un clip restent ensemble ; un dossier peut donc finir quelques fichiers sous la limite. Entretien MXF › **Rééquilibrage** → **Chercher les dossiers MXF pleins…** liste chaque groupe des disques activés qui ne respecte pas la limite.
 
 1. Quittez Media Composer – sur les disques réseau, sur chaque poste – et choisissez les groupes.
 2. Cliquez sur **Rééquilibrer**. Pour un dossier que Media Composer crée lui-même (`1`, `<nom de l’ordinateur>.1`), nous recommandons de lui donner d’abord un nom propre. Rien n’est copié ni supprimé ; un dossier rééquilibré sans fichiers média part en entier dans `MediaFiles Check Database Backups`.
 3. Ensuite, les bases de données des dossiers modifiés doivent être réécrites. **Lancer** met leurs fichiers de base dans `MediaFiles Check Database Backups` sur le même disque et renomme les dossiers que Media Composer ne met pas à jour lui-même ; continuez sous Vérifier BD › Nouvelles bases. **Annuler** laisse les bases telles quelles – cela reste dans Tâches et Historique.
 
-Chaque changement de limite demande d’abord confirmation ; la prochaine recherche **Chercher les dossiers pleins…** répartit à nouveau chaque groupe.
+Chaque changement de limite demande d’abord confirmation ; la prochaine recherche **Chercher les dossiers MXF pleins…** répartit à nouveau chaque groupe.
 
 ## Doublons
 
@@ -128,9 +128,9 @@ Le point vert marque la copie qui reste (celle que connaît la base de son dossi
 
 ## Historique
 
-Entretien MXF › **Réécrire les BD** liste chaque opération dont les bases ne sont pas encore réécrites. **Lancer** met de côté les bases de tous les dossiers modifiés, pour que Media Composer en écrive de nouvelles, et renomme les dossiers qu’il ne met pas à jour lui-même (à renommer à l’origine sous Vérifier BD › Nouvelles bases).
+Entretien MXF › **Historique** liste chaque opération de rééquilibrage et de doublons, la plus récente en haut. Une opération dont les bases ne sont pas encore réécrites l’indique et propose **Réécrire les bases** : ses dossiers modifiés voient leurs bases mises de côté, pour que Media Composer en écrive de nouvelles, et les dossiers qu’il ne met pas à jour lui-même sont renommés (à renommer à l’origine sous Vérifier BD › Nouvelles bases).
 
-Entretien MXF › **Historique** liste chaque opération de rééquilibrage et de doublons, la plus récente en haut. **Annuler** remet tout en place (jamais par-dessus un fichier existant) – renommez d’abord les dossiers renommés à l’origine. **×** retire une entrée, **Tout supprimer…** toutes (après confirmation) ; rien ne change sur les disques, mais l’opération ne peut plus être annulée.
+**Annuler** remet tout en place (jamais par-dessus un fichier existant) – renommez d’abord les dossiers renommés à l’origine. **×** retire une entrée, **Tout supprimer…** toutes (après confirmation) ; rien ne change sur les disques, mais l’opération ne peut plus être annulée.
 
 ## Liens de projet
 

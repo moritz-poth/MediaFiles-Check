@@ -91,6 +91,20 @@ fn settings_path() -> Option<PathBuf> {
 }
 
 /// Which files rebalancing moved where – needed to undo it.
+/// "Delete all" asks in a real macOS dialog first (user 2026-11-16); true = Delete clicked.
+fn sure_delete_all(lang: &str, question: String) -> bool {
+    let delete = pick(lang, ["Delete", "Löschen", "Supprimer", "Borrar"]);
+    let cancel = pick(lang, ["Cancel", "Abbrechen", "Annuler", "Cancelar"]);
+    #[cfg(target_os = "macos")]
+    return mac_menu::ask_delete(&question, delete, cancel);
+    #[cfg(not(target_os = "macos"))]
+    return rfd::MessageDialog::new()
+        .set_description(question)
+        .set_buttons(rfd::MessageButtons::OkCancelCustom(delete.into(), cancel.into()))
+        .show()
+        == rfd::MessageDialogResult::Custom(delete.into());
+}
+
 fn rebalance_journal_path() -> PathBuf {
     app_dir().unwrap_or_else(|| PathBuf::from(".")).join("rebalanced.json")
 }
@@ -2400,6 +2414,22 @@ mod mac_menu {
         unsafe { msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()] }
     }
 
+    /// App-modal warning alert in this process (rfd fell back to a CFUserNotification outside the app).
+    /// First button = `delete` (destructive, Return), second = `cancel` (Esc); true = delete clicked.
+    pub fn ask_delete(question: &str, delete: &str, cancel: &str) -> bool {
+        unsafe {
+            let alert: Retained<AnyObject> = msg_send![class!(NSAlert), new];
+            let _: () = msg_send![&*alert, setAlertStyle: 0usize];
+            let _: () = msg_send![&*alert, setMessageText: &*ns_string(question)];
+            let ok: *mut AnyObject = msg_send![&*alert, addButtonWithTitle: &*ns_string(delete)];
+            let _: () = msg_send![ok, setHasDestructiveAction: true];
+            let no: *mut AnyObject = msg_send![&*alert, addButtonWithTitle: &*ns_string(cancel)];
+            let _: () = msg_send![no, setKeyEquivalent: &*ns_string("\u{1b}")];
+            let answer: isize = msg_send![&*alert, runModal];
+            answer == 1000
+        }
+    }
+
     /// Adds "Settings…" to the app menu if it is missing and keeps its title in the current language.
     pub fn ensure() {
         unsafe {
@@ -3033,6 +3063,28 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = app.as_weak();
         move |kind, index| {
             let app = weak.unwrap();
+            if index < 0 {
+                let lang = app.get_language().to_string();
+                let n = app.get_history().row_count();
+                let q = if n == 1 {
+                    pick(&lang, [
+                        "Really remove the entry from the History? Nothing on the drives changes, but the run can then no longer be undone.",
+                        "Wirklich den Eintrag aus dem Verlauf entfernen? Auf den Laufwerken ändert sich nichts, aber der Lauf lässt sich danach nicht mehr rückgängig machen.",
+                        "Vraiment retirer l’entrée de l’historique ? Rien ne change sur les disques, mais l’opération ne pourra plus être annulée.",
+                        "¿Quitar de verdad la entrada del historial? En las unidades no cambia nada, pero la operación ya no se podrá deshacer.",
+                    ]).to_string()
+                } else {
+                    pick(&lang, [
+                        "Really remove all {n} entries from the History? Nothing on the drives changes, but these runs can then no longer be undone.",
+                        "Wirklich alle {n} Einträge aus dem Verlauf entfernen? Auf den Laufwerken ändert sich nichts, aber diese Läufe lassen sich danach nicht mehr rückgängig machen.",
+                        "Vraiment retirer les {n} entrées de l’historique ? Rien ne change sur les disques, mais ces opérations ne pourront plus être annulées.",
+                        "¿Quitar de verdad las {n} entradas del historial? En las unidades no cambia nada, pero estas operaciones ya no se podrán deshacer.",
+                    ]).replace("{n}", &n.to_string())
+                };
+                if !sure_delete_all(&lang, q) {
+                    return;
+                }
+            }
             if let Err(e) = forget_runs(kind, index) {
                 app.set_notice(ModelRc::new(VecModel::from(vec![notice(3, "History", &e, 0)])));
                 app.set_page(Page::Notice);
@@ -3040,43 +3092,6 @@ fn main() -> Result<(), slint::PlatformError> {
             let lang = app.get_language().to_string();
             show_rebalanced(&app, &lang);
             show_dup_runs(&app, &lang);
-        }
-    });
-
-    // Maintain › Rewrite databases: every run whose databases are not rewritten yet, in one go
-    app.on_rewrite_all({
-        let (weak, renames) = (app.as_weak(), renames.clone());
-        move || {
-            let app = weak.unwrap();
-            if media_composer_running() {
-                app.set_mc_running(true);
-                return;
-            }
-            if renames_open(&renames.borrow()) {
-                log::write("refused: folders still renamed for Media Composer");
-                return;
-            }
-            let mut st = renames.borrow_mut();
-            let mut rows = rewrite_runs(&mut st, |_| true);
-            let path = dup_journal_path();
-            match duplicates::load::<duplicates::Journal>(&path) {
-                Err(e) => rows.push(notice(3, "duplicates.json", &e.to_string(), 0)),
-                Ok(mut journal) => {
-                    for run in journal.entries.iter_mut().filter(|r| !r.db_done) {
-                        rows.extend(rewrite_folders(&mut st, &run.changed));
-                        run.db_done = true;
-                    }
-                    if let Err(e) = duplicates::save(&journal, &path) {
-                        rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
-                    }
-                }
-            }
-            show_renamed(&app, &mut st);
-            let lang = app.get_language().to_string();
-            show_rebalanced(&app, &lang);
-            show_dup_runs(&app, &lang);
-            app.set_notice(ModelRc::new(VecModel::from(rows)));
-            app.set_page(Page::Notice);
         }
     });
 
@@ -3562,7 +3577,7 @@ fn main() -> Result<(), slint::PlatformError> {
             #[cfg(target_os = "macos")]
             mac_menu::ensure();
             match app.get_page() {
-                Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Rewrite | Page::Exchange | Page::Projects | Page::Media | Page::Scan => {
+                Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Exchange | Page::Projects | Page::Media | Page::Scan => {
                     sync_drives(&app, &drives);
                     inventory_ui::show_runs(&app);
                     show_renamed(&app, &mut renames.borrow_mut());

@@ -110,13 +110,13 @@ Mientras haya carpetas renombradas, nada más renombra carpetas ni reescribe bas
 
 Recomendamos no más de 5000 archivos por carpeta MXF. El límite (Ajustes → Reequilibrado) cuenta cada archivo de una carpeta, incluidos los dos archivos de base de datos.
 
-Una carpeta y sus carpetas reequilibradas (`<nombre>-rebalanced-1`, `-2` …) van juntas. El reequilibrado reparte todo el grupo: los archivos de medios más antiguos van a `-rebalanced-1`, los siguientes a `-2` …, los más recientes se quedan en la carpeta principal. Los archivos de vídeo y audio de un clip se quedan juntos, así que una carpeta puede quedar unos archivos por debajo del límite. Mantenimiento MXF › **Reequilibrado** → **Buscar carpetas llenas…** muestra cada grupo de las unidades activadas que no cumple el límite.
+Una carpeta y sus carpetas reequilibradas (`<nombre>-rebalanced-1`, `-2` …) van juntas. El reequilibrado reparte todo el grupo: los archivos de medios más antiguos van a `-rebalanced-1`, los siguientes a `-2` …, los más recientes se quedan en la carpeta principal. Los archivos de vídeo y audio de un clip se quedan juntos, así que una carpeta puede quedar unos archivos por debajo del límite. Mantenimiento MXF › **Reequilibrado** → **Buscar carpetas MXF llenas…** muestra cada grupo de las unidades activadas que no cumple el límite.
 
 1. Cierra Media Composer (en unidades de red, en cada puesto) y elige los grupos.
 2. Haz clic en **Reequilibrar**. Para una carpeta que crea Media Composer (`1`, `<nombre del equipo>.1`) recomendamos darle antes un nombre propio. No se copia ni se borra nada; una carpeta reequilibrada sin archivos de medios va entera a `MediaFiles Check Database Backups`.
 3. Después hay que reescribir las bases de datos de las carpetas modificadas. **Iniciar** pone sus archivos de base de datos en `MediaFiles Check Database Backups` en la misma unidad y renombra las carpetas que Media Composer no actualiza por sí mismo; sigue en Comprobar BD › Bases nuevas. **Cancelar** deja las bases de datos como están; queda en Tareas e Historial.
 
-Cada cambio del límite pregunta antes; la siguiente **Buscar carpetas llenas…** vuelve a repartir cada grupo.
+Cada cambio del límite pregunta antes; la siguiente **Buscar carpetas MXF llenas…** vuelve a repartir cada grupo.
 
 ## Duplicados
 
@@ -128,9 +128,9 @@ El punto verde marca la copia que se queda (la que conoce la base de datos de su
 
 ## Historial
 
-Mantenimiento MXF › **Reescribir BD** muestra cada operación cuyas bases aún no se han reescrito. **Iniciar** aparta las bases de todas las carpetas cambiadas, para que Media Composer escriba otras nuevas, y renombra las carpetas que él no actualiza solo (devuélveles el nombre en Comprobar BD › Bases nuevas).
+Mantenimiento MXF › **Historial** muestra cada operación de reequilibrado y de duplicados, la más reciente arriba. Una operación cuyas bases aún no se han reescrito lo indica y tiene **Reescribir bases de datos**: aparta las bases de sus carpetas cambiadas, para que Media Composer escriba otras nuevas, y renombra las carpetas que él no actualiza solo (devuélveles el nombre en Comprobar BD › Bases nuevas).
 
-Mantenimiento MXF › **Historial** muestra cada operación de reequilibrado y de duplicados, la más reciente arriba. **Deshacer** lo devuelve todo (nunca encima de un archivo existente); antes devuelve el nombre a las carpetas renombradas. **×** quita una entrada, **Borrar todos…** todas (pregunta antes); en las unidades no cambia nada, pero la operación ya no se puede deshacer.
+**Deshacer** lo devuelve todo (nunca encima de un archivo existente); antes devuelve el nombre a las carpetas renombradas. **×** quita una entrada, **Borrar todos…** todas (pregunta antes); en las unidades no cambia nada, pero la operación ya no se puede deshacer.
 
 ## Vínculos de proyecto
 
