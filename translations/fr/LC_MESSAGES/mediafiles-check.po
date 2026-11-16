@@ -8,6 +8,46 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
+msgid "LOOKING FOR DUPLICATES"
+msgstr "RECHERCHE DE DOUBLONS"
+
+msgid "LOOKING FOR FULL FOLDERS"
+msgstr "RECHERCHE DE DOSSIERS PLEINS"
+
+msgid "REBALANCING FOLDERS"
+msgstr "RÉÉQUILIBRAGE DES DOSSIERS"
+
+msgid "SETTING DUPLICATES ASIDE"
+msgstr "MISE DE CÔTÉ DES DOUBLONS"
+
+msgid "CHECKING THE MXF DATABASES"
+msgstr "VÉRIFICATION DES BASES MXF"
+
+msgid "Every ticked folder gets its original name back. Untick a folder to leave it renamed for now. Folders whose database Media Composer has not rewritten yet keep their old database."
+msgstr "Chaque dossier coché retrouve son nom d’origine. Décochez un dossier pour le laisser renommé pour l’instant. Les dossiers dont Media Composer n’a pas encore réécrit la base gardent leur ancienne base."
+
+msgid "Rename back ({})"
+msgstr "Renommer à l’origine ({})"
+
+msgid "{} → {}"
+msgstr "{} → {}"
+
+msgid "database not rewritten yet"
+msgstr "base pas encore réécrite"
+
+msgid "New files since renaming:"
+msgstr "Nouveaux fichiers depuis le renommage :"
+
+msgid "{n} file missing or changed"
+msgid_plural "{n} files missing or changed"
+msgstr[0] "{n} fichier manquant ou modifié"
+msgstr[1] "{n} fichiers manquants ou modifiés"
+
+msgid "{n} new file"
+msgid_plural "{n} new files"
+msgstr[0] "{n} nouveau fichier"
+msgstr[1] "{n} nouveaux fichiers"
+
 msgid "Folders are renamed for Media Composer right now. Rename them back first (Check DBs › New databases) – until then no other folders are renamed and no databases are rewritten."
 msgstr "Des dossiers sont renommés pour Media Composer en ce moment. Renommez-les d’abord à l’origine (Vérifier BD › Nouvelles bases) – d’ici là, aucun autre dossier n’est renommé et aucune base n’est réécrite."
 
@@ -532,9 +572,6 @@ msgstr "compare chaque dossier MXF à sa base de données Avid."
 
 msgid "Rebalanced"
 msgstr "Rééquilibrage terminé"
-
-msgid "Rename back: {} → {}"
-msgstr "Renommer à l’origine : {} → {}"
 
 msgid "Copies set aside"
 msgstr "Copies mises de côté"
@@ -1076,9 +1113,6 @@ msgstr "Aucun disque avec « Avid MediaFiles/MXF » trouvé."
 msgid "Check folder…"
 msgstr "Vérifier un dossier…"
 
-msgid "CHECKING"
-msgstr "VÉRIFICATION"
-
 msgid "Please wait{}"
 msgstr "Veuillez patienter{}"
 
@@ -1214,22 +1248,6 @@ msgstr "Retour"
 msgid "Rename"
 msgstr "Renommer"
 
-msgid "{n} new file since renaming"
-msgid_plural "{n} new files since renaming"
-msgstr[0] "{n} nouveau fichier depuis le renommage"
-msgstr[1] "{n} nouveaux fichiers depuis le renommage"
-
-msgid "{n} file missing or changed since renaming"
-msgid_plural "{n} files missing or changed since renaming"
-msgstr[0] "{n} fichier manquant ou modifié depuis le renommage"
-msgstr[1] "{n} fichiers manquants ou modifiés depuis le renommage"
-
-msgid "Media Composer has not rewritten the database yet"
-msgstr "Media Composer n'a pas encore réécrit la base de données"
-
-msgid "Media Composer probably recorded them while the folder had its new name. If you move them, the folder's database still lists them until it is rebuilt again."
-msgstr "Media Composer les a probablement enregistrés pendant que le dossier portait le nouveau nom. Si vous les déplacez, la base de données du dossier les mentionne encore jusqu'à sa prochaine reconstruction."
-
 msgid "Move to a new folder"
 msgstr "Déplacer dans un nouveau dossier"
 
@@ -1238,12 +1256,6 @@ msgstr "Déplacer dans le dossier {}"
 
 msgid "Keep them in the folder"
 msgstr "Les laisser dans le dossier"
-
-msgid "Rename back anyway"
-msgstr "Renommer à l'origine quand même"
-
-msgid "Leave it renamed for now"
-msgstr "Le laisser renommé pour l'instant"
 
 msgid "{} renamed back to {}"
 msgstr "{} renommé à l'origine en {}"

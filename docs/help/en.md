@@ -100,7 +100,7 @@ Media Composer only rebuilds the databases of its own folders: numbered folders 
 2. **Start Media Composer** and wait until it has scanned the drives. The dot of a folder turns green once Media Composer has written its database.
 3. Quit Media Composer and click **Rename back**.
 
-Before renaming back, every folder is checked: **new files** (usually recorded while the folder had the new name – move them to a new folder, to folder `1`, or keep them), **files missing or changed**, **database not rewritten yet**. **Leave it renamed for now** keeps it as it is.
+**Rename back** first shows every renamed folder on one page, each with its state: *ready*, *database not rewritten yet*, *files missing or changed* or *new files* (usually recorded while the folder had the new name). All folders are ticked – untick the ones that should stay renamed for now. If a ticked folder has new files, choose once for all where they go: keep them in the folder, a new folder, or folder `1` (`<computer name>.1` on network drives). **Rename back (n)** then renames all ticked folders at once.
 
 The original names are saved before anything is renamed, so they survive a crash or a restart. A folder is recognised by its drive, its current name and its media files; a drive that comes back under another name is found again. A renamed folder that was deleted or moved away by hand is dropped from the list.
 

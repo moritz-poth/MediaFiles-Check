@@ -1266,6 +1266,7 @@ fn start_check(app: &AppWindow, roots: Vec<PathBuf>, last: Last) {
     app.set_work_value(0.0);
     app.set_work_text("".into());
     app.set_work_eta(-1);
+    app.set_work_what(0);
     app.set_page(Page::Working);
     let (weak, gate) = (app.as_weak(), work_gate(app));
     log::write(&format!("check {}", roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ")));
@@ -1742,25 +1743,11 @@ fn notice(kind: i32, a: &str, b: &str, n: usize) -> NoticeRow {
     NoticeRow { kind, a: a.into(), b: b.into(), n: n as i32 }
 }
 
-enum Question {
-    /// Media Composer has not rewritten the database yet
-    NotReady,
-    Changed(Vec<String>),
-    Added(Vec<String>),
-}
-
-struct Current {
-    r: Renamed,
-    questions: VecDeque<Question>,
-    added: Vec<String>,
-    choice: Added,
-}
-
-/// Renaming back, one folder after the other, with questions in between.
+/// Renaming back (user 2026-11-16): one review of every folder, one decision for all, single folders can be
+/// left out. Each item: the entry, the new files since renaming, files missing or changed, database rewritten.
 struct BackFlow {
-    todo: VecDeque<Renamed>,
-    cur: Option<Current>,
-    notes: Vec<NoticeRow>,
+    items: Vec<(Renamed, Vec<String>, usize, bool)>,
+    on: Vec<bool>,
 }
 
 /// Rebalancing state: the groups found (and whether ticked), the Media Composer folders still to ask about,
@@ -1941,6 +1928,7 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
     let away = renamed_away(&renames.borrow());
     app.set_work_value(0.0);
     app.set_work_text("".into());
+    app.set_work_what(3);
     app.set_page(Page::Working);
     let (tx, rx) = std::sync::mpsc::channel::<(Vec<(Rebalanced, rebalance::Moved)>, Vec<NoticeRow>)>();
     std::thread::spawn(move || {
@@ -2222,81 +2210,52 @@ fn show_renamed(app: &AppWindow, st: &mut Renames) {
     app.set_renamed(ModelRc::new(VecModel::from(rows)));
 }
 
-fn show_question(app: &AppWindow, cur: &Current, computer: &str) {
-    let (kind, names): (i32, &[String]) = match cur.questions.front() {
-        Some(Question::Added(n)) => (0, n),
-        Some(Question::Changed(n)) => (1, n),
-        _ => (2, &[]),
-    };
-    let mut shown: Vec<slint::SharedString> = names.iter().take(NAMES_SHOWN).map(|n| n.clone().into()).collect();
-    if names.len() > NAMES_SHOWN {
-        shown.push(app.get_txt_more().replace("{}", &(names.len() - NAMES_SHOWN).to_string()).into());
-    }
-    let first = if rename::is_network(&cur.r.dir()) { format!("{computer}.1") } else { "1".into() };
-    app.set_q_kind(kind);
-    app.set_q_folder(cur.r.current.clone().into());
-    app.set_q_original(cur.r.original.clone().into());
-    app.set_q_count(names.len() as i32);
-    app.set_q_names(ModelRc::new(VecModel::from(shown)));
-    app.set_q_first(first.into());
-    app.set_page(Page::Question);
+fn show_back(app: &AppWindow, flow: &BackFlow) {
+    let rows: Vec<BackRow> = flow
+        .items
+        .iter()
+        .zip(&flow.on)
+        .map(|((r, added, changed, ready), on)| BackRow { current: r.current.clone().into(), original: r.original.clone().into(), ready: *ready, changed: *changed as i32, added: added.len() as i32, on: *on })
+        .collect();
+    app.set_back_count(flow.on.iter().filter(|o| **o).count() as i32);
+    app.set_back_added(flow.items.iter().zip(&flow.on).any(|(i, on)| *on && !i.1.is_empty()));
+    app.set_back_rows(ModelRc::new(VecModel::from(rows)));
 }
 
-/// Next step of renaming back: ask the next question, rename the current folder back, or take the next folder.
-fn advance(app: &AppWindow, st: &mut Renames) {
+/// Renames the ticked folders back (new files handled by `choice`); the others stay renamed.
+fn finish_back(app: &AppWindow, st: &mut Renames, choice: Added) {
     let Renames { computer, journal, back } = st;
-    let (Ok(journal), Some(flow)) = (journal.as_mut(), back.as_mut()) else { return };
-    loop {
-        if let Some(cur) = flow.cur.as_ref() {
-            if !cur.questions.is_empty() {
-                return show_question(app, cur, computer);
-            }
-            let cur = flow.cur.take().unwrap();
-            let result = rename::rename_back(&cur.r, &cur.added, cur.choice, computer);
-            log::write(&format!(
-                "rename back {} -> {} ({} new files, {:?}): {}",
-                cur.r.dir().display(),
-                cur.r.original,
-                cur.added.len(),
-                cur.choice,
-                result.as_ref().map_or_else(|e| e.to_string(), |b| format!("{b:?}"))
-            ));
-            match result {
-                Ok(b) => {
-                    flow.notes.push(notice(0, &cur.r.current, &cur.r.original, 0));
-                    if let Some((to, n)) = b.moved_to.filter(|m| m.1 > 0) {
-                        flow.notes.push(notice(1, &to, "", n));
-                    }
-                    flow.notes.extend(b.not_moved.iter().map(|f| notice(4, f, "", 0)));
-                    journal.entries.retain(|e| *e != cur.r);
-                    if let Err(e) = journal.save(&journal_path()) {
-                        flow.notes.push(notice(3, &journal_path().display().to_string(), &e.to_string(), 0));
-                    }
-                }
-                Err(e) => flow.notes.push(notice(3, &cur.r.current, &e.to_string(), 0)),
-            }
+    let (Ok(journal), Some(flow)) = (journal.as_mut(), back.take()) else { return };
+    let mut notes = vec![];
+    for ((r, added, _, _), on) in flow.items.iter().zip(flow.on) {
+        if !on {
+            log::write(&format!("left renamed: {}", r.dir().display()));
+            notes.push(notice(2, &r.current, "", 0));
             continue;
         }
-        let Some(r) = flow.todo.pop_front() else { break };
-        match rename::diff(&r) {
-            Ok(d) => {
-                let mut questions = VecDeque::new();
-                if rename::status(&r) == Status::Waiting {
-                    questions.push_back(Question::NotReady);
+        let result = rename::rename_back(r, added, choice, computer);
+        log::write(&format!(
+            "rename back {} -> {} ({} new files, {choice:?}): {}",
+            r.dir().display(),
+            r.original,
+            added.len(),
+            result.as_ref().map_or_else(|e| e.to_string(), |b| format!("{b:?}"))
+        ));
+        match result {
+            Ok(b) => {
+                notes.push(notice(0, &r.current, &r.original, 0));
+                if let Some((to, n)) = b.moved_to.filter(|m| m.1 > 0) {
+                    notes.push(notice(1, &to, "", n));
                 }
-                if !d.changed.is_empty() {
-                    questions.push_back(Question::Changed(d.changed));
+                notes.extend(b.not_moved.iter().map(|f| notice(4, f, "", 0)));
+                journal.entries.retain(|e| e != r);
+                if let Err(e) = journal.save(&journal_path()) {
+                    notes.push(notice(3, &journal_path().display().to_string(), &e.to_string(), 0));
                 }
-                if !d.added.is_empty() {
-                    questions.push_back(Question::Added(d.added.clone()));
-                }
-                flow.cur = Some(Current { r, questions, added: d.added, choice: Added::Keep });
             }
-            Err(e) => flow.notes.push(notice(3, &r.current, &e.to_string(), 0)),
+            Err(e) => notes.push(notice(3, &r.current, &e.to_string(), 0)),
         }
     }
-    let notes = std::mem::take(&mut flow.notes);
-    *back = None;
     show_renamed(app, st);
     app.set_notice(ModelRc::new(VecModel::from(notes)));
     app.set_page(Page::Notice);
@@ -2806,6 +2765,7 @@ fn main() -> Result<(), slint::PlatformError> {
             app.set_work_value(0.0);
             app.set_work_text("".into());
             app.set_work_eta(-1);
+            app.set_work_what(1);
             app.set_page(Page::Working);
             log::write(&format!("duplicates: looking through {}", roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ")));
             let (tx, rx) = std::sync::mpsc::channel::<duplicates::Found>();
@@ -2909,6 +2869,7 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             app.set_work_value(0.0);
             app.set_work_text("".into());
+            app.set_work_what(4);
             app.set_page(Page::Working);
             let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<(duplicates::Run, duplicates::Moved)>>();
             std::thread::spawn(move || {
@@ -3057,6 +3018,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let (away, computer) = { let st = renames.borrow(); (renamed_away(&st), st.computer.clone()) };
             app.set_work_value(0.0);
             app.set_work_text("".into());
+            app.set_work_what(2);
             app.set_page(Page::Working);
             log::write(&format!("rebalance: looking for groups that do not match {limit} files"));
             let (tx, rx) = std::sync::mpsc::channel::<Vec<Plan>>();
@@ -3294,9 +3256,27 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let mut st = renames.borrow_mut();
             let Ok(journal) = &st.journal else { return };
-            let todo = journal.entries.iter().filter(|r| rename::status(r) != Status::Offline).cloned().collect();
-            st.back = Some(BackFlow { todo, cur: None, notes: vec![] });
-            advance(&app, &mut st);
+            let mut items = vec![];
+            let mut errors = vec![];
+            for r in journal.entries.iter().filter(|r| rename::status(r) != Status::Offline) {
+                match rename::diff(r) {
+                    Ok(d) => items.push((r.clone(), d.added, d.changed.len(), rename::status(r) == Status::Ready)),
+                    Err(e) => errors.push(notice(3, &r.current, &e.to_string(), 0)),
+                }
+            }
+            if items.is_empty() {
+                app.set_notice(ModelRc::new(VecModel::from(errors)));
+                app.set_page(Page::Notice);
+                return;
+            }
+            // decided for all at once; single folders can be left out (unticked)
+            let flow = BackFlow { on: vec![true; items.len()], items };
+            show_back(&app, &flow);
+            app.set_back_choice(0);
+            // local drives use "1", network drives "<computer>.1"
+            app.set_back_first(format!("1 / {}.1", st.computer).into());
+            st.back = Some(flow);
+            app.set_page(Page::Question);
         }
     });
 
@@ -3333,26 +3313,44 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    app.on_answer({
+    app.on_back_toggle({
         let (weak, renames) = (app.as_weak(), renames.clone());
-        move |answer| {
-            let app = weak.unwrap();
+        move |i| {
             let mut st = renames.borrow_mut();
-            let Some(back) = st.back.as_mut() else { return };
-            let Some(cur) = back.cur.as_mut() else { return };
-            let question = cur.questions.pop_front();
-            if answer < 0 {
-                log::write(&format!("left renamed: {}", cur.r.dir().display()));
-                back.notes.push(notice(2, &cur.r.current, "", 0));
-                back.cur = None;
-            } else if let Some(Question::Added(_)) = question {
-                cur.choice = match answer {
-                    1 => Added::NewFolder,
-                    2 => Added::FirstFolder,
-                    _ => Added::Keep,
-                };
+            let Some(flow) = st.back.as_mut() else { return };
+            // -1 all, -2 none
+            for (n, on) in flow.on.iter_mut().enumerate() {
+                match i {
+                    -1 => *on = true,
+                    -2 => *on = false,
+                    i if n == i as usize => *on = !*on,
+                    _ => {}
+                }
             }
-            advance(&app, &mut st);
+            show_back(&weak.unwrap(), flow);
+        }
+    });
+    app.on_back_confirm({
+        let (weak, renames) = (app.as_weak(), renames.clone());
+        move |choice| {
+            let app = weak.unwrap();
+            if media_composer_running() {
+                app.set_mc_running(true);
+                return;
+            }
+            let choice = match choice {
+                1 => Added::NewFolder,
+                2 => Added::FirstFolder,
+                _ => Added::Keep,
+            };
+            finish_back(&app, &mut renames.borrow_mut(), choice);
+        }
+    });
+    app.on_back_cancel({
+        let (weak, renames) = (app.as_weak(), renames.clone());
+        move || {
+            renames.borrow_mut().back = None;
+            weak.unwrap().set_page(Page::Maintain);
         }
     });
 

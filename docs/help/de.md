@@ -100,7 +100,7 @@ Media Composer baut nur die Datenbanken seiner eigenen Ordner neu: nummerierte O
 2. **Media Composer starten** und warten, bis er die Laufwerke gelesen hat. Der Punkt eines Ordners wird grün, sobald Media Composer seine Datenbank geschrieben hat.
 3. Media Composer beenden und **Zurückbenennen** klicken.
 
-Vor dem Zurückbenennen wird jeder Ordner geprüft: **neue Dateien** (meist aufgenommen, während der Ordner umbenannt war – in einen neuen Ordner, nach Ordner `1` verschieben oder im Ordner lassen), **Dateien fehlen oder geändert**, **Datenbank noch nicht neu geschrieben**. **Erst mal umbenannt lassen** lässt ihn, wie er ist.
+**Zurückbenennen** zeigt zuerst alle umbenannten Ordner auf einer Seite, jeden mit seinem Stand: *bereit*, *Datenbank noch nicht neu*, *Dateien fehlen oder geändert* oder *neue Dateien* (meist aufgenommen, während der Ordner umbenannt war). Alle Ordner sind angehakt – nimm das Häkchen bei denen weg, die erst mal umbenannt bleiben sollen. Hat ein angehakter Ordner neue Dateien, wählst du einmal für alle, wohin sie kommen: im Ordner lassen, in einen neuen Ordner oder in Ordner `1` (`<Rechnername>.1` auf Netzlaufwerken). **Zurückbenennen (n)** benennt dann alle angehakten Ordner auf einmal zurück.
 
 Die Originalnamen werden gespeichert, bevor etwas umbenannt wird, und überstehen so einen Absturz oder Neustart. Ein Ordner wird an seinem Laufwerk, seinem jetzigen Namen und seinen Mediendateien erkannt; ein Laufwerk, das unter anderem Namen zurückkommt, wird wiedergefunden. Ein umbenannter Ordner, der von Hand gelöscht oder weggeschoben wurde, verschwindet aus der Liste.
 

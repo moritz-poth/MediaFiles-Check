@@ -100,7 +100,7 @@ Media Composer solo reconstruye las bases de datos de sus propias carpetas: carp
 2. **Abrir Media Composer** y espera a que haya leído las unidades. El punto de una carpeta se pone verde cuando Media Composer ha escrito su base de datos.
 3. Cierra Media Composer y haz clic en **Recuperar el nombre**.
 
-Antes de recuperar el nombre se comprueba cada carpeta: **archivos nuevos** (normalmente grabados mientras la carpeta tenía el nombre nuevo: moverlos a una carpeta nueva, a la carpeta `1` o dejarlos), **archivos que faltan o han cambiado**, **base de datos aún no reescrita**. **Dejarla así por ahora** la deja como está.
+**Recuperar el nombre** muestra primero todas las carpetas renombradas en una página, cada una con su estado: *lista*, *base aún no reescrita*, *archivos que faltan o cambiaron* o *archivos nuevos* (casi siempre grabados mientras la carpeta tenía el nombre nuevo). Todas están marcadas: desmarca las que deban quedarse renombradas por ahora. Si una carpeta marcada tiene archivos nuevos, elige una sola vez para todas adónde van: dejarlos en la carpeta, una carpeta nueva o la carpeta `1` (`<nombre del ordenador>.1` en unidades de red). **Recuperar el nombre (n)** cambia entonces el nombre de todas las carpetas marcadas a la vez.
 
 Los nombres originales se guardan antes de renombrar nada, así sobreviven a un fallo o a un reinicio. Una carpeta se reconoce por su unidad, su nombre actual y sus archivos de medios; una unidad que vuelve con otro nombre se encuentra de nuevo. Una carpeta renombrada que se borró o se movió a mano desaparece de la lista.
 

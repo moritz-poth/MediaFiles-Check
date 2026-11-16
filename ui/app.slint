@@ -1376,16 +1376,11 @@ component ExchangePane inherits VerticalLayout {
     // ── Sammeln / Importieren: Fortschritt ──
     if root.show-busy: VerticalLayout {
         spacing: 14px;
-        PageHead { title: root.work-title; }
+        PageHead { title: root.work-title + " – " + @tr("Please wait{}", root.dots); }
         ProgressBar { value: Exchange.work-value; }
         StatusLine {
             text: Exchange.work-text;
             color: Theme.muted;
-        }
-        Text {
-            text: @tr("Please wait{}", root.dots);
-            font-size: 12px;
-            color: Theme.faint;
         }
         Para {
             text: Exchange.work-kind == 0 ? @tr("Every file is compared with its checksum after copying. Interrupted? Collect again continues where it stopped.") : @tr("Adds files only and never overwrites a media file. Replaced databases go to Ferry-Backup.");
@@ -1588,6 +1583,16 @@ component ExchangePane inherits VerticalLayout {
 
 
 // Seiten des Hauptfensters; jede gehört zu einem Reiter (tab-of) und einem Schritt der Seitenleiste (step-of)
+// ein Ordner beim Zurückbenennen: Stand und ob er mit zurückbenannt wird
+export struct BackRow {
+    current: string,
+    original: string,
+    ready: bool,
+    changed: int,
+    added: int,
+    on: bool,
+}
+
 export struct RunRow {
     text: string,
     detail: string,
@@ -2618,7 +2623,7 @@ export component AppWindow inherits CheckWindow {
     property <Page> page0: Page.exchange;
     property <Page> page1: Page.home;
     property <Page> page2: Page.projects;
-    property <Page> page3: Page.maintain;
+    property <Page> page3: Page.rebalstart;
     property <Page> page5: Page.media;
     property <Page> page6: Page.scan;
     in-out property <bool> has-result;
@@ -2723,14 +2728,16 @@ export component AppWindow inherits CheckWindow {
     // alle umbenannten Ordner haben eine neue Datenbank (grüner Punkt)
     property <bool> renamed-ready: root.renamed.length > 0 && root.ready-count == root.renamed.length;
     in property <int> ready-count;
-    // Frage beim Zurückbenennen; kind: 0 neue Dateien, 1 Dateien fehlen/geändert, 2 Datenbank noch nicht neu
-    in property <int> q-kind;
-    in property <string> q-folder;
-    in property <string> q-original;
-    in property <int> q-count;
-    in property <[string]> q-names;
-    in property <string> q-first;
+    // Zurückbenennen: alle Ordner auf einer Seite, eine Entscheidung für alle, einzelne abwählbar (user 2026-11-16)
+    in property <[BackRow]> back-rows;
+    in property <int> back-count;
+    // mindestens ein angehakter Ordner hat neue Dateien: Wahl, wohin sie kommen (0 bleiben, 1 neuer Ordner, 2 Ordner 1)
+    in property <bool> back-added;
+    in-out property <int> back-choice;
+    in property <string> back-first;
     in property <[NoticeRow]> notice;
+    // Fortschrittsseite: 0 DBs prüfen, 1 Duplikate suchen, 2 volle Ordner suchen, 3 Rebalancing, 4 Duplikate beiseitelegen
+    in property <int> work-what;
     // Rebalancing: volle Ordner zur Auswahl, frühere Rebalancings (rückgängig machen), Zusammenfassung danach
     in property <[RebalRow]> rebalance-rows;
     in property <int> rebalance-selected;
@@ -2772,7 +2779,10 @@ export component AppWindow inherits CheckWindow {
     callback rename();
     callback rename-back();
     callback start-media-composer();
-    callback answer(int);
+    // Zeile an/aus; -1 alle, -2 keine
+    callback back-toggle(int);
+    callback back-confirm(int);
+    callback back-cancel();
     callback find-full();
     callback toggle-rebalance(int);
     callback rebalance();
@@ -3121,18 +3131,16 @@ ScrollBox {
 
         // ── Fortschritt ────────────────────────────────────────
         if root.page == Page.working: Section {
-            title: @tr("CHECKING");
+            // was läuft – Bitte warten (user 2026-11-16: Variante C, die Punkte laufen in der Überschrift)
+            title: (root.work-what == 1 ? @tr("LOOKING FOR DUPLICATES") : root.work-what == 2 ? @tr("LOOKING FOR FULL FOLDERS")
+                : root.work-what == 3 ? @tr("REBALANCING FOLDERS") : root.work-what == 4 ? @tr("SETTING DUPLICATES ASIDE")
+                : @tr("CHECKING THE MXF DATABASES")) + " – " + @tr("Please wait{}", root.dots);
             ProgressBar { value: root.work-value; }
             WorkLine { text: root.work-text; eta: root.work-eta; paused: root.work-paused; }
             if root.work-can-pause: ScanButtons {
                 paused: root.work-paused;
                 pause(on) => { root.work-paused = on; root.work-pause(on); }
                 cancel => { root.work-cancel(); }
-            }
-            Text {
-                text: @tr("Please wait{}", root.dots);
-                font-size: 12px;
-                color: Theme.faint;
             }
         }
 
@@ -3240,54 +3248,79 @@ ScrollBox {
 
         // ── Frage beim Zurückbenennen ─────────────────────────
         if root.page == Page.question: VerticalLayout {
-            spacing: Metrics.spacing;
+            spacing: 14px;
+            height: Metrics.page-height;
             PageHead {
-                title: @tr("Rename back: {} → {}", root.q-folder, root.q-original);
-            }
-            VerticalLayout {
-                spacing: 10px;
-                Text {
-                    text: root.q-kind == 0 ? @tr("{n} new file since renaming" | "{n} new files since renaming" % root.q-count)
-                        : root.q-kind == 1 ? @tr("{n} file missing or changed since renaming" | "{n} files missing or changed since renaming" % root.q-count)
-                        : @tr("Media Composer has not rewritten the database yet");
-                    width: Metrics.content-width;
-                    wrap: word-wrap;
-                    font-size: 15px;
-                    font-weight: 600;
-                    color: Theme.text;
-                }
-                for n in root.q-names: Text {
-                    text: n;
-                    font-size: 12px;
-                    overflow: elide;
-                    color: Theme.muted;
-                }
-                if root.q-kind == 0: Para {
-                    text: @tr("Media Composer probably recorded them while the folder had its new name. If you move them, the folder's database still lists them until it is rebuilt again.");
-                }
-            }
-            VerticalLayout {
-                spacing: 8px;
-                if root.q-kind == 0: CheckButton {
-                    text: @tr("Move to a new folder");
-                    clicked => { root.answer(1); }
-                }
-                if root.q-kind == 0: CheckButton {
-                    text: @tr("Move to folder {}", root.q-first);
-                    clicked => { root.answer(2); }
-                }
-                if root.q-kind == 0: CheckButton {
-                    text: @tr("Keep them in the folder");
-                    clicked => { root.answer(0); }
-                }
-                if root.q-kind != 0: CheckButton {
-                    text: @tr("Rename back anyway");
-                    clicked => { root.answer(0); }
+                title: @tr("Rename back");
+                CheckButton {
+                    text: @tr("Cancel");
+                    clicked => { root.back-cancel(); }
                 }
                 CheckButton {
-                    text: @tr("Leave it renamed for now");
-                    clicked => { root.answer(-1); }
+                    text: @tr("Rename back ({})", root.back-count);
+                    primary: true;
+                    enabled: root.back-count > 0 && !root.mc-running;
+                    clicked => { root.back-confirm(root.back-choice); }
                 }
+            }
+            Para {
+                text: @tr("Every ticked folder gets its original name back. Untick a folder to leave it renamed for now. Folders whose database Media Composer has not rewritten yet keep their old database.");
+            }
+            if root.back-added: HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: @tr("New files since renaming:");
+                    vertical-alignment: center;
+                    color: Theme.text;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Dropdown {
+                        items: [@tr("Keep them in the folder"), @tr("Move to a new folder"), @tr("Move to folder {}", root.back-first)];
+                        current: root.back-choice;
+                        selected(index) => { root.back-choice = index; }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 8px;
+                CheckButton { text: @tr("All"); small: true; clicked => { root.back-toggle(-1); } }
+                CheckButton { text: @tr("None"); small: true; clicked => { root.back-toggle(-2); } }
+            }
+            Card {
+                vertical-stretch: 1;
+                min-height: 0px;
+                FillScroll {
+                    for r[i] in root.back-rows: ToggleRow {
+                        first: i == 0;
+                        toggled => { root.back-toggle(i); }
+                        VerticalLayout { alignment: center; CheckBox { checked: r.on; } }
+                        Text {
+                            text: @tr("{} → {}", r.current, r.original);
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            color: r.on ? Theme.text : Theme.muted;
+                        }
+                        Text {
+                            text: !r.ready ? @tr("database not rewritten yet")
+                                : r.changed > 0 ? @tr("{n} file missing or changed" | "{n} files missing or changed" % r.changed)
+                                : r.added > 0 ? @tr("{n} new file" | "{n} new files" % r.added)
+                                : @tr("ready");
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            color: !r.ready || r.changed > 0 ? Theme.warning : Theme.muted;
+                        }
+                    }
+                }
+            }
+            // freier Platz unten, nicht zwischen den Blöcken
+            Rectangle { vertical-stretch: 1; }
+            if root.mc-running: StatusLine {
+                text: @tr("Quit Media Composer before renaming back.");
+                color: Theme.warning;
             }
         }
 

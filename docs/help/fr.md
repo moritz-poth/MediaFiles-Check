@@ -100,7 +100,7 @@ Media Composer ne reconstruit que les bases de données de ses propres dossiers 
 2. **Lancer Media Composer** et attendez qu’il ait lu les disques. Le point d’un dossier devient vert dès que Media Composer a écrit sa base de données.
 3. Quittez Media Composer et cliquez sur **Renommer à l’origine**.
 
-Avant de renommer à l’origine, chaque dossier est vérifié : **nouveaux fichiers** (en général enregistrés pendant que le dossier avait le nouveau nom – les déplacer dans un nouveau dossier, dans le dossier `1`, ou les garder), **fichiers manquants ou modifiés**, **base pas encore réécrite**. **Le laisser renommé pour l’instant** le garde tel quel.
+**Renommer à l’origine** montre d’abord tous les dossiers renommés sur une page, chacun avec son état : *prêt*, *base pas encore réécrite*, *fichiers manquants ou modifiés* ou *nouveaux fichiers* (enregistrés le plus souvent pendant que le dossier portait le nouveau nom). Tous les dossiers sont cochés – décochez ceux qui doivent rester renommés pour l’instant. Si un dossier coché a de nouveaux fichiers, choisissez une fois pour tous où ils vont : les garder dans le dossier, un nouveau dossier ou le dossier `1` (`<nom de l’ordinateur>.1` sur les disques réseau). **Renommer à l’origine (n)** renomme alors tous les dossiers cochés d’un coup.
 
 Les noms d’origine sont enregistrés avant tout renommage et survivent ainsi à un plantage ou un redémarrage. Un dossier est reconnu par son disque, son nom actuel et ses fichiers média ; un disque qui revient sous un autre nom est retrouvé. Un dossier renommé supprimé ou déplacé à la main disparaît de la liste.
 

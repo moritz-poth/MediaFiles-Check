@@ -9,6 +9,18 @@ PLURAL = {"de": "nplurals=2; plural=(n != 1);", "fr": "nplurals=2; plural=(n > 1
 
 # English: (German, French, Spanish). Plural entries: (singular, plural) -> ((de1, de2), (fr1, fr2), (es1, es2))
 T = {
+    'LOOKING FOR DUPLICATES': ('SUCHE DUPLIKATE', 'RECHERCHE DE DOUBLONS', 'BUSCANDO DUPLICADOS'),
+    'LOOKING FOR FULL FOLDERS': ('SUCHE VOLLE ORDNER', 'RECHERCHE DE DOSSIERS PLEINS', 'BUSCANDO CARPETAS LLENAS'),
+    'REBALANCING FOLDERS': ('TEILE ORDNER AUF', 'RÉÉQUILIBRAGE DES DOSSIERS', 'REEQUILIBRANDO CARPETAS'),
+    'SETTING DUPLICATES ASIDE': ('LEGE DUPLIKATE BEISEITE', 'MISE DE CÔTÉ DES DOUBLONS', 'APARTANDO DUPLICADOS'),
+    'CHECKING THE MXF DATABASES': ('PRÜFE MXF-DATENBANKEN', 'VÉRIFICATION DES BASES MXF', 'COMPROBANDO LAS BASES MXF'),
+    'Every ticked folder gets its original name back. Untick a folder to leave it renamed for now. Folders whose database Media Composer has not rewritten yet keep their old database.': ('Jeder angehakte Ordner bekommt seinen Originalnamen zurück. Nimm das Häkchen weg, um einen Ordner erst mal umbenannt zu lassen. Ordner, deren Datenbank Media Composer noch nicht neu geschrieben hat, behalten ihre alte Datenbank.', 'Chaque dossier coché retrouve son nom d’origine. Décochez un dossier pour le laisser renommé pour l’instant. Les dossiers dont Media Composer n’a pas encore réécrit la base gardent leur ancienne base.', 'Cada carpeta marcada recupera su nombre original. Desmarca una carpeta para dejarla renombrada por ahora. Las carpetas cuya base Media Composer aún no ha reescrito conservan su base antigua.'),
+    'Rename back ({})': ('Zurückbenennen ({})', 'Renommer à l’origine ({})', 'Recuperar el nombre ({})'),
+    '{} → {}': ('{} → {}', '{} → {}', '{} → {}'),
+    'database not rewritten yet': ('Datenbank noch nicht neu', 'base pas encore réécrite', 'base aún no reescrita'),
+    'New files since renaming:': ('Neue Dateien seit dem Umbenennen:', 'Nouveaux fichiers depuis le renommage :', 'Archivos nuevos desde el cambio de nombre:'),
+    ('{n} file missing or changed', '{n} files missing or changed'): (('{n} Datei fehlt oder geändert', '{n} Dateien fehlen oder geändert'), ('{n} fichier manquant ou modifié', '{n} fichiers manquants ou modifiés'), ('{n} archivo falta o cambió', '{n} archivos faltan o cambiaron')),
+    ('{n} new file', '{n} new files'): (('{n} neue Datei', '{n} neue Dateien'), ('{n} nouveau fichier', '{n} nouveaux fichiers'), ('{n} archivo nuevo', '{n} archivos nuevos')),
     'Folders are renamed for Media Composer right now. Rename them back first (Check DBs › New databases) – until then no other folders are renamed and no databases are rewritten.': ('Gerade sind Ordner für Media Composer umbenannt. Benenne sie zuerst zurück (DBs prüfen › Neue Datenbanken) – bis dahin werden keine weiteren Ordner umbenannt und keine Datenbanken neu geschrieben.', 'Des dossiers sont renommés pour Media Composer en ce moment. Renommez-les d’abord à l’origine (Vérifier BD › Nouvelles bases) – d’ici là, aucun autre dossier n’est renommé et aucune base n’est réécrite.', 'Ahora hay carpetas renombradas para Media Composer. Devuélveles primero su nombre (Comprobar BD › Bases nuevas); hasta entonces no se renombran otras carpetas ni se reescriben bases de datos.'),
     'Rewrite databases waits until the renamed folders are renamed back (Check DBs › New databases).': ('Datenbanken neu schreiben wartet, bis die umbenannten Ordner zurückbenannt sind (DBs prüfen › Neue Datenbanken).', 'Réécrire les bases attend que les dossiers renommés retrouvent leur nom (Vérifier BD › Nouvelles bases).', 'Reescribir bases espera a que las carpetas renombradas recuperen su nombre (Comprobar BD › Bases nuevas).'),
     ('{n} folder merges, {} in own folders', '{n} folders merge, {} in own folders'): (('{n} Ordner wird zusammengeführt, {} in eigene Ordner', '{n} Ordner werden zusammengeführt, {} in eigene Ordner'), ('{n} dossier fusionné, {} dans des dossiers propres', '{n} dossiers fusionnés, {} dans des dossiers propres'), ('{n} carpeta se combina, {} en carpetas propias', '{n} carpetas se combinan, {} en carpetas propias')),
@@ -176,7 +188,6 @@ T = {
     'finds the media your bins need that are on none of the drives.': ('findet die Medien, die deine Bins brauchen und die auf keinem Laufwerk liegen.', 'trouve les médias dont vos chutiers ont besoin et qui ne sont sur aucun disque.', 'encuentra los medios que necesitan tus bins y que no están en ninguna unidad.'),
     'compares every MXF folder with its Avid database.': ('vergleicht jeden MXF-Ordner mit seiner Avid-Datenbank.', 'compare chaque dossier MXF à sa base de données Avid.', 'compara cada carpeta MXF con su base de datos de Avid.'),
     'Rebalanced': ('Rebalancing erledigt', 'Rééquilibrage terminé', 'Reequilibrado hecho'),
-    'Rename back: {} → {}': ('Zurückbenennen: {} → {}', 'Renommer à l’origine : {} → {}', 'Recuperar el nombre: {} → {}'),
     'Copies set aside': ('Kopien zur Seite gelegt', 'Copies mises de côté', 'Copias apartadas'),
     'Rename folder?': ('Ordner umbenennen?', 'Renommer le dossier ?', '¿Renombrar la carpeta?'),
     'Check…': ('Prüfen…', 'Vérifier…', 'Comprobar…'),
@@ -353,7 +364,6 @@ T = {
     "… and {} more": ("… und {} weitere", "… et {} de plus", "… y {} más"),
     "No drive with “Avid MediaFiles/MXF” found.": ("Kein Laufwerk mit „Avid MediaFiles/MXF“ gefunden.", "Aucun disque avec « Avid MediaFiles/MXF » trouvé.", "No se encontró ningún disco con «Avid MediaFiles/MXF»."),
     "Check folder…": ("Ordner prüfen…", "Vérifier un dossier…", "Comprobar carpeta…"),
-    "CHECKING": ("PRÜFE", "VÉRIFICATION", "COMPROBANDO"),
     "Please wait{}": ("Bitte warten{}", "Veuillez patienter{}", "Espera, por favor{}"),
     "No MXF folders found": ("Keine MXF-Ordner gefunden", "Aucun dossier MXF trouvé", "No se encontraron carpetas MXF"),
     ("{n} folder matches its database", "All {n} folders match their database"): (
@@ -432,24 +442,9 @@ T = {
     "Media Composer must stay closed while renaming.": ("Media Composer muss beim Umbenennen geschlossen bleiben.", "Media Composer doit rester fermé pendant le renommage.", "Media Composer debe permanecer cerrado mientras se cambian los nombres."),
     "Back": ("Zurück", "Retour", "Atrás"),
     "Rename": ("Umbenennen", "Renommer", "Cambiar el nombre"),
-    ("{n} new file since renaming", "{n} new files since renaming"): (
-        ("{n} neue Datei seit dem Umbenennen", "{n} neue Dateien seit dem Umbenennen"),
-        ("{n} nouveau fichier depuis le renommage", "{n} nouveaux fichiers depuis le renommage"),
-        ("{n} archivo nuevo desde el cambio de nombre", "{n} archivos nuevos desde el cambio de nombre")),
-    ("{n} file missing or changed since renaming", "{n} files missing or changed since renaming"): (
-        ("{n} Datei fehlt oder ist verändert seit dem Umbenennen", "{n} Dateien fehlen oder sind verändert seit dem Umbenennen"),
-        ("{n} fichier manquant ou modifié depuis le renommage", "{n} fichiers manquants ou modifiés depuis le renommage"),
-        ("{n} archivo falta o ha cambiado desde el cambio de nombre", "{n} archivos faltan o han cambiado desde el cambio de nombre")),
-    "Media Composer has not rewritten the database yet": ("Media Composer hat die Datenbank noch nicht neu geschrieben", "Media Composer n'a pas encore réécrit la base de données", "Media Composer aún no ha reescrito la base de datos"),
-    "Media Composer probably recorded them while the folder had its new name. If you move them, the folder's database still lists them until it is rebuilt again.": (
-        "Wahrscheinlich hat Media Composer sie aufgenommen, solange der Ordner den neuen Namen hatte. Verschiebst du sie, nennt die Datenbank des Ordners sie weiter, bis sie wieder neu aufgebaut wird.",
-        "Media Composer les a probablement enregistrés pendant que le dossier portait le nouveau nom. Si vous les déplacez, la base de données du dossier les mentionne encore jusqu'à sa prochaine reconstruction.",
-        "Probablemente Media Composer los grabó mientras la carpeta tenía el nombre nuevo. Si los mueves, la base de datos de la carpeta los seguirá nombrando hasta que se reconstruya de nuevo."),
     "Move to a new folder": ("In einen neuen Ordner verschieben", "Déplacer dans un nouveau dossier", "Mover a una carpeta nueva"),
     "Move to folder {}": ("In den Ordner {} verschieben", "Déplacer dans le dossier {}", "Mover a la carpeta {}"),
     "Keep them in the folder": ("Im Ordner lassen", "Les laisser dans le dossier", "Dejarlos en la carpeta"),
-    "Rename back anyway": ("Trotzdem zurückbenennen", "Renommer à l'origine quand même", "Recuperar el nombre de todos modos"),
-    "Leave it renamed for now": ("Erst mal umbenannt lassen", "Le laisser renommé pour l'instant", "Dejarla así por ahora"),
     "{} renamed back to {}": ("{} zurückbenannt in {}", "{} renommé à l'origine en {}", "{} ha recuperado el nombre {}"),
     ("{n} new file moved to {}", "{n} new files moved to {}"): (
         ("{n} neue Datei nach {} verschoben", "{n} neue Dateien nach {} verschoben"),
