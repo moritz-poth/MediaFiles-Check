@@ -2725,15 +2725,20 @@ export component AppWindow inherits CheckWindow {
     public function home() {
         root.page = root.start-of(root.tab, root.step);
     }
+    // Reiter und Schritt, in denen der laufende Lauf gestartet wurde: nur dort steht sein Fortschritt (user 2026-11-16)
+    out property <int> work-tab: 3;
+    property <int> work-step;
     public function select-tab(t: int) {
         root.tab = t;
         root.page = t == 0 ? root.page0 : t == 1 ? root.page1 : t == 2 ? root.page2 : t == 3 ? root.page3 : t == 5 ? root.page5 : root.page6;
-        // während eines Laufs zeigen DBs prüfen und MXFs pflegen seinen Fortschritt statt der Startseiten
-        if root.work-busy && (t == 1 || t == 3) { root.page = Page.working; }
+        if root.work-busy && t == root.work-tab { root.page = Page.working; root.step = root.work-step; }
+        // ein beendeter Lauf hinterlässt keine stehengebliebene Fortschrittsseite
+        if !root.work-busy && root.page == Page.working { root.page = root.start-of(t, root.step); }
         if root.step-of(root.page) >= 0 { root.step = root.step-of(root.page); }
     }
     changed page => {
         page-flick.content-y = 0;
+        if root.page == Page.working { root.work-tab = root.tab; root.work-step = root.step; }
         if root.tab-of(root.page) >= 0 && root.tab-of(root.page) != root.tab { root.tab = root.tab-of(root.page); }
         if root.step-of(root.page) >= 0 { root.step = root.step-of(root.page); }
         if root.page == Page.result { root.has-result = true; }
@@ -3017,6 +3022,7 @@ export component AppWindow inherits CheckWindow {
                         if root.tab == 2 { Projects.view = i; }
                         if root.tab == 0 { Exchange.view = i + 1; }
                         root.page = root.start-of(root.tab, i);
+                        if root.work-busy && root.tab == root.work-tab && i == root.work-step { root.page = Page.working; root.step = i; }
                     }
                 }
             }

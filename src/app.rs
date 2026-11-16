@@ -490,18 +490,18 @@ impl Drop for WorkGuard {
 
 /// Progress of a run on the Working page from its thread: the file being read and how far into its folder
 /// (at most ten updates a second, the last one always).
-fn work_progress(weak: slint::Weak<AppWindow>) -> impl FnMut(usize, usize, &str) {
-    let mut last = std::time::Instant::now() - Duration::from_secs(1);
-    move |i, n, place| {
-        if last.elapsed() < Duration::from_millis(100) && i + 1 < n {
-            return;
-        }
-        last = std::time::Instant::now();
-        let (w, text, value) = (weak.clone(), shorten(place, LINE_CHARS), (i + 1) as f32 / n.max(1) as f32);
+/// Progress over the whole run: every call is one file of `total`; shows the time left like a scan.
+fn work_progress(weak: slint::Weak<AppWindow>, total: usize) -> impl FnMut(usize, usize, &str) {
+    let (mut done, mut eta) = (0usize, Eta::default());
+    move |_, _, place| {
+        done += 1;
+        let Some(left) = eta.tick(done.min(total) as u64, total.max(1) as u64) else { return };
+        let (w, text, value) = (weak.clone(), shorten(place, LINE_CHARS), done as f32 / total.max(1) as f32);
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(a) = w.upgrade() {
                 a.set_work_text(text.into());
-                a.set_work_value(value);
+                a.set_work_value(value.min(1.0));
+                a.set_work_eta(left);
             }
         });
     }
@@ -510,10 +510,11 @@ fn work_progress(weak: slint::Weak<AppWindow>) -> impl FnMut(usize, usize, &str)
 fn begin_work(app: &AppWindow) -> Option<WorkGuard> {
     if WORK_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
         log::write("refused: another run is still going");
-        app.set_page(Page::Working);
+        app.invoke_select_tab(app.get_work_tab());
         return None;
     }
     app.set_work_busy(true);
+    app.set_work_eta(-1);
     Some(WorkGuard(app.as_weak()))
 }
 
@@ -2017,7 +2018,7 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
     app.set_work_what(3);
     app.set_page(Page::Working);
     let (tx, rx) = std::sync::mpsc::channel::<(Vec<(Rebalanced, rebalance::Moved)>, Vec<NoticeRow>)>();
-    let mut progress = work_progress(app.as_weak());
+    let mut progress = work_progress(app.as_weak(), chosen.iter().map(|(p, _)| p.count).sum());
     std::thread::spawn(move || {
         // one run at a time; released when this thread ends
         let _work = work;
@@ -3189,7 +3190,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // one run at a time; released when this thread ends
                 let _work = work;
                 check_access(&access, &roots, &gate);
-                let mut progress = work_progress(access.clone());
+                let mut progress = work_progress(access.clone(), rebalance::mxf_count(&roots));
                 let _ = tx.send(rebalance::full_folders(&roots, limit, &away, &|mxf, name| is_mc_folder(mxf, name, &computer), &gate, &mut progress));
             });
             let (timer, weak, rebal) = (Rc::new(slint::Timer::default()), weak.clone(), rebal.clone());

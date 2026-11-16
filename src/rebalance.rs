@@ -79,6 +79,15 @@ fn subdirs(mxf: &Path) -> Vec<String> {
     v
 }
 
+/// MXF files in all folders of these drives: the total for the progress of `full_folders`.
+pub fn mxf_count(volumes: &[PathBuf]) -> usize {
+    let mxf_files = |d: &Path| fs::read_dir(d).map(|rd| rd.flatten().filter(|e| {
+        let n = e.file_name().to_string_lossy().to_lowercase();
+        !n.starts_with('.') && n.ends_with(".mxf")
+    }).count()).unwrap_or(0);
+    volumes.iter().map(|v| crate::mxf_dir(v)).map(|mxf| subdirs(&mxf).iter().map(|d| mxf_files(&mxf.join(d))).sum::<usize>()).sum()
+}
+
 /// The rebalanced folders of `main` in this MXF folder, by number.
 pub fn members(mxf: &Path, main: &str) -> Vec<String> {
     let base = key(base_name(main));
