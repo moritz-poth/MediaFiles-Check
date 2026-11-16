@@ -61,6 +61,10 @@ export struct TestRow {
 export struct ReportRow {
     text: string,
     level: int,
+    // Befund-Nummer (Ebene 1 und 2), Anzahl Dateinamen, Dateinamen gerade aufgeklappt
+    group: int,
+    names: int,
+    open: bool,
 }
 
 // Ordnerbaum im Fenster „Fehlende Medien“: Ebene 0 = Projekt
@@ -506,6 +510,7 @@ component FillScroll inherits Rectangle {
 component RowList inherits Rectangle {
     in property <[ReportRow]> rows;
     in property <length> limit: 360px;
+    callback toggled(int);
     height: min(list.preferred-height + 20px, root.limit);
     background: Theme.card;
     border-width: 1px;
@@ -524,14 +529,38 @@ component RowList inherits Rectangle {
             spacing: 4px;
             for r[i] in root.rows: VerticalLayout {
                 padding-top: r.level == 0 && i > 0 ? 10px : 0;
-                padding-left: r.level == 2 ? 16px : 0;
-                Text {
-                    width: Metrics.content-width - 40px - (r.level == 2 ? 16px : 0);
+                padding-left: r.level == 2 ? 32px : 0;
+                if r.level != 1: Text {
+                    width: Metrics.content-width - 40px - (r.level == 2 ? 32px : 0);
                     text: r.text;
                     wrap: word-wrap;
                     font-size: 12px;
                     font-weight: r.level == 0 ? 600 : 400;
-                    color: r.level == 0 ? Theme.text : r.level == 1 ? Theme.warning : Theme.muted;
+                    color: r.level == 0 ? Theme.text : Theme.muted;
+                }
+                // Befund: Klick klappt seine Dateinamen auf/zu (anfangs zu)
+                if r.level == 1: Rectangle {
+                    height: ft.preferred-height;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            width: 10px;
+                            text: r.names == 0 ? "" : r.open ? "▾" : "▸";
+                            font-size: 12px;
+                            color: Theme.muted;
+                        }
+                        ft := Text {
+                            width: Metrics.content-width - 56px;
+                            text: r.text;
+                            wrap: word-wrap;
+                            font-size: 12px;
+                            color: Theme.warning;
+                        }
+                    }
+                    if r.names > 0: TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.toggled(r.group); }
+                    }
                 }
             }
         }
@@ -2774,6 +2803,8 @@ export component AppWindow inherits CheckWindow {
     in property <string> check-volumes;
     callback check-drives();
     callback check-folder();
+    // Prüfergebnis: Dateinamen eines Befunds auf-/zuklappen
+    callback toggle-finding(int);
     callback back();
     callback show-rename();
     callback rename();
@@ -3150,7 +3181,7 @@ ScrollBox {
             PageHead {
                 title: root.checked-folders == 0 ? @tr("No MXF folders found")
                             : root.bad-folders == 0 ? @tr("{n} folder matches its database" | "All {n} folders match their database" % root.checked-folders)
-                            : @tr("{n} folder of {} differs from its database" | "{n} folders of {} differ from their database" % root.bad-folders, root.checked-folders);
+                            : @tr("{n} folder differs from its database" | "{n} folders differ from their database" % root.bad-folders);
                 CheckButton {
                     text: @tr("Check folder…");
                     clicked => { root.check-folder(); }
@@ -3169,7 +3200,7 @@ ScrollBox {
                 title: @tr("DIFFERENCES");
                 // the page never scrolls: fixed window 620 − 80 tab bar = 540, minus 28 top and 36 bottom (= the
                 // left margin), the head, section titles, gaps and the texts below (measured, they differ per language)
-                RowList { rows: root.rows; limit: 540px - 28px - 36px - 32px - 24px - 26px - 10px - note-height.preferred-height
+                RowList { rows: root.rows; toggled(n) => { root.toggle-finding(n); } limit: 540px - 28px - 36px - 32px - 24px - 26px - 10px - note-height.preferred-height
                     - (root.rename-count > 0 ? 24px + 26px + rename-height.preferred-height + 10px + 32px : 0px); }
                 Para {
                     text: @tr("Files not in the database may be missing in Media Composer; entries without a file show up as offline media. To rebuild a database: quit Media Composer, move msmMMOB.mdb and msmFMID.pmr out of the folder and start Media Composer again.");
@@ -3178,7 +3209,7 @@ ScrollBox {
                 }
             }
             if root.rename-count > 0: Section {
-                title: @tr("FOR MEDIA COMPOSER");
+                title: @tr("REWRITE DATABASES WITH MEDIA COMPOSER");
                 Para {
                     text: @tr("{n} of these folders has a name Media Composer does not update. MediaFiles Check can rename it so that Media Composer rebuilds its database, and rename it back afterwards." | "{n} of these folders have names Media Composer does not update. MediaFiles Check can rename them so that Media Composer rebuilds their databases, and rename them back afterwards." % root.rename-count);
                 }
@@ -3196,7 +3227,8 @@ ScrollBox {
 
         // ── Umbenennen ─────────────────────────────────────────
         if root.page == Page.rename: VerticalLayout {
-            spacing: Metrics.spacing;
+            spacing: 14px;
+            height: Metrics.page-height;
             PageHead {
                 title: @tr("Rename for Media Composer");
                 CheckButton {
@@ -3210,40 +3242,44 @@ ScrollBox {
                     clicked => { root.rename(); }
                 }
             }
-            VerticalLayout {
+            // Warnung zuerst (user 2026-11-16)
+            Para {
+                text: root.mc-running ? @tr("Quit Media Composer first.") : @tr("Media Composer must stay closed while renaming.");
+                color: Theme.warning;
+            }
+            if root.renamed.length > 0: RenameBlocked { }
+            Para { text: @tr("Media Composer only rewrites the databases of folders named like its own. That takes three steps:"); }
+            for t[i] in [
+                @tr("Rename – each folder below gets the next free number (“1”, on network drives “<computer>.1”). Its original name and every media file are remembered."),
+                @tr("Start Media Composer – it scans these folders and writes new msmFMID.pmr and msmMMOB.mdb files."),
+                @tr("Quit Media Composer and rename the folders back under Check DBs › New databases – they get their old names and keep the new databases."),
+            ]: HorizontalLayout {
                 spacing: 10px;
-                Rectangle {
-                    height: min(rl.preferred-height, 240px);
-                    rf := Flickable {
-                        content-height: rl.preferred-height;
-                        rl := VerticalLayout {
-                            x: 0;
-                            width: rf.width - 10px;
-                            spacing: 6px;
-                            for r in root.rename-rows: HorizontalLayout {
-                                spacing: 8px;
-                                Text {
-                                    text: r.from;
-                                    horizontal-stretch: 1;
-                                    overflow: elide;
-                                    color: Theme.text;
-                                }
-                                Text {
-                                    text: "→ " + r.to;
-                                    color: Theme.muted;
-                                }
-                            }
+                Text { text: (i + 1) + "."; width: 18px; color: Theme.muted; }
+                Text { text: t; width: Metrics.content-width - 28px; wrap: word-wrap; color: Theme.text; }
+            }
+            Card {
+                vertical-stretch: 1;
+                min-height: 0px;
+                FillScroll {
+                    for r[i] in root.rename-rows: CardRow {
+                        first: i == 0;
+                        Text {
+                            text: r.from;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            color: Theme.text;
+                        }
+                        Text {
+                            text: "→ " + r.to;
+                            vertical-alignment: center;
+                            color: Theme.muted;
                         }
                     }
                 }
-                Para {
-                    text: @tr("The original names and all media files are remembered. Once Media Composer has rebuilt the databases, rename the folders back under Check DBs › New databases.");
-                }
-                Para {
-                    text: root.mc-running ? @tr("Quit Media Composer first.") : @tr("Media Composer must stay closed while renaming.");
-                    color: Theme.warning;
-                }
             }
+            Rectangle { vertical-stretch: 1; }
         }
 
         // ── Frage beim Zurückbenennen ─────────────────────────

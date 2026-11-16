@@ -88,7 +88,7 @@ Every folder in `Avid MediaFiles/MXF` has two Avid database files, `msmFMID.pmr`
 - **No database** / **msmFMID.pmr or msmMMOB.mdb is missing** / **Database is empty**.
 - **Database unreadable** – an unknown format. MediaFiles Check never guesses.
 
-Up to 10 file names are shown per finding. Folders Media Composer does not update itself get **Rename for Media Composer…** right there.
+Click a finding to show up to 10 of its file names; they are closed at first. Folders Media Composer does not update itself get **Rename for Media Composer…** right there.
 
 ![Check result](images/en/check.png)
 

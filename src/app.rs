@@ -1231,16 +1231,25 @@ fn apply_all(app: &AppWindow, others: &Others, s: &Settings) {
     }
 }
 
-fn rows(reports: &[FolderReport], lang: &str, more: &str) -> Vec<ReportRow> {
+/// Rows of the check result; the file names of a finding only while it is open (`open` = finding numbers,
+/// counted over all folders; user 2026-11-16: closed at first, they take a lot of room).
+fn rows(reports: &[FolderReport], lang: &str, more: &str, open: &HashSet<i32>) -> Vec<ReportRow> {
     let mut rows = vec![];
+    let mut n = -1;
+    let row = |text: String, level, group, names: usize, is_open| ReportRow { text: text.into(), level, group, names: names as i32, open: is_open };
     for r in reports.iter().filter(|r| !r.findings.is_empty()) {
-        rows.push(ReportRow { text: r.place.clone().into(), level: 0 });
+        rows.push(row(r.place.clone(), 0, -1, 0, false));
         for f in &r.findings {
-            rows.push(ReportRow { text: f.describe(r.files, lang).into(), level: 1 });
+            n += 1;
             let names = f.names();
-            rows.extend(names.iter().take(NAMES_SHOWN).map(|n| ReportRow { text: n.clone().into(), level: 2 }));
+            let is_open = open.contains(&n);
+            rows.push(row(f.describe(r.files, lang), 1, n, names.len(), is_open));
+            if !is_open {
+                continue;
+            }
+            rows.extend(names.iter().take(NAMES_SHOWN).map(|x| row(x.clone(), 2, n, 0, false)));
             if names.len() > NAMES_SHOWN {
-                rows.push(ReportRow { text: more.replace("{}", &(names.len() - NAMES_SHOWN).to_string()).into(), level: 2 });
+                rows.push(row(more.replace("{}", &(names.len() - NAMES_SHOWN).to_string()), 2, n, 0, false));
             }
         }
     }
@@ -1251,6 +1260,9 @@ fn rows(reports: &[FolderReport], lang: &str, more: &str) -> Vec<ReportRow> {
 #[derive(Default)]
 struct Checked {
     candidates: Vec<(PathBuf, String)>,
+    /// for opening and closing the file names of a finding
+    reports: Vec<FolderReport>,
+    open: HashSet<i32>,
 }
 
 type Last = Arc<Mutex<Checked>>;
@@ -1305,8 +1317,8 @@ fn start_check(app: &AppWindow, roots: Vec<PathBuf>, last: Last) {
             app.set_checked_folders(reports.len() as i32);
             app.set_bad_folders(reports.iter().filter(|r| !r.findings.is_empty()).count() as i32);
             app.set_work_can_pause(false);
-            app.set_rows(ModelRc::new(VecModel::from(rows(&reports, &lang, &app.get_txt_more()))));
-            *last.lock().unwrap() = Checked { candidates };
+            app.set_rows(ModelRc::new(VecModel::from(rows(&reports, &lang, &app.get_txt_more(), &HashSet::new()))));
+            *last.lock().unwrap() = Checked { candidates, reports, open: HashSet::new() };
             app.set_page(Page::Result);
         });
     });
@@ -2720,6 +2732,18 @@ fn main() -> Result<(), slint::PlatformError> {
         let (weak, last) = (app.as_weak(), last.clone());
         // the volumes of the current scan (Scan tab) that are still connected
         move || start_check(&weak.unwrap(), inventory_ui::scanned_volumes(), last.clone())
+    });
+
+    app.on_toggle_finding({
+        let (weak, last) = (app.as_weak(), last.clone());
+        move |n| {
+            let app = weak.unwrap();
+            let mut l = last.lock().unwrap();
+            if !l.open.remove(&n) {
+                l.open.insert(n);
+            }
+            app.set_rows(ModelRc::new(VecModel::from(rows(&l.reports, &app.get_language(), &app.get_txt_more(), &l.open))));
+        }
     });
 
     app.on_check_folder({

@@ -8,6 +8,26 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
+msgid "REWRITE DATABASES WITH MEDIA COMPOSER"
+msgstr "RÉÉCRIRE LES BASES AVEC MEDIA COMPOSER"
+
+msgid "{n} folder differs from its database"
+msgid_plural "{n} folders differ from their database"
+msgstr[0] "{n} dossier diffère de sa base"
+msgstr[1] "{n} dossiers diffèrent de leur base"
+
+msgid "Media Composer only rewrites the databases of folders named like its own. That takes three steps:"
+msgstr "Media Composer ne réécrit que les bases des dossiers nommés comme les siens. Cela se fait en trois étapes :"
+
+msgid "Rename – each folder below gets the next free number (“1”, on network drives “<computer>.1”). Its original name and every media file are remembered."
+msgstr "Renommer – chaque dossier ci-dessous reçoit le prochain numéro libre (« 1 », sur les disques réseau « <ordinateur>.1 »). Son nom d’origine et chaque fichier média sont mémorisés."
+
+msgid "Start Media Composer – it scans these folders and writes new msmFMID.pmr and msmMMOB.mdb files."
+msgstr "Lancer Media Composer – il analyse ces dossiers et écrit de nouveaux fichiers msmFMID.pmr et msmMMOB.mdb."
+
+msgid "Quit Media Composer and rename the folders back under Check DBs › New databases – they get their old names and keep the new databases."
+msgstr "Quitter Media Composer et renommer les dossiers à l’origine sous Vérifier BD › Nouvelles bases – ils retrouvent leur ancien nom et gardent les nouvelles bases."
+
 msgid "LOOKING FOR DUPLICATES"
 msgstr "RECHERCHE DE DOUBLONS"
 
@@ -1124,11 +1144,6 @@ msgid_plural "All {n} folders match their database"
 msgstr[0] "{n} dossier correspond à sa base de données"
 msgstr[1] "Les {n} dossiers correspondent à leur base de données"
 
-msgid "{n} folder of {} differs from its database"
-msgid_plural "{n} folders of {} differ from their database"
-msgstr[0] "{n} dossier sur {} diffère de sa base de données"
-msgstr[1] "{n} dossiers sur {} diffèrent de leur base de données"
-
 msgid "DIFFERENCES"
 msgstr "DIFFÉRENCES"
 
@@ -1222,9 +1237,6 @@ msgstr "Quittez Media Composer avant de renommer à l'origine."
 msgid "Rename back"
 msgstr "Renommer à l'origine"
 
-msgid "FOR MEDIA COMPOSER"
-msgstr "POUR MEDIA COMPOSER"
-
 msgid "{n} of these folders has a name Media Composer does not update. MediaFiles Check can rename it so that Media Composer rebuilds its database, and rename it back afterwards."
 msgid_plural "{n} of these folders have names Media Composer does not update. MediaFiles Check can rename them so that Media Composer rebuilds their databases, and rename them back afterwards."
 msgstr[0] "{n} de ces dossiers porte un nom que Media Composer ne met pas à jour. MediaFiles Check peut le renommer pour que Media Composer reconstruise sa base de données, puis lui rendre son nom."
@@ -1232,9 +1244,6 @@ msgstr[1] "{n} de ces dossiers portent des noms que Media Composer ne met pas à
 
 msgid "Rename for Media Composer…"
 msgstr "Renommer pour Media Composer…"
-
-msgid "The original names and all media files are remembered. Once Media Composer has rebuilt the databases, rename the folders back under Check DBs › New databases."
-msgstr "Les noms d'origine et tous les fichiers médias sont mémorisés. Dès que Media Composer a reconstruit les bases de données, rendez aux dossiers leur nom sous Vérifier BD › Nouvelles bases."
 
 msgid "Quit Media Composer first."
 msgstr "Quittez d'abord Media Composer."

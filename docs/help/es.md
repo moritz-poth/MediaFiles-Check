@@ -88,7 +88,7 @@ Cada carpeta de `Avid MediaFiles/MXF` tiene dos archivos de base de datos de Avi
 - **Sin base de datos** / **falta msmFMID.pmr o msmMMOB.mdb** / **base de datos vacía**.
 - **Base de datos ilegible**: un formato desconocido. MediaFiles Check nunca adivina.
 
-Se muestran hasta 10 nombres de archivo por hallazgo. Las carpetas que Media Composer no actualiza por sí mismo tienen ahí mismo **Cambiar el nombre para Media Composer…**.
+Un clic en un hallazgo muestra hasta 10 de sus nombres de archivo; al principio están plegados. Las carpetas que Media Composer no actualiza por sí mismo tienen ahí mismo **Cambiar el nombre para Media Composer…**.
 
 ![Resultado de la comprobación](images/es/check.png)
 

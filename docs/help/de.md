@@ -88,7 +88,7 @@ Jeder Ordner in `Avid MediaFiles/MXF` hat zwei Avid-Datenbankdateien, `msmFMID.p
 - **Keine Datenbank** / **msmFMID.pmr oder msmMMOB.mdb fehlt** / **Datenbank ist leer**.
 - **Datenbank unlesbar** – ein unbekanntes Format. MediaFiles Check rät nie.
 
-Pro Befund stehen bis zu 10 Dateinamen da. Für Ordner, die Media Composer nicht selbst aktualisiert, gibt es gleich dort **Für Media Composer umbenennen…**.
+Ein Klick auf einen Befund zeigt bis zu 10 seiner Dateinamen; anfangs sind sie zugeklappt. Für Ordner, die Media Composer nicht selbst aktualisiert, gibt es gleich dort **Für Media Composer umbenennen…**.
 
 ![Prüfergebnis](images/de/check.png)
 

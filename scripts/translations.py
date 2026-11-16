@@ -9,6 +9,12 @@ PLURAL = {"de": "nplurals=2; plural=(n != 1);", "fr": "nplurals=2; plural=(n > 1
 
 # English: (German, French, Spanish). Plural entries: (singular, plural) -> ((de1, de2), (fr1, fr2), (es1, es2))
 T = {
+    'REWRITE DATABASES WITH MEDIA COMPOSER': ('DATENBANKEN MIT MEDIA COMPOSER NEU SCHREIBEN', 'RÉÉCRIRE LES BASES AVEC MEDIA COMPOSER', 'REESCRIBIR LAS BASES CON MEDIA COMPOSER'),
+    ('{n} folder differs from its database', '{n} folders differ from their database'): (('{n} Ordner weicht von seiner Datenbank ab', '{n} Ordner weichen von ihrer Datenbank ab'), ('{n} dossier diffère de sa base', '{n} dossiers diffèrent de leur base'), ('{n} carpeta difiere de su base de datos', '{n} carpetas difieren de su base de datos')),
+    'Media Composer only rewrites the databases of folders named like its own. That takes three steps:': ('Media Composer schreibt nur die Datenbanken von Ordnern neu, die wie seine eigenen heißen. Dafür gibt es drei Schritte:', 'Media Composer ne réécrit que les bases des dossiers nommés comme les siens. Cela se fait en trois étapes :', 'Media Composer solo reescribe las bases de las carpetas con un nombre como los suyos. Son tres pasos:'),
+    'Rename – each folder below gets the next free number (“1”, on network drives “<computer>.1”). Its original name and every media file are remembered.': ('Umbenennen – jeder Ordner unten bekommt die nächste freie Nummer („1“, auf Netzlaufwerken „<Computer>.1“). Sein Originalname und jede Mediendatei werden gemerkt.', 'Renommer – chaque dossier ci-dessous reçoit le prochain numéro libre (« 1 », sur les disques réseau « <ordinateur>.1 »). Son nom d’origine et chaque fichier média sont mémorisés.', 'Renombrar: cada carpeta de abajo recibe el siguiente número libre («1», en unidades de red «<ordenador>.1»). Se recuerdan su nombre original y cada archivo de medios.'),
+    'Start Media Composer – it scans these folders and writes new msmFMID.pmr and msmMMOB.mdb files.': ('Media Composer starten – er liest diese Ordner und schreibt neue msmFMID.pmr- und msmMMOB.mdb-Dateien.', 'Lancer Media Composer – il analyse ces dossiers et écrit de nouveaux fichiers msmFMID.pmr et msmMMOB.mdb.', 'Abrir Media Composer: analiza estas carpetas y escribe archivos msmFMID.pmr y msmMMOB.mdb nuevos.'),
+    'Quit Media Composer and rename the folders back under Check DBs › New databases – they get their old names and keep the new databases.': ('Media Composer beenden und die Ordner unter DBs prüfen › Neue Datenbanken zurückbenennen – sie bekommen ihre alten Namen und behalten die neuen Datenbanken.', 'Quitter Media Composer et renommer les dossiers à l’origine sous Vérifier BD › Nouvelles bases – ils retrouvent leur ancien nom et gardent les nouvelles bases.', 'Cerrar Media Composer y devolver el nombre a las carpetas en Comprobar BD › Bases nuevas: recuperan su nombre antiguo y conservan las bases nuevas.'),
     'LOOKING FOR DUPLICATES': ('SUCHE DUPLIKATE', 'RECHERCHE DE DOUBLONS', 'BUSCANDO DUPLICADOS'),
     'LOOKING FOR FULL FOLDERS': ('SUCHE VOLLE ORDNER', 'RECHERCHE DE DOSSIERS PLEINS', 'BUSCANDO CARPETAS LLENAS'),
     'REBALANCING FOLDERS': ('TEILE ORDNER AUF', 'RÉÉQUILIBRAGE DES DOSSIERS', 'REEQUILIBRANDO CARPETAS'),
@@ -370,10 +376,6 @@ T = {
         ("{n} Ordner passt zu seiner Datenbank", "Alle {n} Ordner passen zu ihrer Datenbank"),
         ("{n} dossier correspond à sa base de données", "Les {n} dossiers correspondent à leur base de données"),
         ("{n} carpeta coincide con su base de datos", "Las {n} carpetas coinciden con su base de datos")),
-    ("{n} folder of {} differs from its database", "{n} folders of {} differ from their database"): (
-        ("{n} von {} Ordnern weicht von seiner Datenbank ab", "{n} von {} Ordnern weichen von ihrer Datenbank ab"),
-        ("{n} dossier sur {} diffère de sa base de données", "{n} dossiers sur {} diffèrent de leur base de données"),
-        ("{n} de {} carpetas difiere de su base de datos", "{n} de {} carpetas difieren de su base de datos")),
     "DIFFERENCES": ("ABWEICHUNGEN", "DIFFÉRENCES", "DIFERENCIAS"),
     "Files not in the database may be missing in Media Composer; entries without a file show up as offline media. To rebuild a database: quit Media Composer, move msmMMOB.mdb and msmFMID.pmr out of the folder and start Media Composer again.": (
         "Dateien, die nicht in der Datenbank stehen, fehlen eventuell in Media Composer; Einträge ohne Datei erscheinen als Offline-Medien. Datenbank neu aufbauen: Media Composer beenden, msmMMOB.mdb und msmFMID.pmr aus dem Ordner herausbewegen und Media Composer wieder starten.",
@@ -424,7 +426,6 @@ T = {
         "Abre Media Composer y espera a que haya analizado los discos; el punto se vuelve verde en cuanto ha escrito la base de datos. Después cierra Media Composer y recupera el nombre de las carpetas."),
     "Quit Media Composer before renaming back.": ("Media Composer vor dem Zurückbenennen beenden.", "Quittez Media Composer avant de renommer à l'origine.", "Cierra Media Composer antes de recuperar el nombre."),
     "Rename back": ("Zurückbenennen", "Renommer à l'origine", "Recuperar el nombre"),
-    "FOR MEDIA COMPOSER": ("FÜR MEDIA COMPOSER", "POUR MEDIA COMPOSER", "PARA MEDIA COMPOSER"),
     ("{n} of these folders has a name Media Composer does not update. MediaFiles Check can rename it so that Media Composer rebuilds its database, and rename it back afterwards.",
      "{n} of these folders have names Media Composer does not update. MediaFiles Check can rename them so that Media Composer rebuilds their databases, and rename them back afterwards."): (
         ("{n} dieser Ordner hat einen Namen, den Media Composer nicht aktualisiert. MediaFiles Check kann ihn umbenennen, damit Media Composer seine Datenbank neu aufbaut, und danach zurückbenennen.",
@@ -434,10 +435,6 @@ T = {
         ("{n} de estas carpetas tiene un nombre que Media Composer no actualiza. MediaFiles Check puede cambiarle el nombre para que Media Composer reconstruya su base de datos y después recuperarlo.",
          "{n} de estas carpetas tienen nombres que Media Composer no actualiza. MediaFiles Check puede cambiarles el nombre para que Media Composer reconstruya sus bases de datos y después recuperarlos.")),
     "Rename for Media Composer…": ("Für Media Composer umbenennen…", "Renommer pour Media Composer…", "Cambiar el nombre para Media Composer…"),
-    "The original names and all media files are remembered. Once Media Composer has rebuilt the databases, rename the folders back under Check DBs › New databases.": (
-        "Die Originalnamen und alle Mediendateien werden gemerkt. Sobald Media Composer die Datenbanken neu aufgebaut hat, benennst du die Ordner unter DBs prüfen › Neue Datenbanken zurück.",
-        "Les noms d'origine et tous les fichiers médias sont mémorisés. Dès que Media Composer a reconstruit les bases de données, rendez aux dossiers leur nom sous Vérifier BD › Nouvelles bases.",
-        "Se recuerdan los nombres originales y todos los archivos de medios. Cuando Media Composer haya reconstruido las bases de datos, recupera el nombre de las carpetas en Comprobar BD › Bases nuevas."),
     "Quit Media Composer first.": ("Zuerst Media Composer beenden.", "Quittez d'abord Media Composer.", "Primero cierra Media Composer."),
     "Media Composer must stay closed while renaming.": ("Media Composer muss beim Umbenennen geschlossen bleiben.", "Media Composer doit rester fermé pendant le renommage.", "Media Composer debe permanecer cerrado mientras se cambian los nombres."),
     "Back": ("Zurück", "Retour", "Atrás"),

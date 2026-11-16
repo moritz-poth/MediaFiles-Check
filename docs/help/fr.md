@@ -88,7 +88,7 @@ Chaque dossier de `Avid MediaFiles/MXF` contient deux fichiers de base de donné
 - **Pas de base de données** / **msmFMID.pmr ou msmMMOB.mdb manque** / **Base de données vide**.
 - **Base de données illisible** – un format inconnu. MediaFiles Check ne devine jamais.
 
-Jusqu’à 10 noms de fichiers sont affichés par constat. Les dossiers que Media Composer ne met pas à jour lui-même ont directement **Renommer pour Media Composer…**.
+Un clic sur un constat affiche jusqu’à 10 de ses noms de fichiers ; ils sont d’abord repliés. Les dossiers que Media Composer ne met pas à jour lui-même ont directement **Renommer pour Media Composer…**.
 
 ![Résultat de la vérification](images/fr/check.png)
 
