@@ -35,7 +35,7 @@ Folder names can be anything, e.g. `1`, `Avid8.1` or `Mac Studio.1`. Every conne
 The **Scan** tab comes first: its scan is the basis for the other tabs.
 
 1. Scan › **Scan**: switch on the connected drives and the Avid Media Composer projects whose bins count (**Projects folder…** chooses the folder they are in), then **Scan volumes & projects**. The first scan reads the header of every media file and every bin; later ones only new or changed files and bins (a bin Media Composer saved since). After a few seconds the time left shows on the right under the bar. When it is done, the page says which scan is current.
-2. Scan › **History**: the newest 20 scans. **Load…** first checks that its volumes and projects are reachable – if not, it says which to connect. Then it makes the scan current again without scanning: back on the Scan page, its volumes and projects are switched on and the volumes show when they were scanned. **×** removes a scan at once; **Delete all…** asks first.
+2. Scan › **History**: the newest 20 scans. **Load…** first checks that its volumes and projects are reachable – if not, it says which to connect. Then it makes the scan current again without scanning: back on the Scan page, its volumes and projects are switched on and the volumes show when they were scanned. **×** removes a scan (asks first); **Delete all…** asks first.
 
 The scan also writes Exchange's *manifest*: every MXF file of the switched-on drives with a checksum – a list of files, no media. The first scan reads every file once, so it takes longer; later scans only read new or changed files. Loading a scan from the History makes its manifest current again (scans saved before this version have none).
 
@@ -130,7 +130,7 @@ The green dot marks the copy that stays (the one its folder's database knows, ot
 
 Maintain MXFs › **History** lists every rebalancing and duplicates run, newest first. A run whose databases are not rewritten yet says so and has **Rewrite databases**: it puts the databases of its changed folders aside, so Media Composer writes new ones, and renames the folders it does not update itself (rename them back under Check DBs › New databases).
 
-**Undo** moves everything back (never over an existing file) – rename renamed folders back first. **×** removes one entry, **Delete all…** all of them (asks first); nothing on the drives changes, but the run can then no longer be undone. While a run or an undo is going, its progress shows the folder and file it is working on.
+**Undo** moves everything back (never over an existing file) – rename renamed folders back first. **×** removes one entry, **Delete all…** all of them (both ask first); nothing on the drives changes, but the run can then no longer be undone. While a run or an undo is going, its progress shows the folder and file it is working on.
 
 ## Project links
 

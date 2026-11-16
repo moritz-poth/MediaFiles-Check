@@ -1151,10 +1151,20 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
         let ww = app.as_weak();
         move |which| {
             let app = ww.unwrap();
-            if which < 0 {
+            // × and "Delete all…" both ask in a macOS dialog first (user 2026-11-16)
+            {
                 let lang = app.get_language().to_string();
-                let n = app.global::<Inventory>().get_scans().row_count();
-                let q = if n == 1 {
+                let scans = app.global::<Inventory>().get_scans();
+                let n = scans.row_count();
+                let one = usize::try_from(which).ok().and_then(|i| scans.row_data(i));
+                let q = if let Some(sc) = one {
+                    pick(&lang, [
+                        "Really delete the scan from {}? This cannot be undone.",
+                        "Wirklich den Scan vom {} löschen? Das lässt sich nicht rückgängig machen.",
+                        "Vraiment supprimer l’analyse du {} ? C’est irréversible.",
+                        "¿Borrar de verdad el análisis del {}? No se puede deshacer.",
+                    ]).replace("{}", &sc.name)
+                } else if n == 1 {
                     pick(&lang, [
                         "Really delete the scan? This cannot be undone.",
                         "Wirklich den Scan löschen? Das lässt sich nicht rückgängig machen.",
@@ -1169,7 +1179,7 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
                         "¿Borrar de verdad los {n} análisis? No se puede deshacer.",
                     ]).replace("{n}", &n.to_string())
                 };
-                if !sure_delete_all(&lang, q) {
+                if !sure_delete(&lang, q) {
                     return;
                 }
             }

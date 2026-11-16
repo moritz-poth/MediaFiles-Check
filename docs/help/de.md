@@ -35,7 +35,7 @@ Die Ordner dürfen beliebig heißen, z. B. `1`, `Avid8.1` oder `Mac Studio.1`. J
 Der Reiter **Scannen** kommt zuerst: Sein Scan ist die Grundlage für die anderen Reiter.
 
 1. Scannen › **Scannen**: die angeschlossenen Laufwerke und die Avid-Media-Composer-Projekte einschalten, deren Bins zählen (**Projekte Ordner…** wählt den Ordner, in dem sie liegen), dann **Volumes & Projekt scannen**. Der erste Durchlauf liest den Kopf jeder Mediendatei und jeden Bin, spätere nur neue oder geänderte Dateien und Bins (ein Bin, den Media Composer seitdem gesichert hat). Nach ein paar Sekunden steht rechts unter dem Balken die Restzeit. Danach zeigt die Seite, welcher Scan aktuell ist.
-2. Scannen › **Verlauf**: die neuesten 20 Scans. **Laden…** prüft zuerst, ob seine Volumes und Projekte erreichbar sind – sonst steht da, was angeschlossen werden muss. Dann wird der Scan ohne neuen Durchlauf wieder aktuell: zurück auf der Seite Scannen sind seine Volumes und Projekte eingeschaltet, und bei den Volumes steht, wann sie gescannt wurden. **×** entfernt einen Scan sofort; **Alle löschen…** fragt vorher nach.
+2. Scannen › **Verlauf**: die neuesten 20 Scans. **Laden…** prüft zuerst, ob seine Volumes und Projekte erreichbar sind – sonst steht da, was angeschlossen werden muss. Dann wird der Scan ohne neuen Durchlauf wieder aktuell: zurück auf der Seite Scannen sind seine Volumes und Projekte eingeschaltet, und bei den Volumes steht, wann sie gescannt wurden. **×** entfernt einen Scan (mit Rückfrage); **Alle löschen…** fragt vorher nach.
 
 Der Scan schreibt auch das *Manifest* für Austausch: jede MXF-Datei der eingeschalteten Laufwerke mit Prüfsumme – eine Dateiliste, keine Medien. Der erste Scan liest dafür jede Datei einmal und dauert länger; spätere lesen nur neue oder geänderte Dateien. Ein aus dem Verlauf geladener Scan macht sein Manifest wieder aktuell (vor dieser Version gesicherte Scans haben keins).
 
@@ -130,7 +130,7 @@ Der grüne Punkt zeigt die Kopie, die bleibt (die, die die Datenbank ihres Ordne
 
 MXFs pflegen › **Verlauf** listet jeden Lauf von Rebalancing und Duplikaten, neueste zuerst. Steht bei einem Lauf „Datenbanken noch nicht neu geschrieben“, hat er **Datenbanken neu schreiben**: Das legt die Datenbanken seiner geänderten Ordner beiseite, damit Media Composer neue schreibt, und benennt die Ordner um, die Media Composer nicht selbst aktualisiert (zurückbenennen unter DBs prüfen › Neue Datenbanken).
 
-**Rückgängig** schiebt alles zurück (nie über eine vorhandene Datei) – umbenannte Ordner vorher zurückbenennen. **×** entfernt einen Eintrag, **Alle löschen…** alle (mit Rückfrage); auf den Laufwerken ändert sich nichts, der Lauf lässt sich danach aber nicht mehr rückgängig machen. Während ein Lauf oder ein Rückgängig läuft, zeigt der Fortschritt den Ordner und die Datei, an der er gerade ist.
+**Rückgängig** schiebt alles zurück (nie über eine vorhandene Datei) – umbenannte Ordner vorher zurückbenennen. **×** entfernt einen Eintrag, **Alle löschen…** alle (beides mit Rückfrage); auf den Laufwerken ändert sich nichts, der Lauf lässt sich danach aber nicht mehr rückgängig machen. Während ein Lauf oder ein Rückgängig läuft, zeigt der Fortschritt den Ordner und die Datei, an der er gerade ist.
 
 ## Projekt-Verlinkungen
 

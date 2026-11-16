@@ -35,7 +35,7 @@ Las carpetas pueden llamarse como sea, p. ej. `1`, `Avid8.1` o `Mac Studio.1`. C
 La pestaña **Analizar** va primero: su análisis es la base de las demás pestañas.
 
 1. Analizar › **Analizar**: activa las unidades conectadas y los proyectos de Avid Media Composer cuyos bins cuentan (**Carpeta de proyectos…** elige la carpeta donde están) y pulsa **Analizar volúmenes y proyectos**. El primer análisis lee la cabecera de cada archivo de medios y cada bin; los siguientes solo los archivos y bins nuevos o cambiados (un bin que Media Composer ha guardado desde entonces). A los pocos segundos aparece a la derecha, bajo la barra, el tiempo restante. Después, la página indica qué análisis es el actual.
-2. Analizar › **Historial**: los 20 análisis más recientes. **Cargar…** comprueba primero que sus volúmenes y proyectos estén accesibles; si no, dice qué conectar. Después el análisis vuelve a ser el actual sin leer de nuevo: de vuelta en la página Analizar, sus volúmenes y proyectos están activados y los volúmenes muestran cuándo se analizaron. **×** quita un análisis al instante; **Borrar todos…** pregunta antes.
+2. Analizar › **Historial**: los 20 análisis más recientes. **Cargar…** comprueba primero que sus volúmenes y proyectos estén accesibles; si no, dice qué conectar. Después el análisis vuelve a ser el actual sin leer de nuevo: de vuelta en la página Analizar, sus volúmenes y proyectos están activados y los volúmenes muestran cuándo se analizaron. **×** quita un análisis (pregunta antes); **Borrar todos…** pregunta antes.
 
 El análisis también escribe el *manifiesto* de Intercambio: cada archivo MXF de las unidades activadas con una suma de comprobación; una lista de archivos, sin medios. Para ello el primer análisis lee cada archivo una vez y tarda más; los siguientes solo leen archivos nuevos o modificados. Un análisis cargado desde el Historial vuelve a hacer actual su manifiesto (los guardados antes de esta versión no tienen).
 
@@ -130,7 +130,7 @@ El punto verde marca la copia que se queda (la que conoce la base de datos de su
 
 Mantenimiento MXF › **Historial** muestra cada operación de reequilibrado y de duplicados, la más reciente arriba. Una operación cuyas bases aún no se han reescrito lo indica y tiene **Reescribir bases de datos**: aparta las bases de sus carpetas cambiadas, para que Media Composer escriba otras nuevas, y renombra las carpetas que él no actualiza solo (devuélveles el nombre en Comprobar BD › Bases nuevas).
 
-**Deshacer** lo devuelve todo (nunca encima de un archivo existente); antes devuelve el nombre a las carpetas renombradas. **×** quita una entrada, **Borrar todos…** todas (pregunta antes); en las unidades no cambia nada, pero la operación ya no se puede deshacer.
+**Deshacer** lo devuelve todo (nunca encima de un archivo existente); antes devuelve el nombre a las carpetas renombradas. **×** quita una entrada, **Borrar todos…** todas (ambos preguntan antes); en las unidades no cambia nada, pero la operación ya no se puede deshacer.
 
 ## Vínculos de proyecto
 

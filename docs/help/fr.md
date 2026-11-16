@@ -35,7 +35,7 @@ Les dossiers peuvent porter n’importe quel nom, p. ex. `1`, `Avid8.1` ou `Mac 
 L’onglet **Analyser** vient en premier : son analyse sert de base aux autres onglets.
 
 1. Analyser › **Analyser** : activez les disques connectés et les projets Avid Media Composer dont les chutiers comptent (**Dossier des projets…** choisit le dossier où ils se trouvent), puis **Analyser volumes et projets**. La première analyse lit l’en-tête de chaque fichier média et chaque chutier ; les suivantes seulement les fichiers et chutiers nouveaux ou modifiés (un chutier que Media Composer a enregistré depuis). Après quelques secondes, le temps restant s’affiche à droite sous la barre. Ensuite, la page indique quelle analyse est actuelle.
-2. Analyser › **Historique** : les 20 analyses les plus récentes. **Charger…** vérifie d’abord que ses volumes et projets sont accessibles – sinon il indique quoi connecter. Ensuite l’analyse redevient actuelle sans nouvelle lecture : de retour sur la page Analyser, ses volumes et projets sont activés et les volumes indiquent quand ils ont été analysés. **×** retire une analyse aussitôt ; **Tout supprimer…** demande d’abord.
+2. Analyser › **Historique** : les 20 analyses les plus récentes. **Charger…** vérifie d’abord que ses volumes et projets sont accessibles – sinon il indique quoi connecter. Ensuite l’analyse redevient actuelle sans nouvelle lecture : de retour sur la page Analyser, ses volumes et projets sont activés et les volumes indiquent quand ils ont été analysés. **×** retire une analyse (après confirmation) ; **Tout supprimer…** demande d’abord.
 
 L’analyse écrit aussi le *manifeste* d’Échange : chaque fichier MXF des disques activés avec une somme de contrôle – une liste de fichiers, sans médias. La première analyse lit pour cela chaque fichier une fois et prend plus de temps ; les suivantes ne lisent que les fichiers nouveaux ou modifiés. Une analyse chargée depuis l’Historique rend son manifeste de nouveau actuel (les analyses enregistrées avant cette version n’en ont pas).
 
@@ -130,7 +130,7 @@ Le point vert marque la copie qui reste (celle que connaît la base de son dossi
 
 Entretien MXF › **Historique** liste chaque opération de rééquilibrage et de doublons, la plus récente en haut. Une opération dont les bases ne sont pas encore réécrites l’indique et propose **Réécrire les bases** : ses dossiers modifiés voient leurs bases mises de côté, pour que Media Composer en écrive de nouvelles, et les dossiers qu’il ne met pas à jour lui-même sont renommés (à renommer à l’origine sous Vérifier BD › Nouvelles bases).
 
-**Annuler** remet tout en place (jamais par-dessus un fichier existant) – renommez d’abord les dossiers renommés à l’origine. **×** retire une entrée, **Tout supprimer…** toutes (après confirmation) ; rien ne change sur les disques, mais l’opération ne peut plus être annulée.
+**Annuler** remet tout en place (jamais par-dessus un fichier existant) – renommez d’abord les dossiers renommés à l’origine. **×** retire une entrée, **Tout supprimer…** toutes (toujours après confirmation) ; rien ne change sur les disques, mais l’opération ne peut plus être annulée.
 
 ## Liens de projet
 

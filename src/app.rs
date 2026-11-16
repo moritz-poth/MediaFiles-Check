@@ -91,8 +91,8 @@ fn settings_path() -> Option<PathBuf> {
 }
 
 /// Which files rebalancing moved where – needed to undo it.
-/// "Delete all" asks in a real macOS dialog first (user 2026-11-16); true = Delete clicked.
-fn sure_delete_all(lang: &str, question: String) -> bool {
+/// × and "Delete all" ask in a real macOS dialog first (user 2026-11-16); true = Delete clicked.
+fn sure_delete(lang: &str, question: String) -> bool {
     let delete = pick(lang, ["Delete", "Löschen", "Supprimer", "Borrar"]);
     let cancel = pick(lang, ["Cancel", "Abbrechen", "Annuler", "Cancelar"]);
     #[cfg(target_os = "macos")]
@@ -3063,10 +3063,20 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = app.as_weak();
         move |kind, index| {
             let app = weak.unwrap();
-            if index < 0 {
+            // × and "Delete all…" both ask in a macOS dialog first (user 2026-11-16)
+            {
                 let lang = app.get_language().to_string();
-                let n = app.get_history().row_count();
-                let q = if n == 1 {
+                let history = app.get_history();
+                let n = history.row_count();
+                let one = history.iter().find(|r| index >= 0 && r.kind == kind && r.index == index);
+                let q = if let Some(r) = one {
+                    pick(&lang, [
+                        "Really remove “{}” from the History? Nothing on the drives changes, but the run can then no longer be undone.",
+                        "Wirklich „{}“ aus dem Verlauf entfernen? Auf den Laufwerken ändert sich nichts, aber der Lauf lässt sich danach nicht mehr rückgängig machen.",
+                        "Vraiment retirer « {} » de l’historique ? Rien ne change sur les disques, mais l’opération ne pourra plus être annulée.",
+                        "¿Quitar de verdad «{}» del historial? En las unidades no cambia nada, pero la operación ya no se podrá deshacer.",
+                    ]).replace("{}", &r.text)
+                } else if n == 1 {
                     pick(&lang, [
                         "Really remove the entry from the History? Nothing on the drives changes, but the run can then no longer be undone.",
                         "Wirklich den Eintrag aus dem Verlauf entfernen? Auf den Laufwerken ändert sich nichts, aber der Lauf lässt sich danach nicht mehr rückgängig machen.",
@@ -3081,7 +3091,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         "¿Quitar de verdad las {n} entradas del historial? En las unidades no cambia nada, pero estas operaciones ya no se podrán deshacer.",
                     ]).replace("{n}", &n.to_string())
                 };
-                if !sure_delete_all(&lang, q) {
+                if !sure_delete(&lang, q) {
                     return;
                 }
             }
