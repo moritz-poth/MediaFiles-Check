@@ -841,6 +841,21 @@ mod tests {
         // the imported file is not on the drives: the AMA clip counts
         let r = crate::projects::scan(&[project.clone()], &HashSet::new(), &mut |_, _, _| {}, &crate::Gate::default());
         assert_eq!((r.ama, r.ama_covered, r.ama_by_bin.len()), (1, 0, 1));
+
+        // bin cache: an unchanged bin (same size and date) is not read again, a changed one is
+        let cache = project.parent().unwrap().join("bins.json");
+        let refs = |p: &std::path::Path| crate::projects::references(&[p.to_path_buf()], Some(&cache), &mut |_, _, _| {}, &crate::Gate::default());
+        let first = refs(&project);
+        assert!(first.media.contains(&file) && first.failed.is_empty());
+        let bin = project.join("Bin.avb");
+        let date = fs::metadata(&bin).unwrap().modified().unwrap();
+        let size = fs::metadata(&bin).unwrap().len() as usize;
+        fs::write(&bin, vec![0u8; size]).unwrap();
+        fs::File::options().write(true).open(&bin).unwrap().set_modified(date).unwrap();
+        let cached = refs(&project);
+        assert_eq!((cached.media, cached.failed.len()), (first.media, 0));
+        fs::File::options().write(true).open(&bin).unwrap().set_modified(date + std::time::Duration::from_secs(1)).unwrap();
+        assert_eq!(refs(&project).failed.len(), 1);
         fs::remove_dir_all(project.parent().unwrap()).unwrap();
     }
 }

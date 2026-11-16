@@ -9,7 +9,7 @@ use mediafiles_check::ferry::flow::{self as exflow, Choice, Compare, Incoming, M
 use mediafiles_check::ferry::{self as fy, Manifest, collect as fcollect, scan as fscan};
 use mediafiles_check::rebalance::{self, Plan, Rebalanced};
 use mediafiles_check::report::{self, Outcome, Report};
-use mediafiles_check::{FolderReport, Gate, UPDATE_APP, check, find_volumes, log, pick, report_text, selftest, update};
+use mediafiles_check::{FolderReport, Gate, UPDATE_APP, check, find_volumes, log, pick, selftest, update};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::cell::RefCell;
@@ -303,10 +303,6 @@ fn manifest_path() -> PathBuf {
     ferry_dir().join("last-manifest.json")
 }
 
-fn minutes_since_scan() -> i32 {
-    fs::metadata(manifest_path()).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map_or(-1, |d| (d.as_secs() / 60) as i32)
-}
-
 fn group_digits(n: usize, lang: &str) -> String {
     let sep = match lang {
         "en" => ',',
@@ -324,7 +320,7 @@ fn group_digits(n: usize, lang: &str) -> String {
     out
 }
 
-/// Scan list: the connected drives (same switches as Check › Drives) plus the drives of the last scan that are missing.
+/// Scan list: the connected drives (same switches as the Scan tab) plus the drives of the last scan that are missing.
 fn show_volumes(app: &AppWindow, drives: &[(PathBuf, bool)]) {
     let lang = app.get_language().to_string();
     let manifest = Manifest::load(&manifest_path()).ok();
@@ -340,10 +336,8 @@ fn show_volumes(app: &AppWindow, drives: &[(PathBuf, bool)]) {
         .chain(offline.map(|n| VolumeRow { name: shorten(n, NAME_CHARS).into(), files: files(scanned(n)), online: false, selected: false }))
         .collect();
     let x = app.global::<Exchange>();
-    x.set_selected_count(drives.iter().filter(|d| d.1).count() as i32);
     x.set_volumes(ModelRc::new(VecModel::from(rows)));
     x.set_has_manifest(manifest.is_some());
-    x.set_minutes_since_scan(minutes_since_scan());
 }
 
 fn map_rows(app: &AppWindow, drives: &[Choice], with_skip: bool) -> ModelRc<MapRow> {
@@ -374,9 +368,6 @@ fn show_compare(app: &AppWindow, c: &Compare) {
     let fmt = if lang == "en" { "%Y-%m-%d %H:%M" } else { "%d.%m.%Y %H:%M" };
     x.set_remote_date(fy::local_time(c.remote.created, fmt).into());
     x.set_maps(map_rows(app, &c.drives, true));
-    // a request (Projects) names files, not drives: nothing to assign
-    let matched: Vec<String> = c.local.volumes.iter().filter(|_| c.request.is_none()).map(|v| v.name.clone()).filter(|n| !c.drives.iter().any(|d| &d.name == n)).collect();
-    x.set_matched(strings(&matched, NAME_CHARS));
     x.set_copy_files(files as i32);
     x.set_copy_size(exflow::format_size(bytes, &lang).into());
     let tasks: Vec<String> = plan.tasks.iter().map(|t| t.describe(&lang)).collect();
@@ -384,6 +375,11 @@ fn show_compare(app: &AppWindow, c: &Compare) {
     x.set_can_collect(c.ready());
     x.set_has_compare(true);
     x.set_view(1);
+}
+
+thread_local! {
+    /// Exchange › Import: the window for merge / own folder per delivery folder (created on first use)
+    static FOLDERS_WIN: RefCell<Option<FoldersWindow>> = const { RefCell::new(None) };
 }
 
 fn show_incoming(app: &AppWindow, i: &Incoming) {
@@ -406,7 +402,15 @@ fn show_incoming(app: &AppWindow, i: &Incoming) {
             ChoiceRow { name: shorten(id, NAME_CHARS + 10).into(), own: shorten(&fcollect::own_folder_name(&i.delivery.from, folder), NAME_CHARS).into(), choice: *own as i32 }
         })
         .collect();
-    x.set_delivery_folders(ModelRc::new(VecModel::from(folders)));
+    let own = i.folders.iter().filter(|f| f.1).count();
+    x.set_folders_merge((i.folders.len() - own) as i32);
+    x.set_folders_own(own as i32);
+    FOLDERS_WIN.with(|w| {
+        if let Some(w) = w.borrow().as_ref() {
+            w.set_heading(app.get_txt_folders_heading().replace("{}", &i.delivery.from).into());
+            w.set_rows(ModelRc::new(VecModel::from(folders)));
+        }
+    });
     x.set_can_import(i.ready());
     x.set_has_delivery(true);
     x.set_view(3);
@@ -453,12 +457,10 @@ impl Eta {
 enum ScanAt {
     /// Check's Working page (check, duplicates, full folders)
     Work,
-    Exchange,
-    Projects,
 }
 
 thread_local! {
-    static GATES: RefCell<[Arc<Gate>; 3]> = RefCell::default();
+    static GATES: RefCell<[Arc<Gate>; 1]> = RefCell::default();
 }
 
 /// A fresh gate for a new scan at `at`; the old scan (if still running) keeps its own.
@@ -564,7 +566,7 @@ fn start_work(app: &AppWindow, kind: i32) {
     x.set_view(if kind == 0 { 2 } else { 3 });
 }
 
-/// Wires the "Exchange" tab (scan, compare, collect, import – MediaFiles Ferry's flow).
+/// Wires the "Exchange" tab (compare, collect, import – MediaFiles Ferry's flow).
 fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Settings>>) {
     let x = app.global::<Exchange>();
     x.set_system_name(shorten(&fscan::computer_name(), TITLE_CHARS).into());
@@ -572,75 +574,6 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
     let compare: Rc<RefCell<Option<Compare>>> = Rc::default();
     let incoming: Rc<RefCell<Option<Incoming>>> = Rc::default();
     let err = |app: &AppWindow, e: String| app.global::<Exchange>().set_error(shorten(&e, LINE_CHARS * 2).into());
-
-    x.on_toggle_volume({
-        let (weak, drives) = (app.as_weak(), drives.clone());
-        // connected drives come first, in the order of Check's list
-        move |i| toggle_drive(&weak.unwrap(), &drives, i)
-    });
-
-    x.on_scan({
-        let (weak, drives) = (app.as_weak(), drives.clone());
-        move || {
-            let app = weak.unwrap();
-            let x = app.global::<Exchange>();
-            x.set_scanning(true);
-            x.set_warnings(0);
-            x.set_error("".into());
-            let vols: Vec<PathBuf> = drives.borrow().iter().filter(|d| d.1).map(|d| d.0.clone()).collect();
-            log::write(&format!("exchange scan: {}", vols.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")));
-            x.set_scan_eta(-1);
-            x.set_paused(false);
-            let (weak, gate) = (weak.clone(), new_gate(ScanAt::Exchange));
-            let progress = weak.clone();
-            std::thread::spawn(move || {
-                check_access(&progress, &vols, &gate);
-                let mut eta = Eta::default();
-                let result = fscan::scan(&vols, false, Some(&ferry_dir().join("cache")), &mut |done, total, p| {
-                    let Some(left) = eta.tick(done, total) else { return };
-                    let (p, w) = (p.to_string(), progress.clone());
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(a) = w.upgrade() {
-                            let x = a.global::<Exchange>();
-                            x.set_progress(shorten(&p, LINE_CHARS - 40).into());
-                            x.set_scan_eta(left);
-                        }
-                    });
-                }, &gate)
-                .and_then(|r| {
-                    let _ = fs::create_dir_all(ferry_dir());
-                    r.manifest.save(&manifest_path()).map(|_| r.warnings)
-                });
-                if let Ok(w) = &result {
-                    w.iter().for_each(|w| log::write(&format!("  scan warning: {w}")));
-                }
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(app) = weak.upgrade() else { return };
-                    let x = app.global::<Exchange>();
-                    x.set_scanning(false);
-                    match result {
-                        Ok(warnings) => x.set_warnings(warnings.len() as i32),
-                        // the manifest stays as it was
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => log::write("  scan cancelled"),
-                        Err(e) => {
-                            log::write(&format!("  scan failed: {e}"));
-                            x.set_error(shorten(&e.to_string(), LINE_CHARS * 2).into())
-                        }
-                    }
-                    // the drives may be gone meanwhile: the list is rebuilt from the current state
-                    x.invoke_rescanned();
-                });
-            });
-        }
-    });
-
-    x.on_pause(|on| gate(ScanAt::Exchange).pause(on));
-    x.on_cancel(|| gate(ScanAt::Exchange).cancel());
-
-    x.on_rescanned({
-        let (weak, drives) = (app.as_weak(), drives.clone());
-        move || show_volumes(&weak.unwrap(), &drives.borrow())
-    });
 
     x.on_save_manifest({
         let weak = app.as_weak();
@@ -803,6 +736,33 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
         }
     });
 
+    x.on_show_folders({
+        let (weak, incoming, settings) = (app.as_weak(), incoming.clone(), settings.clone());
+        move || {
+            let app = weak.unwrap();
+            FOLDERS_WIN.with(|w| {
+                if w.borrow().is_none() {
+                    *w.borrow_mut() = FoldersWindow::new().ok();
+                    if let Some(f) = w.borrow().as_ref() {
+                        repaint_on_resize!(f);
+                        forward_menu(&f.global::<Shared>(), &weak);
+                        let fw = f.as_weak();
+                        f.on_close(move || { let _ = fw.unwrap().hide(); });
+                        let main = weak.clone();
+                        f.on_changed(move |row, value| main.unwrap().global::<Exchange>().invoke_delivery_folder_changed(row, value));
+                    }
+                }
+                if let Some(f) = w.borrow().as_ref() {
+                    apply_menus(&f.global::<Shared>(), &settings.borrow());
+                }
+            });
+            if let Some(i) = incoming.borrow().as_ref() {
+                show_incoming(&app, i);
+            }
+            FOLDERS_WIN.with(|w| w.borrow().iter().for_each(|f| { let _ = f.show(); }));
+        }
+    });
+
     x.on_delivery_folder_changed({
         let (weak, incoming) = (app.as_weak(), incoming.clone());
         move |row, value| {
@@ -881,7 +841,7 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             if x.get_result_kind() >= 2 {
                 *incoming.borrow_mut() = None;
                 x.set_has_delivery(false);
-                x.set_view(0);
+                x.set_view(3);
             } else {
                 *compare.borrow_mut() = None;
                 x.set_has_compare(false);
@@ -912,7 +872,9 @@ fn tasks_path() -> Option<PathBuf> {
 }
 
 fn load_tasks() -> Vec<TaskEntry> {
-    tasks_path().and_then(|p| fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+    let all: Vec<TaskEntry> = tasks_path().and_then(|p| fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    // only this workstation's tasks (user 2026-11-16); older lists also held the other side's, they go with the delivery (Tasks.txt)
+    all.into_iter().filter(|t| t.mine).collect()
 }
 
 fn save_tasks(t: &[TaskEntry]) {
@@ -934,6 +896,9 @@ fn add_tasks(texts: &[String], source: &str, me: &str) {
             continue;
         }
         let mine = t.starts_with(&me);
+        if !mine {
+            continue;
+        }
         // "… : <drive>/<folder>" – a folder of this system that exists here
         let folder = t.rsplit_once(": ").and_then(|(_, p)| p.split_once('/')).map(|(v, f)| fy::mxf_dir(&Path::new("/Volumes").join(v)).join(f)).filter(|p| mine && p.is_dir());
         all.push(TaskEntry { text: t.clone(), source: source.to_string(), mine, folder, done: false });
@@ -941,41 +906,17 @@ fn add_tasks(texts: &[String], source: &str, me: &str) {
     save_tasks(&all);
 }
 
-enum TaskAct {
-    Check(PathBuf),
-    Rebalance(i32),
-    Dups(i32),
-    Media(i32),
-    Renamed,
-    Nothing,
-}
+/// What a task's button does: check the folder of a "Rebuild database" task of this system.
+type TaskAct = Option<PathBuf>;
 
-/// Open list = saved tasks not done, then what Maintain is waiting for (databases to rewrite, folders to rename back).
+/// Exchange › Tasks: the saved tasks of deliveries, open ones first (`finish` counts them in this order).
 fn show_tasks(app: &AppWindow, acts: &RefCell<Vec<TaskAct>>) {
     let all = load_tasks();
     let mut rows = vec![];
     let mut a = vec![];
     for t in all.iter().filter(|t| !t.done) {
         rows.push(TaskRow { text: t.text.clone().into(), source: t.source.clone().into(), action: if t.folder.is_some() { app.get_txt_task_check() } else { "".into() }, stored: true, mine: t.mine });
-        a.push(t.folder.clone().map_or(TaskAct::Nothing, TaskAct::Check));
-    }
-    let live = |rows: &mut Vec<TaskRow>, text: SharedString, source: SharedString, action: SharedString| rows.push(TaskRow { text, source, action, stored: false, mine: true });
-    for (i, r) in app.get_rebalanced().iter().enumerate().filter(|(_, r)| !r.db_done) {
-        live(&mut rows, app.get_txt_task_rewrite(), format!("{} · {}", app.get_txt_task_rebalancing(), r.text).into(), app.get_txt_task_start());
-        a.push(TaskAct::Rebalance(i as i32));
-    }
-    for (i, r) in app.get_dup_runs().iter().enumerate().filter(|(_, r)| !r.db_done) {
-        live(&mut rows, app.get_txt_task_rewrite(), format!("{} · {}", app.get_txt_task_duplicates(), r.text).into(), app.get_txt_task_start());
-        a.push(TaskAct::Dups(i as i32));
-    }
-    for (i, r) in app.global::<Inventory>().get_runs().iter().enumerate().filter(|(_, r)| !r.db_done) {
-        live(&mut rows, app.get_txt_task_rewrite(), format!("{} · {}", app.get_txt_task_media(), r.text).into(), app.get_txt_task_start());
-        a.push(TaskAct::Media(i as i32));
-    }
-    let renamed = app.get_renamed().row_count();
-    if renamed > 0 {
-        live(&mut rows, app.get_txt_task_rename_back().replace("{}", &renamed.to_string()).into(), app.get_txt_task_maintain(), app.get_txt_task_open());
-        a.push(TaskAct::Renamed);
+        a.push(t.folder.clone());
     }
     let done: Vec<TaskRow> = all.iter().filter(|t| t.done).map(|t| TaskRow { text: t.text.clone().into(), source: t.source.clone().into(), action: "".into(), stored: true, mine: t.mine }).collect();
     let g = app.global::<Tasks>();
@@ -984,7 +925,7 @@ fn show_tasks(app: &AppWindow, acts: &RefCell<Vec<TaskAct>>) {
     *acts.borrow_mut() = a;
 }
 
-/// Wires the "Tasks" tab. Index i of `finish` counts the saved open tasks, which come first in the list.
+/// Wires Exchange › Tasks. Index i of `finish` counts the saved open tasks, which come first in the list.
 fn wire_tasks(app: &AppWindow, last: &Last) -> Rc<RefCell<Vec<TaskAct>>> {
     let acts: Rc<RefCell<Vec<TaskAct>>> = Rc::default();
     let g = app.global::<Tasks>();
@@ -1026,13 +967,8 @@ fn wire_tasks(app: &AppWindow, last: &Last) -> Rc<RefCell<Vec<TaskAct>>> {
         let (weak, acts, last) = (app.as_weak(), acts.clone(), last.clone());
         move |i| {
             let app = weak.unwrap();
-            match acts.borrow().get(i as usize) {
-                Some(TaskAct::Check(folder)) => start_check(&app, vec![folder.clone()], last.clone()),
-                Some(TaskAct::Rebalance(r)) => app.invoke_rebalance_db(*r),
-                Some(TaskAct::Dups(r)) => app.invoke_dup_db(*r),
-                Some(TaskAct::Media(r)) => app.global::<Inventory>().invoke_db(*r),
-                Some(TaskAct::Renamed) => app.set_page(Page::Maintain),
-                _ => {}
+            if let Some(Some(folder)) = acts.borrow().get(i as usize) {
+                start_check(&app, vec![folder.clone()], last.clone());
             }
         }
     });
@@ -1311,10 +1247,9 @@ fn rows(reports: &[FolderReport], lang: &str, more: &str) -> Vec<ReportRow> {
     rows
 }
 
-/// Result of the last check: reports and the folders that can be renamed for Media Composer (folder, new name).
+/// Result of the last check: the folders that can be renamed for Media Composer (folder, new name).
 #[derive(Default)]
 struct Checked {
-    reports: Vec<FolderReport>,
     candidates: Vec<(PathBuf, String)>,
 }
 
@@ -1370,7 +1305,7 @@ fn start_check(app: &AppWindow, roots: Vec<PathBuf>, last: Last) {
             app.set_bad_folders(reports.iter().filter(|r| !r.findings.is_empty()).count() as i32);
             app.set_work_can_pause(false);
             app.set_rows(ModelRc::new(VecModel::from(rows(&reports, &lang, &app.get_txt_more()))));
-            *last.lock().unwrap() = Checked { reports, candidates };
+            *last.lock().unwrap() = Checked { candidates };
             app.set_page(Page::Result);
         });
     });
@@ -1500,11 +1435,23 @@ fn show_projects(w: &AppWindow, st: &ProjectsState) {
     p.set_projects(ModelRc::new(VecModel::from(rows)));
 }
 
+/// What the request asks for: every missing file (without the ones to relink) used in a bin whose folders are all
+/// switched on in the media window's tree.
+fn requested(r: &ScanResult, hidden: &HashSet<FolderKey>) -> Vec<projects::Missing> {
+    if hidden.is_empty() {
+        return r.missing.clone();
+    }
+    let shown: HashSet<_> = r.by_bin.iter().filter(|(k, _)| bin_visible(hidden, k)).flat_map(|(_, gs)| gs).filter(|g| !g.relink).flat_map(|g| g.ids.iter().copied()).collect();
+    r.missing.iter().filter(|m| shown.contains(&m.id)).cloned().collect()
+}
+
 /// The lists of missing media files and of AMA clips (an open file shows where it is used in the bin). The media
 /// window leaves out the bins of folders switched off in its folder tree – in every view and in its counts.
 fn show_rows(w: &AppWindow, r: &ScanResult, st: &ProjectsState) {
     let p = w.global::<Projects>();
     p.set_has_rows(!r.by_bin.is_empty());
+    p.set_request_count(requested(r, &st.hidden).len() as i32);
+    p.set_folders_off(!st.hidden.is_empty());
     p.set_has_ama_rows(!r.ama_by_bin.is_empty());
     if let Some(m) = st.media.borrow().as_ref() {
         let ama = st.media_kind == 1;
@@ -1593,7 +1540,9 @@ fn media_rows(w: &AppWindow, r: &ScanResult, by_bin: &BTreeMap<(String, String),
     rows
 }
 
-fn start_project_scan(w: &AppWindow, st: &mut ProjectsState) {
+/// The missing media of the current scan (Scan tab) on the Projects tab; None: the scan read no projects.
+/// `unknown`: MXF files in no database with an unreadable header (clips using them count as missing).
+fn show_project_result(w: &AppWindow, st: &mut ProjectsState, r: Option<ScanResult>, unknown: usize) {
     st.open.clear();
     st.hidden.clear();
     st.folders_open.clear();
@@ -1602,76 +1551,32 @@ fn start_project_scan(w: &AppWindow, st: &mut ProjectsState) {
     if let Some(m) = st.media.borrow().as_ref() {
         let _ = m.hide();
     }
-    let chosen: Vec<PathBuf> = st.projects.iter().filter(|p| p.1).map(|p| p.0.clone()).collect();
-    log::write(&format!("project scan: {}", chosen.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")));
     let p = w.global::<Projects>();
     p.set_error("".into());
-    p.set_work_value(0.0);
-    p.set_work_text(w.get_txt_reading_drives());
-    p.set_step(1);
-    p.set_paused(false);
-    let (weak, result, gate) = (w.as_weak(), st.result.clone(), new_gate(ScanAt::Projects));
-    std::thread::spawn(move || {
-        let drives = find_volumes();
-        check_access(&weak, &[drives.clone(), chosen.clone()].concat(), &gate);
-        let a = projects::available_media(&drives, Duration::from_secs(30), &gate);
-        log::write(&format!("  {} media files on {} drives, {} in no database identified by their MXF header, {} unidentified", a.ids.len(), drives.len(), a.from_header, a.unknown));
-        for d in &a.skipped {
-            log::write(&format!("  drive does not answer, skipped: {}", d.display()));
-        }
-        let (available, unknown, gone) = (a.ids, a.unknown, a.gone);
-        let skipped: Vec<String> = a.skipped.iter().map(|d| volume_name(d)).collect();
-        let (progress, mut eta) = (weak.clone(), Eta::default());
-        let mut r = projects::scan(&chosen, &available, &mut |i, n, bin| {
-            let Some(left) = eta.tick(i as u64, n as u64) else { return };
-            let (bin, w) = (bin.to_string(), progress.clone());
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(w) = w.upgrade() {
-                    let p = w.global::<Projects>();
-                    p.set_work_text(bin.into());
-                    p.set_work_value(i as f32 / n.max(1) as f32);
-                    p.set_work_eta(left);
-                }
-            });
-        }, &gate);
-        if gate.is_cancelled() {
-            log::write("  project scan cancelled");
-            let _ = slint::invoke_from_event_loop(move || weak.upgrade().into_iter().for_each(|w| w.global::<Projects>().set_step(0)));
-            return;
-        }
-        r.mxf_names = gone;
-        log::write(&format!("  {} bins ({} unreadable), {} clips, {} media files missing, {} to relink, {} AMA left out, {} without media left out, {} renders", r.bins, r.failed.len(), r.clips, r.missing.len(), r.relink, r.ama, r.no_media, r.renders));
-        for (p, e) in &r.failed {
-            log::write(&format!("  unreadable bin {}: {e}", p.display()));
-        }
-        let _ = slint::invoke_from_event_loop(move || {
-            let Some(w) = weak.upgrade() else { return };
-            let p = w.global::<Projects>();
-            p.set_missing(r.missing.len() as i32);
-            p.set_unmanaged(r.missing.iter().filter(|m| m.unmanaged).count() as i32);
-            p.set_bins(r.bins as i32);
-            p.set_clips(r.clips as i32);
-            p.set_failed(r.failed.len() as i32);
-            p.set_unknown(unknown as i32);
-            p.set_skipped(skipped.join(", ").into());
-            p.set_renders(r.renders as i32);
-            p.set_relink(r.relink as i32);
-            p.set_ama(r.ama as i32);
-            p.set_ama_covered(r.ama_covered as i32);
-            p.set_no_media(r.no_media as i32);
-            show_rows(&w, &r, &ProjectsState::default());
-            *result.lock().unwrap() = Some(r);
-            p.set_step(2);
-            p.set_view(1);
-        });
-    });
+    let Some(r) = r else {
+        *st.result.lock().unwrap() = None;
+        p.set_step(0);
+        return;
+    };
+    p.set_missing(r.missing.len() as i32);
+    p.set_unmanaged(r.missing.iter().filter(|m| m.unmanaged).count() as i32);
+    p.set_bins(r.bins as i32);
+    p.set_clips(r.clips as i32);
+    p.set_failed(r.failed.len() as i32);
+    p.set_unknown(unknown as i32);
+    p.set_renders(r.renders as i32);
+    p.set_relink(r.relink as i32);
+    p.set_ama(r.ama as i32);
+    p.set_ama_covered(r.ama_covered as i32);
+    p.set_no_media(r.no_media as i32);
+    show_rows(w, &r, st);
+    *st.result.lock().unwrap() = Some(r);
+    p.set_step(2);
 }
 
 /// Wires the "Projects" tab; the saved projects folder is loaded at once.
 fn wire_projects(app: &AppWindow, st: &Rc<RefCell<ProjectsState>>, settings: &Rc<RefCell<Settings>>) {
     let p = app.global::<Projects>();
-    p.on_pause(|on| gate(ScanAt::Projects).pause(on));
-    p.on_cancel(|| gate(ScanAt::Projects).cancel());
     let saved = projects_folder_file().and_then(|f| fs::read_to_string(f).ok()).map(|s| PathBuf::from(s.trim()));
     if let Some(folder) = saved.filter(|f| f.is_dir()) {
         load_projects(app, &mut st.borrow_mut(), &folder);
@@ -1680,7 +1585,12 @@ fn wire_projects(app: &AppWindow, st: &Rc<RefCell<ProjectsState>>, settings: &Rc
         let (ww, st) = (app.as_weak(), st.clone());
         move || {
             let w = ww.unwrap();
-            let Some(folder) = rfd::FileDialog::new().set_title(w.get_txt_choose()).pick_folder() else { return };
+            // opens in the folder whose projects are listed now
+            let mut dialog = rfd::FileDialog::new().set_title(w.get_txt_choose());
+            if let Some(current) = projects_folder_file().and_then(|f| fs::read_to_string(f).ok()).map(|p| PathBuf::from(p.trim())).filter(|p| p.is_dir()) {
+                dialog = dialog.set_directory(current);
+            }
+            let Some(folder) = dialog.pick_folder() else { return };
             if let Some(f) = projects_folder_file() {
                 let _ = fs::create_dir_all(f.parent().unwrap());
                 let _ = fs::write(f, folder.display().to_string());
@@ -1697,10 +1607,6 @@ fn wire_projects(app: &AppWindow, st: &Rc<RefCell<ProjectsState>>, settings: &Rc
             }
             show_projects(&ww.unwrap(), &st);
         }
-    });
-    p.on_scan({
-        let (ww, st) = (app.as_weak(), st.clone());
-        move || start_project_scan(&ww.unwrap(), &mut st.borrow_mut())
     });
     let toggle = |ama: bool| {
         let (ww, st) = (app.as_weak(), st.clone());
@@ -1818,7 +1724,11 @@ fn wire_projects(app: &AppWindow, st: &Rc<RefCell<ProjectsState>>, settings: &Rc
             let name = format!("{}_{}_Request.ferry", chrono::Local::now().format("%y%m%d-%H%M"), system.replace(['/', '\\', ':'], "_"));
             let Some(target) = rfd::FileDialog::new().set_file_name(name).add_filter("MediaFiles Ferry", &["ferry"]).save_file() else { return };
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-            let data = st.borrow().result.lock().unwrap().as_ref().map(|r| projects::request_json(&system, now, &r.missing)).unwrap_or_default();
+            let data = {
+                let st = st.borrow();
+                let r = st.result.lock().unwrap();
+                r.as_ref().map(|r| projects::request_json(&system, now, &requested(r, &st.hidden))).unwrap_or_default()
+            };
             let result = fs::write(&target, data);
             log::write(&format!("request saved {}: {result:?}", target.display()));
             if let Err(e) = result {
@@ -1984,19 +1894,19 @@ fn show_rebalanced(app: &AppWindow, lang: &str) {
         .iter()
         .map(|r| {
             let mut text = pick(lang, [
-                "{folder} → {k} rebalanced folders, {n} files moved · {date}",
-                "{folder} → {k} rebalanced-Ordner, {n} Dateien verschoben · {date}",
-                "{folder} → {k} dossiers rééquilibrés, {n} fichiers déplacés · {date}",
-                "{folder} → {k} carpetas reequilibradas, {n} archivos movidos · {date}",
+                "{folder} → {k} rebalanced folders, {n} files moved",
+                "{folder} → {k} rebalanced-Ordner, {n} Dateien verschoben",
+                "{folder} → {k} dossiers rééquilibrés, {n} fichiers déplacés",
+                "{folder} → {k} carpetas reequilibradas, {n} archivos movidos",
             ])
             .replace("{folder}", &drive_and_folder(&r.mxf.join(&r.original)))
             .replace("{k}", &r.rebalanced_folders().len().to_string())
-            .replace("{n}", &r.moved_files().to_string())
-            .replace("{date}", &r.date);
+            .replace("{n}", &r.moved_files().to_string());
             if let Some(old) = &r.renamed_from {
                 text += &pick(lang, [" (was {})", " (war {})", " (avant : {})", " (antes {})"]).replace("{}", old);
             }
-            RunRow { text: text.into(), db_done: r.db_done }
+            let detail = pick(lang, ["Rebalancing · {}", "Rebalancing · {}", "Rééquilibrage · {}", "Reequilibrado · {}"]).replace("{}", &r.date);
+            RunRow { text: text.into(), detail: detail.into(), db_done: r.db_done }
         })
         .collect();
     app.set_rebalanced(ModelRc::new(VecModel::from(rows)));
@@ -2201,11 +2111,11 @@ fn show_dup_runs(app: &AppWindow, lang: &str) {
         .entries
         .iter()
         .map(|r| {
-            let text = pick(lang, ["{n} copies set aside ({size}) · {date}", "{n} Kopien zur Seite gelegt ({size}) · {date}", "{n} copies mises de côté ({size}) · {date}", "{n} copias apartadas ({size}) · {date}"])
+            let text = pick(lang, ["{n} copies set aside ({size})", "{n} Kopien zur Seite gelegt ({size})", "{n} copies mises de côté ({size})", "{n} copias apartadas ({size})"])
                 .replace("{n}", &r.moved.len().to_string())
-                .replace("{size}", &size_text(r.bytes()))
-                .replace("{date}", &r.date);
-            RunRow { text: text.into(), db_done: r.db_done }
+                .replace("{size}", &size_text(r.bytes()));
+            let detail = pick(lang, ["Duplicates · {}", "Duplikate · {}", "Doublons · {}", "Duplicados · {}"]).replace("{}", &r.date);
+            RunRow { text: text.into(), detail: detail.into(), db_done: r.db_done }
         })
         .collect();
     app.set_dup_runs(ModelRc::new(VecModel::from(rows)));
@@ -2286,8 +2196,15 @@ fn repair_renamed(st: &mut Renames) {
     }
 }
 
+/// Folders renamed for Media Composer and not renamed back yet: nothing else may rename folders or rewrite
+/// databases until then (user 2026-11-16) – an unreadable journal blocks too.
+pub(crate) fn renames_open(st: &Renames) -> bool {
+    st.journal.as_ref().map_or(true, |j| !j.entries.is_empty())
+}
+
 fn show_renamed(app: &AppWindow, st: &mut Renames) {
     repair_renamed(st);
+    app.global::<Inventory>().set_renames_pending(renames_open(st));
     let entries = st.journal.as_ref().map(|j| j.entries.as_slice()).unwrap_or_default();
     let rows: Vec<RenamedRow> = entries
         .iter()
@@ -2840,17 +2757,10 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    app.on_toggle_drive({
-        let (weak, drives) = (app.as_weak(), drives.clone());
-        move |i| toggle_drive(&weak.unwrap(), &drives, i)
-    });
-
     app.on_check_drives({
-        let (weak, last, drives) = (app.as_weak(), last.clone(), drives.clone());
-        move || {
-            let roots: Vec<PathBuf> = drives.borrow().iter().filter(|d| d.1).map(|d| d.0.clone()).collect();
-            start_check(&weak.unwrap(), roots, last.clone());
-        }
+        let (weak, last) = (app.as_weak(), last.clone());
+        // the volumes of the current scan (Scan tab) that are still connected
+        move || start_check(&weak.unwrap(), inventory_ui::scanned_volumes(), last.clone())
     });
 
     app.on_check_folder({
@@ -2859,20 +2769,6 @@ fn main() -> Result<(), slint::PlatformError> {
             let app = weak.unwrap();
             if let Some(folder) = rfd::FileDialog::new().set_title(app.get_txt_choose_folder()).pick_folder() {
                 start_check(&app, vec![folder], last.clone());
-            }
-        }
-    });
-
-    app.on_save_report({
-        let (weak, last) = (app.as_weak(), last.clone());
-        move || {
-            let app = weak.unwrap();
-            let lang = app.get_language().to_string();
-            let name = format!("MediaFiles Check {}.txt", chrono::Local::now().format("%Y-%m-%d"));
-            let Some(target) = rfd::FileDialog::new().set_file_name(name).add_filter("Text", &["txt"]).save_file() else { return };
-            if let Err(e) = fs::write(&target, report_text(&last.lock().unwrap().reports, &lang)) {
-                app.set_error(format!("{}: {e}", target.display()).into());
-                app.invoke_home();
             }
         }
     });
@@ -3063,6 +2959,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let app = weak.unwrap();
             if media_composer_running() {
                 app.set_mc_running(true);
+                return;
+            }
+            if renames_open(&renames.borrow()) {
+                log::write("refused: folders still renamed for Media Composer");
                 return;
             }
             let path = dup_journal_path();
@@ -3271,6 +3171,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 app.set_mc_running(true);
                 return;
             }
+            if renames_open(&renames.borrow()) {
+                log::write("refused: folders still renamed for Media Composer");
+                return;
+            }
             let done = std::mem::take(&mut rebal.borrow_mut().done);
             let journal = rebalance::Journal::load(&rebalance_journal_path()).map(|j| j.entries).unwrap_or_default();
             let pick: Option<&Rebalanced> = usize::try_from(i).ok().and_then(|i| journal.get(i));
@@ -3352,6 +3256,10 @@ fn main() -> Result<(), slint::PlatformError> {
             let app = weak.unwrap();
             if media_composer_running() {
                 app.set_mc_running(true);
+                return;
+            }
+            if renames_open(&renames.borrow()) {
+                log::write("refused: folders still renamed for Media Composer");
                 return;
             }
             let candidates = std::mem::take(&mut last.lock().unwrap().candidates);
@@ -3457,7 +3365,7 @@ fn main() -> Result<(), slint::PlatformError> {
             #[cfg(target_os = "macos")]
             mac_menu::ensure();
             match app.get_page() {
-                Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Exchange | Page::Projects | Page::Tasks | Page::Media => {
+                Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Exchange | Page::Projects | Page::Media => {
                     sync_drives(&app, &drives);
                     inventory_ui::show_runs(&app);
                     show_renamed(&app, &mut renames.borrow_mut());

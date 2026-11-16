@@ -99,10 +99,11 @@ pub struct ScanHead {
     pub files: usize,
 }
 
-pub const SCANS_KEPT: usize = 5;
+pub const SCANS_KEPT: usize = 20;
 
-/// Saves a scan into `dir` (head + items) and removes all but the newest `SCANS_KEPT`.
-pub fn save_scan(dir: &Path, head: &ScanHead, items: &[Item]) -> std::io::Result<()> {
+/// Saves a scan into `dir` (head + items) and removes all but the newest `SCANS_KEPT`; returns the head file
+/// (the caller may keep more next to it, as `<head>.<name>.json`, see `extra`).
+pub fn save_scan(dir: &Path, head: &ScanHead, items: &[Item]) -> std::io::Result<PathBuf> {
     fs::create_dir_all(dir)?;
     let base = chrono::Local::now().format("%Y%m%d-%H%M%S%3f").to_string();
     // two scans within the same millisecond (tests) must not share a file
@@ -110,10 +111,22 @@ pub fn save_scan(dir: &Path, head: &ScanHead, items: &[Item]) -> std::io::Result
     fs::write(dir.join(format!("{stamp}.items.json")), serde_json::to_vec(items)?)?;
     fs::write(dir.join(format!("{stamp}.json")), serde_json::to_vec_pretty(head)?)?;
     for (old, _) in list_scans(dir).into_iter().skip(SCANS_KEPT) {
-        let _ = fs::remove_file(old.with_extension("items.json"));
-        let _ = fs::remove_file(&old);
+        delete_scan(&old);
     }
-    Ok(())
+    Ok(dir.join(format!("{stamp}.json")))
+}
+
+/// A file kept next to a saved scan's head: `<stamp>.<name>.json`.
+pub fn extra(head: &Path, name: &str) -> PathBuf {
+    head.with_extension(format!("{name}.json"))
+}
+
+/// Removes a saved scan (head file and its items).
+pub fn delete_scan(head: &Path) {
+    let _ = fs::remove_file(head.with_extension("items.json"));
+    let _ = fs::remove_file(extra(head, "missing"));
+    let _ = fs::remove_file(extra(head, "manifest"));
+    let _ = fs::remove_file(head);
 }
 
 /// Saved scans, newest first: (head file, head).
@@ -122,7 +135,7 @@ pub fn list_scans(dir: &Path) -> Vec<(PathBuf, ScanHead)> {
         .map(|rd| {
             rd.flatten()
                 .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|x| x == "json") && !p.to_string_lossy().ends_with(".items.json"))
+                .filter(|p| p.extension().is_some_and(|x| x == "json") && p.file_stem().is_some_and(|s| !s.to_string_lossy().contains('.')))
                 .filter_map(|p| Some((p.clone(), serde_json::from_slice(&fs::read(&p).ok()?).ok()?)))
                 .collect()
         })
@@ -162,8 +175,9 @@ fn modified(m: &fs::Metadata) -> u128 {
 /// Lists and reads every MXF file in the MXF folders of `drives` (see crate::folders). `cache` (a JSON file) keeps
 /// the headers for the next scan. progress gets (files done, files total); `gate` pauses or cancels the scan
 /// (cancelled: an incomplete list the caller throws away; the headers read so far stay in the cache). Kind and use
-/// are set by `classify`.
-pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, usize) + Sync), gate: &crate::Gate) -> Vec<Item> {
+/// are set by `classify`. `gone` gets the MXF file names of database entries whose file is not in the folder (the
+/// only place the name of a missing media file is known).
+pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, usize) + Sync), gate: &crate::Gate, gone: &mut HashMap<MobId, String>) -> Vec<Item> {
     let mut items = vec![];
     for drive in drives {
         let drive_name = drive.file_name().map_or_else(|| drive.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -172,14 +186,11 @@ pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, 
                 return vec![];
             }
             let folder = dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            let db: HashMap<String, (MobId, MobId, String)> = fs::read(dir.join(PMR))
-                .ok()
-                .and_then(|d| read_pmr_entries(&d).ok())
-                .unwrap_or_default()
-                .into_iter()
-                .map(|e| (key(&e.name), (e.id, e.id2, e.project)))
-                .collect();
+            let entries = fs::read(dir.join(PMR)).ok().and_then(|d| read_pmr_entries(&d).ok()).unwrap_or_default();
+            let names: HashMap<String, (MobId, String)> = entries.iter().map(|e| (key(&e.name), (e.id, e.name.clone()))).collect();
+            let db: HashMap<String, (MobId, MobId, String)> = entries.into_iter().map(|e| (key(&e.name), (e.id, e.id2, e.project))).collect();
             let Ok(rd) = fs::read_dir(&dir) else { continue };
+            let mut present = std::collections::HashSet::new();
             for e in rd.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
                 if name.starts_with('.') || !name.to_lowercase().ends_with(".mxf") {
@@ -190,6 +201,7 @@ pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, 
                     continue;
                 }
                 let known = db.get(&key(&name));
+                present.insert(key(&name));
                 items.push(Item {
                     path: e.path(),
                     drive: drive_name.clone(),
@@ -207,6 +219,7 @@ pub fn scan(drives: &[PathBuf], cache: Option<&Path>, progress: &(dyn Fn(usize, 
                     used: None,
                 });
             }
+            gone.extend(names.into_iter().filter(|(k, _)| !present.contains(k)).map(|(_, v)| v));
         }
     }
     items.sort_by(|a, b| a.path.cmp(&b.path));
@@ -343,14 +356,19 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("mfc-scans-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let head = |n| ScanHead { date: format!("d{n}"), drives: vec![], projects: vec![], projects_read: 0, failed: 0, missing: (0, 0), files: n };
-        for n in 0..7 {
-            save_scan(&dir, &head(n), &[item(Some(true), n as u8)]).unwrap();
+        let n = SCANS_KEPT + 2;
+        for i in 0..n {
+            save_scan(&dir, &head(i), &[item(Some(true), i as u8)]).unwrap();
         }
         let list = list_scans(&dir);
-        assert_eq!(list.iter().map(|l| l.1.files).collect::<Vec<_>>(), [6, 5, 4, 3, 2]);
+        assert_eq!(list.iter().map(|l| l.1.files).collect::<Vec<_>>(), (2..n).rev().collect::<Vec<_>>());
         let items = load_scan(&list[0].0, None).unwrap();
-        assert_eq!((items[0].file_id, items[0].kind, items[0].info.is_none()), (Some([6; 32]), Kind::Unknown, true));
-        assert_eq!(fs::read_dir(&dir).unwrap().count(), 10);
+        assert_eq!((items[0].file_id, items[0].kind, items[0].info.is_none()), (Some([n as u8 - 1; 32]), Kind::Unknown, true));
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2 * SCANS_KEPT);
+        // deleting takes the head and its items
+        delete_scan(&list[0].0);
+        assert_eq!(list_scans(&dir).len(), SCANS_KEPT - 1);
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 2 * (SCANS_KEPT - 1));
         fs::remove_dir_all(&dir).unwrap();
     }
 

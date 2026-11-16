@@ -26,7 +26,7 @@ pub struct InvState {
     gate: Arc<Gate>,
     /// filled by the scan thread, taken by Inventory.scanned on the event loop: items, projects read, unreadable
     /// bins, media and renders the projects use that are on none of the scanned drives
-    result: Arc<Mutex<Option<(Vec<Item>, usize, usize, usize, usize)>>>,
+    result: Arc<Mutex<Option<Scanned>>>,
     /// the bin chosen for copying or moving its media, and what it uses
     bin: Option<(PathBuf, mediafiles_check::projects::Refs)>,
     /// set aside: unused renders, all renders, unused media; the folders shown (in order)
@@ -68,7 +68,15 @@ fn show_scans(app: &AppWindow) {
         .collect();
     let g = app.global::<Inventory>();
     g.set_load_ask(-1);
+    g.set_delete_ask(-1);
     g.set_scans(ModelRc::new(VecModel::from(rows)));
+}
+
+/// Volumes and projects of a saved scan that are not reachable now (volume name, or project name with its folder).
+fn unreachable(head: &inventory::ScanHead) -> Vec<String> {
+    let volumes = head.drives.iter().filter(|d| !d.is_dir()).map(|d| volume_name(d));
+    let projects = head.projects.iter().filter(|p| !p.is_dir()).map(|p| format!("{} ({})", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), p.parent().map(|f| f.display().to_string()).unwrap_or_default()));
+    volumes.chain(projects).collect()
 }
 
 fn journal_path() -> PathBuf {
@@ -88,14 +96,14 @@ pub fn show_runs(app: &AppWindow) {
         .iter()
         .map(|r| {
             let what = match r.action {
-                Action::Aside => ["{n} files set aside ({size}) · {date}", "{n} Dateien beiseitegelegt ({size}) · {date}", "{n} fichiers mis de côté ({size}) · {date}", "{n} archivos apartados ({size}) · {date}"],
-                Action::Renderfiles => ["{n} render files into folders of their own ({size}) · {date}", "{n} Render-Dateien in eigene Ordner ({size}) · {date}", "{n} fichiers de rendu dans leurs propres dossiers ({size}) · {date}", "{n} archivos de render en sus propias carpetas ({size}) · {date}"],
-                Action::Copy => ["{n} files of {label} copied ({size}) · {date}", "{n} Dateien von {label} kopiert ({size}) · {date}", "{n} fichiers de {label} copiés ({size}) · {date}", "{n} archivos de {label} copiados ({size}) · {date}"],
-                Action::Move => ["{n} files of {label} moved ({size}) · {date}", "{n} Dateien von {label} verschoben ({size}) · {date}", "{n} fichiers de {label} déplacés ({size}) · {date}", "{n} archivos de {label} movidos ({size}) · {date}"],
-                Action::Swap => ["{n} files moved between the import and the render drive ({size}) · {date}", "{n} Dateien zwischen Import- und Render-Laufwerk verschoben ({size}) · {date}", "{n} fichiers déplacés entre le disque d’import et le disque de rendu ({size}) · {date}", "{n} archivos movidos entre la unidad de importación y la de render ({size}) · {date}"],
+                Action::Aside => ["{n} files set aside ({size})", "{n} Dateien beiseitegelegt ({size})", "{n} fichiers mis de côté ({size})", "{n} archivos apartados ({size})"],
+                Action::Renderfiles => ["{n} render files into folders of their own ({size})", "{n} Render-Dateien in eigene Ordner ({size})", "{n} fichiers de rendu dans leurs propres dossiers ({size})", "{n} archivos de render en sus propias carpetas ({size})"],
+                Action::Copy => ["{n} files of {label} copied ({size})", "{n} Dateien von {label} kopiert ({size})", "{n} fichiers de {label} copiés ({size})", "{n} archivos de {label} copiados ({size})"],
+                Action::Move => ["{n} files of {label} moved ({size})", "{n} Dateien von {label} verschoben ({size})", "{n} fichiers de {label} déplacés ({size})", "{n} archivos de {label} movidos ({size})"],
+                Action::Swap => ["{n} files moved between the import and the render drive ({size})", "{n} Dateien zwischen Import- und Render-Laufwerk verschoben ({size})", "{n} fichiers déplacés entre le disque d’import et le disque de rendu ({size})", "{n} archivos movidos entre la unidad de importación y la de render ({size})"],
             };
-            let text = pick(&lang, what).replace("{n}", &r.moved.len().to_string()).replace("{size}", &size_text(r.bytes())).replace("{date}", &r.date).replace("{label}", &r.label);
-            RunRow { text: text.into(), db_done: r.db_done }
+            let text = pick(&lang, what).replace("{n}", &r.moved.len().to_string()).replace("{size}", &size_text(r.bytes())).replace("{label}", &r.label);
+            RunRow { text: text.into(), detail: r.date.clone().into(), db_done: r.db_done }
         })
         .collect();
     app.global::<Inventory>().set_runs(ModelRc::new(VecModel::from(rows)));
@@ -230,7 +238,6 @@ fn prepare(app: &AppWindow, st: &mut InvState, kind: i32, limit: usize) {
     };
     st.action = Some(action);
     st.plan = plan;
-    g.set_per_folder(rebalance::per_folder(limit) as i32);
     // asked anew for every action, kept while the drives are changed
     if g.get_task() != kind {
         g.set_delete_originals(false);
@@ -329,6 +336,10 @@ fn confirm(app: &AppWindow, inv: &Inv) {
 
 /// "Start" after a run (-1) or "Rewrite databases" of a History entry.
 fn rewrite(app: &AppWindow, inv: &Inv, renames: &Rc<RefCell<Renames>>, i: i32) {
+    if renames_open(&renames.borrow()) {
+        log::write("refused: folders still renamed for Media Composer");
+        return;
+    }
     if media_composer_running() {
         app.global::<Inventory>().set_mc_running(true);
         return;
@@ -398,14 +409,43 @@ fn undo(app: &AppWindow, renames: &Rc<RefCell<Renames>>, i: i32) {
 
 pub type Inv = Rc<RefCell<InvState>>;
 
+/// A finished (or loaded) scan, handed from the scan thread to the event loop: items, projects read, unreadable
+/// bins, media and renders used but on no scanned drive, and the missing media of the projects (Projects tab).
+type Scanned = (Vec<Item>, usize, usize, usize, usize, Option<projects::ScanResult>);
+
 fn cache_path() -> Option<PathBuf> {
     app_dir().map(|d| d.join("media-cache.json"))
 }
 
+thread_local! {
+    /// the current scan (fresh or loaded): its date and the volumes it read
+    static SCANNED: RefCell<(String, Vec<PathBuf>)> = RefCell::default();
+}
+
+/// What each bin contributed to the last project read (projects::references): unchanged bins are not read again.
+fn bin_cache_path() -> Option<PathBuf> {
+    app_dir().map(|d| d.join("bin-cache.json"))
+}
+
+/// The volumes of the current scan that are connected (Check works on them).
+pub fn scanned_volumes() -> Vec<PathBuf> {
+    SCANNED.with(|s| s.borrow().1.iter().filter(|p| p.is_dir()).cloned().collect())
+}
+
 /// The drive switches (shared with Check and Exchange).
 pub fn show_drives(app: &AppWindow, drives: &[(PathBuf, bool)]) {
+    app.set_check_volumes(scanned_volumes().iter().map(|p| volume_name(p)).collect::<Vec<_>>().join(", ").into());
     let rows: Vec<DriveRow> = drives.iter().map(|(p, sel)| DriveRow { name: volume_name(p).into(), selected: *sel }).collect();
     let g = app.global::<Inventory>();
+    // the Scan tab: connected volumes, with the time of the current scan for those it read
+    let (current, scanned) = SCANNED.with(|s| s.borrow().clone());
+    // "2026-11-15 16:27" -> "11-15 16:27": with the year the volume names no longer fit
+    let current = current.get(5..).unwrap_or(&current).to_string();
+    let volumes: Vec<VolumeRow> = drives
+        .iter()
+        .map(|(p, sel)| VolumeRow { name: shorten(&volume_name(p), NAME_CHARS).into(), files: if scanned.contains(p) { current.clone().into() } else { "".into() }, online: true, selected: *sel })
+        .collect();
+    g.set_scan_volumes(ModelRc::new(VecModel::from(volumes)));
     g.set_drive_count(drives.iter().filter(|d| d.1).count() as i32);
     g.set_drives(ModelRc::new(VecModel::from(rows)));
 }
@@ -638,6 +678,7 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
     g.set_paused(false);
     st.gate = Arc::default();
     let (weak, gate, result) = (app.as_weak(), st.gate.clone(), st.result.clone());
+    let checksums_label = app.get_txt_checksums().to_string();
     std::thread::spawn(move || {
         let progress_to = weak.clone();
         let eta = Mutex::new(Eta::default());
@@ -654,8 +695,56 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
             });
         };
         check_access(&weak, &[chosen.clone(), projects.clone()].concat(), &gate);
-        let mut items = inventory::scan(&chosen, cache_path().as_deref(), &progress, &gate);
-        let refs = (!projects.is_empty()).then(|| projects::references(&projects, &mut |_, _, _| {}, &gate));
+        let mut gone = HashMap::new();
+        let mut items = inventory::scan(&chosen, cache_path().as_deref(), &progress, &gate, &mut gone);
+        // checksums for Exchange (user 2026-11-15: part of the one scan); only new or changed files are read
+        let manifest = (!gate.is_cancelled()).then(|| {
+            let (hash_to, label) = (weak.clone(), checksums_label.clone());
+            let mut eta = Eta::default();
+            let r = fscan::scan(&chosen, false, Some(&ferry_dir().join("cache")), &mut |done, total, place| {
+                let Some(left) = eta.tick(done, total) else { return };
+                let (w, text) = (hash_to.clone(), format!("{label} · {}", shorten(place, LINE_CHARS - 30)));
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = w.upgrade() {
+                        let g = w.global::<Inventory>();
+                        g.set_work_value(done as f32 / total.max(1) as f32);
+                        g.set_work_text(text.into());
+                        g.set_work_eta(left);
+                    }
+                });
+            }, &gate);
+            match r {
+                Ok(r) => {
+                    r.warnings.iter().for_each(|w| log::write(&format!("  checksum warning: {w}")));
+                    Some(r.manifest)
+                }
+                Err(e) => {
+                    if e.kind() != std::io::ErrorKind::Interrupted {
+                        log::write(&format!("  checksums failed: {e}"));
+                    }
+                    None
+                }
+            }
+        }).flatten();
+        let bins_to = weak.clone();
+        let mut bin_progress = move |done: usize, total: usize, bin: &str| {
+            // every 50th bin is enough (unchanged ones come from the cache in microseconds)
+            if done % 50 != 0 {
+                return;
+            }
+            let (w, bin) = (bins_to.clone(), bin.to_string());
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = w.upgrade() {
+                    let g = w.global::<Inventory>();
+                    g.set_work_value(done as f32 / total.max(1) as f32);
+                    g.set_work_text(format!("Bins {done} / {total} · {bin}").into());
+                    g.set_work_eta(-1);
+                }
+            });
+        };
+        // the bins are read once (unchanged ones from the cache) for both: used/unused here, missing media (Projects)
+        let bins = (!projects.is_empty()).then(|| projects::read_projects(&projects, bin_cache_path().as_deref(), &mut bin_progress, &gate));
+        let refs = bins.as_ref().map(projects::references_of);
         if gate.is_cancelled() {
             log::write("  media scan cancelled");
             let _ = slint::invoke_from_event_loop(move || weak.upgrade().into_iter().for_each(|w| w.global::<Inventory>().set_step(0)));
@@ -674,13 +763,20 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
             log::write(&format!("  unreadable bin {}: {e}", p.display()));
         }
         let n = if refs.is_some() { projects.len() } else { 0 };
+        let date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
         let present: HashSet<_> = items.iter().filter_map(|i| i.file_id).collect();
         let missing = |set: Option<&HashSet<_>>| set.map_or(0, |s| s.iter().filter(|id| !present.contains(*id)).count());
         let (mm, mr) = (missing(refs.as_ref().map(|r| &r.media)), missing(refs.as_ref().map(|r| &r.renders)));
+        let lost = bins.map(|b| {
+            let mut r = projects::scan_of(&b, &present);
+            r.mxf_names = gone;
+            log::write(&format!("  {} clips, {} media files missing, {} to relink, {} AMA left out, {} without media left out, {} renders missing", r.clips, r.missing.len(), r.relink, r.ama, r.no_media, r.renders));
+            r
+        });
         // kept for the History of scans
         {
             let head = inventory::ScanHead {
-                date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
+                date: date.clone(),
                 drives: chosen.clone(),
                 projects: if n > 0 { projects.clone() } else { vec![] },
                 projects_read: n,
@@ -688,13 +784,34 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
                 missing: (mm, mr),
                 files: items.len(),
             };
-            if let Err(e) = inventory::save_scan(&scans_dir(), &head, &items) {
-                log::write(&format!("  scan not kept: {e}"));
+            if let Some(m) = &manifest {
+                let _ = fs::create_dir_all(ferry_dir());
+                if let Err(e) = m.save(&manifest_path()) {
+                    log::write(&format!("  manifest not saved: {e}"));
+                }
+            }
+            match inventory::save_scan(&scans_dir(), &head, &items) {
+                Ok(head) => {
+                    // Load (History) puts it back as Exchange's manifest
+                    if let Some(m) = &manifest
+                        && let Err(e) = m.save(&inventory::extra(&head, "manifest"))
+                    {
+                        log::write(&format!("  manifest not kept: {e}"));
+                    }
+                    if let Some(l) = &lost
+                        && let Err(e) = serde_json::to_vec(l).map_err(std::io::Error::other).and_then(|d| fs::write(inventory::extra(&head, "missing"), d))
+                    {
+                        log::write(&format!("  missing media not kept: {e}"));
+                    }
+                }
+                Err(e) => log::write(&format!("  scan not kept: {e}")),
             }
         }
-        *result.lock().unwrap() = Some((items, n, failed, mm, mr));
+        *result.lock().unwrap() = Some((items, n, failed, mm, mr, lost));
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(w) = weak.upgrade() {
+                SCANNED.with(|s| *s.borrow_mut() = (date.clone(), chosen));
+                w.global::<Inventory>().set_current(date.into());
                 w.global::<Inventory>().invoke_scanned();
             }
         });
@@ -934,11 +1051,17 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
         move || inv.borrow().gate.cancel()
     });
     g.on_scanned({
-        let (ww, inv) = (app.as_weak(), inv.clone());
+        let (ww, inv, drives, project_st) = (app.as_weak(), inv.clone(), drives.clone(), projects.clone());
         move || {
             let app = ww.unwrap();
+            // "scanned <time>" next to the volumes the scan read; file counts from the new manifest
+            show_drives(&app, &drives.borrow());
+            show_volumes(&app, &drives.borrow());
             let mut st = inv.borrow_mut();
-            let Some((items, projects, failed, missing_media, missing_renders)) = st.result.lock().unwrap().take() else { return };
+            let Some((items, projects, failed, missing_media, missing_renders, lost)) = st.result.lock().unwrap().take() else { return };
+            // MXF files in no database whose header could not be read: clips using them count as missing
+            let unknown = items.iter().filter(|i| !i.in_db && i.error.is_some()).count();
+            show_project_result(&app, &mut project_st.borrow_mut(), lost, unknown);
             app.global::<Inventory>().set_missing_media(missing_media as i32);
             app.global::<Inventory>().set_missing_renders(missing_renders as i32);
             let present: HashSet<PathBuf> = items.iter().map(|i| i.path.clone()).collect();
@@ -957,22 +1080,92 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
             show_scans(&app);
         }
     });
+    g.on_ask_load({
+        let ww = app.as_weak();
+        move |i| {
+            let app = ww.unwrap();
+            let g = app.global::<Inventory>();
+            let Some((_, head)) = inventory::list_scans(&scans_dir()).into_iter().nth(i as usize) else { return };
+            g.set_load_missing(unreachable(&head).join(", ").into());
+            g.set_load_ask(i);
+        }
+    });
     g.on_load_scan({
-        let (ww, inv) = (app.as_weak(), inv.clone());
+        let (ww, inv, drives, projects) = (app.as_weak(), inv.clone(), drives.clone(), projects.clone());
         move |i| {
             let app = ww.unwrap();
             let Some((path, head)) = inventory::list_scans(&scans_dir()).into_iter().nth(i as usize) else { return };
+            // connected in the meantime or not: checked again
+            let missing = unreachable(&head);
+            if !missing.is_empty() {
+                app.global::<Inventory>().set_load_missing(missing.join(", ").into());
+                return;
+            }
             match inventory::load_scan(&path, cache_path().as_deref()) {
                 Ok(items) => {
                     log::write(&format!("media scan loaded: {} ({} files)", head.date, items.len()));
-                    *inv.borrow().result.lock().unwrap() = Some((items, head.projects_read, head.failed, head.missing.0, head.missing.1));
-                    app.global::<Inventory>().invoke_scanned();
+                    // the volumes and projects of that scan switched on, everything else off
+                    {
+                        let mut d = drives.borrow_mut();
+                        for x in d.iter_mut() {
+                            x.1 = head.drives.contains(&x.0);
+                        }
+                        save_drives_off(&d);
+                    }
+                    if let Some(folder) = head.projects.first().and_then(|p| p.parent()) {
+                        if let Some(f) = projects_folder_file() {
+                            let _ = fs::write(f, folder.display().to_string());
+                        }
+                        let mut st = projects.borrow_mut();
+                        load_projects(&app, &mut st, folder);
+                    }
+                    {
+                        let mut st = projects.borrow_mut();
+                        for p in st.projects.iter_mut() {
+                            p.1 = head.projects.contains(&p.0);
+                        }
+                        show_projects(&app, &st);
+                    }
+                    // Exchange's manifest of that scan (older saved scans have none: the current one stays)
+                    let kept = inventory::extra(&path, "manifest");
+                    if kept.is_file()
+                        && let Err(e) = fs::copy(&kept, manifest_path())
+                    {
+                        log::write(&format!("  manifest not restored: {e}"));
+                    }
+                    SCANNED.with(|s| *s.borrow_mut() = (head.date.clone(), head.drives.clone()));
+                    show_drives(&app, &drives.borrow());
+                    show_volumes(&app, &drives.borrow());
+                    let lost = fs::read(inventory::extra(&path, "missing")).ok().and_then(|d| serde_json::from_slice(&d).ok());
+                    *inv.borrow().result.lock().unwrap() = Some((items, head.projects_read, head.failed, head.missing.0, head.missing.1, lost));
+                    let g = app.global::<Inventory>();
+                    g.set_current(head.date.into());
+                    g.invoke_scanned();
+                    g.set_scan_view(0);
                 }
                 Err(e) => app.global::<Inventory>().set_error(format!("{}: {e}", head.date).into()),
             }
         }
     });
     show_scans(app);
+    g.on_delete_scan({
+        let ww = app.as_weak();
+        move |which| {
+            let app = ww.unwrap();
+            // the list shows list_scans in the same order (newest first); -1 = all
+            for (i, (path, head)) in inventory::list_scans(&scans_dir()).into_iter().enumerate() {
+                if which < 0 || i == which as usize {
+                    log::write(&format!("media scan deleted: {}", head.date));
+                    inventory::delete_scan(&path);
+                }
+            }
+            show_scans(&app);
+        }
+    });
+    g.on_go_scan({
+        let ww = app.as_weak();
+        move || ww.unwrap().invoke_select_tab(6)
+    });
     g.on_show_table({
         let (ww, inv, settings) = (app.as_weak(), inv.clone(), settings.clone());
         move || open_table(&ww.unwrap(), &inv, &settings)

@@ -1,10 +1,9 @@
 //! Vergleich zweier Manifeste: was muss von hier zur Gegenseite, und was muss der User von Hand erledigen.
 use crate::ferry::*;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 /// Avid legt ab etwa 5000 Dateien einen neuen Ordner an; größere Ordner sollten aufgeteilt werden.
-pub const MAX_FILES: usize = 5000;
 
 #[derive(Default)]
 pub struct Options {
@@ -27,9 +26,7 @@ pub struct Copy {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub enum Task {
     RebuildDb { system: String, volume: String, folder: String },
-    Rebalance { system: String, volume: String, folder: String, files: usize },
     Conflict { system: String, volume: String, folder: String, name: String },
-    Duplicates { system: String, places: Vec<String>, files: usize },
     /// requested files (MediaFiles Check) this system does not have; clips that use them
     NotFound { system: String, files: usize, clips: Vec<String> },
 }
@@ -40,9 +37,7 @@ impl Task {
         let t = |a: [&'static str; 4]| crate::pick(lang, a);
         match self {
             Task::RebuildDb { system, volume, folder } => format!("[{system}] {}: {volume}/{folder}", t(["Rebuild database", "Datenbank neu schreiben", "Reconstruire la base de données", "Reconstruir la base de datos"])),
-            Task::Rebalance { system, volume, folder, files } => format!("[{system}] {}", t(["Rebalance folder: {f} has {n} files", "Ordner aufteilen (rebalancen): {f} hat {n} Dateien", "Rééquilibrer le dossier : {f} a {n} fichiers", "Reequilibrar la carpeta: {f} tiene {n} archivos"]).replace("{f}", &format!("{volume}/{folder}")).replace("{n}", &files.to_string())),
             Task::Conflict { system, volume, folder, name } => format!("[{system}] {}: {volume}/{folder}/{name}", t(["Same name, different content – not copied, please check", "Gleicher Name, anderer Inhalt – nicht kopiert, bitte prüfen", "Même nom, contenu différent – pas copié, à vérifier", "Mismo nombre, contenido distinto: no se copió, compruébalo"])),
-            Task::Duplicates { system, places, files } => format!("[{system}] {}: {}", t(["{n} duplicate files in", "{n} doppelte Dateien in", "{n} fichiers en double dans", "{n} archivos duplicados en"]).replace("{n}", &files.to_string()), places.join(", ")),
             Task::NotFound { system, files, clips } => {
                 let mut shown = clips.iter().take(10).cloned().collect::<Vec<_>>().join(", ");
                 if clips.len() > 10 {
@@ -74,7 +69,6 @@ struct Proposal<'a> {
     to_volume: String,
     to_folder: String,
     missing: Vec<&'a FileEntry>,
-    existing: usize,
     db_ok: bool,
 }
 
@@ -121,20 +115,18 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options) -> Plan {
             let existing = existing.map_or(0, |x| x.files.len());
             // Die DB passt nur, wenn der Zielordner danach exakt dem Quellordner entspricht.
             let db_ok = f.has_db && subset && existing + missing.len() == f.files.len();
-            proposals.push(Proposal { from_volume: &lv.name, from: f, to_volume: to_volume.clone(), to_folder, missing, existing, db_ok });
+            proposals.push(Proposal { from_volume: &lv.name, from: f, to_volume: to_volume.clone(), to_folder, missing, db_ok });
         }
     }
 
     // Mehrere lokale Ordner können im selben Zielordner landen (z. B. zwei lokale Volumes -> ein Volume drüben).
     let target = |pr: &Proposal| (key(&pr.to_volume), key(&pr.to_folder));
-    let mut incoming: HashMap<(String, String), (usize, usize)> = HashMap::new(); // (Quellordner, neue Dateien)
+    let mut incoming: HashMap<(String, String), usize> = HashMap::new(); // Quellordner je Zielordner
     for pr in &proposals {
-        let t = incoming.entry(target(pr)).or_default();
-        t.0 += 1;
-        t.1 += pr.missing.len();
+        *incoming.entry(target(pr)).or_default() += 1;
     }
     for pr in &proposals {
-        let (sources, added) = incoming[&target(pr)];
+        let sources = incoming[&target(pr)];
         let copy = |name: &str, size, hash| Copy {
             from_volume: pr.from_volume.into(),
             from_folder: pr.from.name.clone(),
@@ -145,41 +137,14 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options) -> Plan {
             hash,
         };
         p.copies.extend(pr.missing.iter().map(|e| copy(&e.name, e.size, Some(e.hash.clone()))));
-        let (system, volume, folder) = (remote.system.clone(), pr.to_volume.clone(), pr.to_folder.clone());
         if pr.db_ok && sources == 1 {
             p.copies.extend(DB_FILES.iter().map(|db| copy(db, 0, None)));
         } else {
-            push_once(&mut p.tasks, Task::RebuildDb { system: system.clone(), volume: volume.clone(), folder: folder.clone() });
-        }
-        if pr.existing + added > MAX_FILES {
-            push_once(&mut p.tasks, Task::Rebalance { system, volume, folder, files: pr.existing + added });
+            push_once(&mut p.tasks, Task::RebuildDb { system: remote.system.clone(), volume: pr.to_volume.clone(), folder: pr.to_folder.clone() });
         }
     }
-    p.tasks.extend(hints(local));
+    // only tasks the exchange itself causes (user 2026-11-16): no hints about full folders or duplicates
     p
-}
-
-/// Hinweise zum eigenen Bestand: doppelte Dateien und übervolle Ordner.
-pub fn hints(m: &Manifest) -> Vec<Task> {
-    let mut tasks = vec![];
-    let mut places: HashMap<(String, &str), Vec<String>> = HashMap::new();
-    for v in &m.volumes {
-        for f in &v.folders {
-            if f.files.len() > MAX_FILES {
-                tasks.push(Task::Rebalance { system: m.system.clone(), volume: v.name.clone(), folder: f.name.clone(), files: f.files.len() });
-            }
-            for e in &f.files {
-                places.entry((key(&e.name), &e.hash)).or_default().push(format!("{}/{}", v.name, f.name));
-            }
-        }
-    }
-    // pro Kombination von Ordnern zusammenfassen, sonst werden es tausende Einzelhinweise
-    let mut groups: BTreeMap<Vec<String>, usize> = BTreeMap::new();
-    for (_, pl) in places.into_iter().filter(|(_, pl)| pl.len() > 1) {
-        *groups.entry(pl).or_default() += 1;
-    }
-    tasks.extend(groups.into_iter().map(|(places, files)| Task::Duplicates { system: m.system.clone(), places, files }));
-    tasks
 }
 
 fn push_once(tasks: &mut Vec<Task>, t: Task) {
@@ -297,15 +262,14 @@ mod tests {
     }
 
     #[test]
-    fn full_folders_and_duplicates_are_hinted() {
-        let many: Vec<String> = (0..=MAX_FILES).map(|i| format!("f{i}")).collect();
+    fn only_exchange_tasks() {
+        // a full folder and a duplicate on this side are no task of the exchange
+        let many: Vec<String> = (0..=5000).map(|i| format!("f{i}")).collect();
         let many: Vec<&str> = many.iter().map(String::as_str).collect();
         let a = ma("A", vec![("V", vec![fo("1", &many), fo("2", &["f1", "f2"])])]);
         let b = ma("B", vec![("V", vec![])]);
         let (copies, p) = run(&a, &b, &Options::default());
-        assert_eq!(copies.len(), MAX_FILES + 1 + 2 + 2 + 2); // beide Ordner fehlen drüben: Dateien + je 2 DB
-        let rebalance = |system: &str| Task::Rebalance { system: system.into(), volume: "V".into(), folder: "1".into(), files: MAX_FILES + 1 };
-        assert!(p.tasks.contains(&rebalance("A")) && p.tasks.contains(&rebalance("B")));
-        assert!(p.tasks.contains(&Task::Duplicates { system: "A".into(), places: vec!["V/1".into(), "V/2".into()], files: 2 }));
+        assert_eq!(copies.len(), 5001 + 2 + 2 + 2); // beide Ordner fehlen drüben: Dateien + je 2 DB
+        assert!(p.tasks.is_empty());
     }
 }

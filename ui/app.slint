@@ -315,28 +315,29 @@ component ToggleRow inherits Rectangle {
 }
 
 // Lauf im Verlauf: Text (umbrechend) und darunter ggf. „Datenbanken noch nicht neu geschrieben“, Knöpfe rechts
+// Zeile eines Verlaufs (Pflegen, Medien) – aufgebaut wie die Zeilen im Verlauf von Scannen:
+// zwei Zeilen links (was / Art · Datum), Knöpfe rechts
 component RunItem inherits CardRow {
     in property <string> text;
+    in property <string> detail;
     in property <bool> db-done;
     in property <bool> mc-running;
+    // umbenannte Ordner offen: „Datenbanken neu schreiben“ gesperrt
+    in property <bool> blocked;
     callback db();
     callback undo();
     VerticalLayout {
         horizontal-stretch: 1;
-        padding-top: 10px;
-        padding-bottom: 10px;
-        spacing: 4px;
-        Text {
-            width: Metrics.content-width - 430px;
-            text: root.text;
-            wrap: word-wrap;
-            font-size: 12px;
-            color: Theme.text;
-        }
-        if !root.db-done: Text {
-            text: @tr("Databases not rewritten yet");
-            font-size: 11px;
-            color: Theme.warning;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        alignment: center;
+        spacing: 2px;
+        Text { text: root.text; overflow: elide; font-size: 12px; color: Theme.text; }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: root.detail; overflow: elide; font-size: 11px; color: Theme.muted; }
+            if !root.db-done: Text { text: @tr("Databases not rewritten yet"); overflow: elide; font-size: 11px; color: Theme.warning; }
+            Rectangle { horizontal-stretch: 1; }
         }
     }
     VerticalLayout {
@@ -346,7 +347,7 @@ component RunItem inherits CardRow {
             if !root.db-done: CheckButton {
                 text: @tr("Rewrite databases");
                 small: true;
-                enabled: !root.mc-running;
+                enabled: !root.mc-running && !root.blocked;
                 clicked => { root.db(); }
             }
             CheckButton {
@@ -356,6 +357,33 @@ component RunItem inherits CardRow {
                 clicked => { root.undo(); }
             }
         }
+    }
+}
+
+// Sperre (user 2026-11-16): solange Ordner für Media Composer umbenannt sind, benennt keine Funktion weitere um
+// und schreibt keine Datenbanken neu – erst zurückbenennen (DBs prüfen › Neue Datenbanken)
+component RenameBlocked inherits Text {
+    width: Metrics.content-width;
+    text: @tr("Folders are renamed for Media Composer right now. Rename them back first (Check DBs › New databases) – until then no other folders are renamed and no databases are rewritten.");
+    wrap: word-wrap;
+    font-size: 12px;
+    color: Theme.warning;
+}
+
+// Hinweiszeile über einem Verlauf, feste Höhe wie im Verlauf von Scannen
+component HistoryNote inherits Rectangle {
+    in property <bool> empty;
+    in property <bool> mc-running;
+    in property <bool> blocked;
+    height: 40px;
+    Text {
+        x: 0;
+        width: parent.width;
+        text: root.mc-running ? @tr("Quit Media Composer first.") : root.blocked ? @tr("Rewrite databases waits until the renamed folders are renamed back (Check DBs › New databases).") : root.empty ? @tr("No runs yet.") : @tr("Every run can be undone.");
+        vertical-alignment: center;
+        overflow: elide;
+        font-size: 12px;
+        color: root.mc-running || root.blocked ? Theme.warning : Theme.muted;
     }
 }
 
@@ -472,46 +500,6 @@ component FillScroll inherits Rectangle {
         }
     }
     ScrollThumb { x: parent.width - self.width - 2px; view: flick.height; content: inner.preferred-height; offset: flick.content-y; }
-}
-
-// Laufwerke mit Schaltern – überall gleich (Austausch, Prüfen, Medien teilen dieselben Schalter):
-// grüner Punkt, Name, Dateien aus dem letzten Austausch-Scan, Schalter
-component DriveList inherits Card {
-    in property <[VolumeRow]> rows;
-    in property <int> visible-rows: 6;
-    callback toggled(int);
-    ScrollBox {
-        limit: root.visible-rows * 38px;
-        for v[i] in root.rows: ToggleRow {
-            first: i == 0;
-            enabled: v.online;
-            toggled => { root.toggled(i); }
-            spacing: 10px;
-            Dot { color: v.online ? Theme.online : Theme.line; }
-            Text {
-                text: v.name;
-                horizontal-stretch: 1;
-                overflow: elide;
-                vertical-alignment: center;
-                color: v.online && v.selected ? Theme.text : Theme.muted;
-            }
-            Text {
-                text: !v.online ? @tr("not connected") : v.files == "" ? @tr("not scanned yet") : @tr("{} files", v.files);
-                font-size: 12px;
-                vertical-alignment: center;
-                color: v.files == "" ? Theme.faint : Theme.muted;
-            }
-            VerticalLayout {
-                alignment: center;
-                width: 34px;
-                if v.online: Switch {
-                    on: v.selected;
-                    label: v.name;
-                    toggled => { root.toggled(i); }
-                }
-            }
-        }
-    }
 }
 
 // Ergebnisliste mit eigener Scrollfläche; level: 0 Überschrift, 1 Befund (Warnfarbe), 2 Detail (eingerückt)
@@ -742,22 +730,19 @@ component SettingsTab {
 
 // Avid-Projekte (Reiter „Projekte“): Rust füllt diesen Zustand, die Seite zeigt ihn je Schritt (view)
 export global Projects {
-    // 0 nichts gelesen, 1 liest Bins, 2 Ergebnis da
+    // 0 kein Ergebnis (der aktuelle Scan hat keine Projekte gelesen), 2 Ergebnis des aktuellen Scans da
     in property <int> step;
-    // Schritt in der Seitenleiste: 0 Projekte wählen, 1 Fehlende Medien, 2 AMA-Clips, 3 Anfordern
+    // Schritt in der Seitenleiste: 0 Fehlende Medien, 1 AMA-Clips, 2 Anfordern
     in-out property <int> view;
+    // Projektordner und Projekte: gewählt im Reiter Scannen
     in property <string> folder;
     in property <[DriveRow]> projects;
     in property <int> selected-count;
     in property <string> error;
-    in property <string> work-text;
-    in property <float> work-value;
-    in property <int> work-eta: -1;
-    // Pause/Abbrechen des laufenden Scans (ScanButtons)
-    in-out property <bool> paused;
-    callback pause(bool);
-    callback cancel();
     in property <int> missing;
+    // was die Anforderung enthält: nur Dateien aus den im Baum eingeschalteten Ordnern
+    in property <int> request-count;
+    in property <bool> folders-off;
     in property <int> unmanaged;
     in property <int> no-media;
     in property <int> bins;
@@ -774,7 +759,6 @@ export global Projects {
     in property <bool> has-ama-rows;
     callback choose-folder();
     callback toggle(int);
-    callback scan();
     callback save-request();
     callback toggle-group(int);
     callback toggle-ama(int);
@@ -862,93 +846,26 @@ component FlowStrip inherits HorizontalLayout {
 
 component ProjectsPane inherits VerticalLayout {
     spacing: Metrics.spacing;
-    property <int> dot-count;
-    Timer {
-        interval: 400ms;
-        running: Projects.step == 1;
-        triggered => { root.dot-count = Math.mod(root.dot-count + 1, 4); }
-    }
 
-    // ── Projekte wählen ──
-    if Projects.view == 0 && Projects.step != 1: VerticalLayout {
+    // ── kein Ergebnis: der kommt aus dem Reiter „Scannen“ ──
+    if Projects.step != 2: VerticalLayout {
         spacing: 14px;
+        alignment: start;
         PageHead {
-            title: @tr("Choose projects");
+            title: @tr("No project scan yet");
             CheckButton {
-                text: @tr("Choose folder…");
-                clicked => { Projects.choose-folder(); }
-            }
-            CheckButton {
-                text: @tr("Scan");
+                text: @tr("Go to Scan");
                 primary: true;
-                enabled: Projects.selected-count > 0;
-                clicked => { Projects.scan(); }
+                clicked => { Inventory.go-scan(); }
             }
         }
-        Text {
-            text: Projects.folder == "" ? @tr("No folder chosen") : Projects.folder;
-            overflow: elide;
-            font-size: 12px;
-            color: Projects.folder == "" ? Theme.faint : Theme.muted;
-        }
-        if Projects.folder != "" && Projects.projects.length == 0: Text {
-            text: @tr("No Avid projects in this folder.");
-            color: Theme.muted;
-        }
-        if Projects.projects.length > 0: Card {
-ScrollBox {  
-            limit: 6 * 38px;
-            for p[i] in Projects.projects: ToggleRow {
- first: i == 0;
-                toggled => { Projects.toggle(i); }
-                spacing: 10px;
-                Text {
-                    text: p.name;
-                    horizontal-stretch: 1;
-                    overflow: elide;
-                    vertical-alignment: center;
-                    color: p.selected ? Theme.text : Theme.muted;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    Switch {
-                        on: p.selected;
-                        label: p.name;
-                        toggled => { Projects.toggle(i); }
-                    }
-                }
-            }
-        }
-}
         Para {
-            text: @tr("Reads every bin of the switched-on projects and lists the media files their clips, subclips and sequences need that are on none of the connected drives. Nothing is changed.");
-        }
-        if Access.denied != "": AccessNote { }
-        StatusLine {
-            text: Projects.error;
-            color: Theme.error;
-        }
-    }
-
-    // ── Bins werden gelesen ──
-    if Projects.step == 1: Section {
-        title: @tr("READING BINS");
-        ProgressBar { value: Projects.work-value; }
-        WorkLine { text: Projects.work-text; eta: Projects.work-eta; paused: Projects.paused; }
-        ScanButtons {
-            paused: Projects.paused;
-            pause(on) => { Projects.paused = on; Projects.pause(on); }
-            cancel => { Projects.cancel(); }
-        }
-        Text {
-            text: @tr("Please wait{}", root.dot-count == 1 ? ".  " : root.dot-count == 2 ? ".. " : root.dot-count == 3 ? "..." : "   ");
-            font-size: 12px;
-            color: Theme.faint;
+            text: Inventory.step == 1 ? @tr("The scan is running – see the Scan tab.") : @tr("Switch on at least one Avid Media Composer project under Scan and scan, or load an earlier scan. The missing media of its projects then show here.");
         }
     }
 
     // ── Fehlende Medien ──
-    if Projects.view == 1 && Projects.step == 2: VerticalLayout {
+    if Projects.view == 0 && Projects.step == 2: VerticalLayout {
         spacing: 14px;
         PageHead {
             title: Projects.missing == 0 ? @tr("All media files are on the drives") : @tr("{n} media file missing" | "{n} media files missing" % Projects.missing);
@@ -994,7 +911,7 @@ ScrollBox {
                 }
                 CheckButton {
                     text: @tr("Show AMA clips");
-                    clicked => { Projects.view = 2; }
+                    clicked => { Projects.view = 1; }
                 }
             }
             if Projects.ama-covered > 0: Para {
@@ -1025,7 +942,7 @@ ScrollBox {
     }
 
     // ── AMA-Clips ──
-    if Projects.view == 2 && Projects.step == 2: VerticalLayout {
+    if Projects.view == 1 && Projects.step == 2: VerticalLayout {
         spacing: 14px;
         PageHead {
             title: @tr("{n} AMA-linked file" | "{n} AMA-linked files" % Projects.ama);
@@ -1044,24 +961,29 @@ ScrollBox {
     }
 
     // ── Anfordern ──
-    if Projects.view == 3 && Projects.step == 2: VerticalLayout {
+    if Projects.view == 2 && Projects.step == 2: VerticalLayout {
         spacing: 14px;
         PageHead {
             title: @tr("Request missing media");
             CheckButton {
                 text: @tr("Save request…");
                 primary: true;
-                enabled: Projects.missing > 0;
+                enabled: Projects.request-count > 0;
                 clicked => { Projects.save-request(); }
             }
         }
         Para {
             text: Projects.missing == 0 ? @tr("Nothing to request – all media files are on the drives.")
-                : @tr("{n} media file will be requested." | "{n} media files will be requested." % Projects.missing)
+                : Projects.request-count == 0 ? @tr("Nothing to request – every folder with missing media is switched off in the folder tree (Show media…).")
+                : @tr("{n} media file will be requested." | "{n} media files will be requested." % Projects.request-count)
                     + (Projects.relink > 0 ? " " + @tr("Files to relink are not part of it.") : "");
             color: Theme.text;
         }
-        if Projects.missing > 0: Rectangle {
+        if Projects.folders-off && Projects.request-count > 0: Para {
+            text: @tr("Only files from the folders switched on in the folder tree (Show media…).");
+            color: Theme.warning;
+        }
+        if Projects.request-count > 0: Rectangle {
             border-radius: 8px;
             border-width: 1px;
             border-color: Theme.line;
@@ -1110,20 +1032,10 @@ export struct ChoiceRow {
 }
 
 export global Exchange {
-    // Schritt in der Seitenleiste: 0 Scannen, 1 Vergleichen, 2 Sammeln, 3 Importieren
-    in-out property <int> view;
+    // Schritt in der Seitenleiste: 1 Vergleichen, 2 Sammeln, 3 Importieren (der Scan ist der zentrale im Reiter Scannen)
+    in-out property <int> view: 1;
     in property <string> system-name;
     in property <[VolumeRow]> volumes;
-    in property <int> selected-count;
-    in property <int> minutes-since-scan: -1;
-    in property <bool> scanning;
-    in property <string> progress;
-    in property <int> scan-eta: -1;
-    // Pause/Abbrechen des laufenden Scans (ScanButtons)
-    in-out property <bool> paused;
-    callback pause(bool);
-    callback cancel();
-    in property <int> warnings;
     in property <string> error;
     in property <bool> has-manifest;
     // Vergleichen
@@ -1132,8 +1044,6 @@ export global Exchange {
     in property <string> remote-date;
     in property <bool> is-request;
     in property <[MapRow]> maps;
-    // eigene Laufwerke mit gleichnamigem Gegenstück drüben (automatisch zugeordnet)
-    in property <[string]> matched;
     in property <int> copy-files;
     in property <string> copy-size;
     in property <[string]> tasks;
@@ -1154,10 +1064,11 @@ export global Exchange {
     in property <int> delivery-files;
     in property <string> delivery-size;
     in property <[DeliveryDrive]> delivery-maps;
-    in property <[ChoiceRow]> delivery-folders;
+    // Ordner der Lieferung: so viele werden zusammengeführt / kommen in eigene Ordner (Wahl im FoldersWindow)
+    in property <int> folders-merge;
+    in property <int> folders-own;
+    callback show-folders();
     in property <bool> can-import;
-    callback scan();
-    callback toggle-volume(int);
     callback save-manifest();
     callback open-manifest();
     callback map-changed(int, int);
@@ -1173,8 +1084,6 @@ export global Exchange {
     callback close-result();
     // Aufgaben des Vergleichs in eigenem Fenster
     callback show-tasks();
-    // Rust intern: Laufwerksliste neu aufbauen (nach dem Scannen)
-    callback rescanned();
 }
 
 component MapList inherits Card {
@@ -1206,6 +1115,11 @@ component MapList inherits Card {
     }
 }
 
+// Prüfen: was geprüft wird (Seite ohne Ergebnis)
+component CheckIntro inherits Para {
+    text: @tr("Every folder in “Avid MediaFiles/MXF” has two Avid database files (msmFMID.pmr, msmMMOB.mdb) that tell Media Composer which media files are in it. Check reads them and compares them with the MXF files really in the folder: files missing in the database, database entries without a file, missing or unreadable databases. Nothing is changed.");
+}
+
 component LineList inherits ScrollBox {
     in property <[string]> lines;
     in property <color> text-color: Theme.text;
@@ -1220,23 +1134,136 @@ component LineList inherits ScrollBox {
     }
 }
 
+// Austausch › Aufgaben: gespeicherte Aufgaben der Lieferungen
+export struct TaskRow {
+    text: string,
+    source: string,
+    // Knopf für den nächsten Schritt ("" = keiner)
+    action: string,
+    // gespeicherte Aufgabe (abhakbar) oder live aus dem Zustand der App
+    stored: bool,
+    // für diesen Schnittplatz (sonst geht sie mit einer Lieferung an den anderen)
+    mine: bool,
+}
+
+export global Tasks {
+    in property <[TaskRow]> open;
+    in property <[TaskRow]> done;
+    callback action(int);
+    callback finish(int);
+    callback reopen(int);
+    callback clear-done();
+    // Rust intern: Liste neu aufbauen
+    callback reload();
+}
+
+// eine Aufgabe; finished = erledigt (grüner Punkt, Wieder öffnen)
+component TaskItem inherits Rectangle {
+    in property <TaskRow> t;
+    in property <int> index;
+    in property <bool> finished;
+    in property <bool> first;
+    if !root.first: Rectangle { y: 0; height: 1px; background: Theme.row-line; }
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 10px;
+            Dot { color: root.finished ? Theme.online : root.t.mine ? Theme.warning : Theme.line; }
+            Text {
+                text: root.t.text;
+                width: Metrics.content-width - 80px;
+                wrap: word-wrap;
+                color: root.finished ? Theme.muted : Theme.text;
+            }
+        }
+        HorizontalLayout {
+            padding-left: 18px;
+            spacing: 8px;
+            Text {
+                text: root.t.source;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                font-size: 11px;
+                overflow: elide;
+                color: Theme.muted;
+            }
+            if root.t.action != "" && !root.finished: CheckButton {
+                text: root.t.action;
+                small: true;
+                clicked => { Tasks.action(root.index); }
+            }
+            if root.t.stored && !root.finished: CheckButton {
+                text: @tr("Done");
+                small: true;
+                clicked => { Tasks.finish(root.index); }
+            }
+            if root.finished: CheckButton {
+                text: @tr("Reopen");
+                small: true;
+                clicked => { Tasks.reopen(root.index); }
+            }
+        }
+    }
+}
+
+// Austausch › Aufgaben: die gespeicherten Aufgaben der Lieferungen, offene zuerst, darunter erledigte
+component TasksView inherits VerticalLayout {
+    spacing: 14px;
+    height: Metrics.page-height;
+    PageHead {
+        title: Tasks.open.length == 0 ? @tr("Nothing to do by hand right now.") : @tr("{n} open task" | "{n} open tasks" % Tasks.open.length);
+        if Tasks.done.length > 0: CheckButton {
+            text: @tr("Clear completed");
+            clicked => { Tasks.clear-done(); }
+        }
+    }
+    Para {
+        text: @tr("Tasks for this workstation from deliveries collected or imported here. Tasks for the other workstation go with the delivery (Tasks.txt).");
+        color: Theme.faint;
+    }
+    // eine Karte, die den Rest der Seite füllt: offene Aufgaben, darunter die erledigten
+    if Tasks.open.length + Tasks.done.length > 0: Rectangle {
+        vertical-stretch: 1;
+        background: Theme.card;
+        border-width: 1px;
+        border-color: Theme.card-line;
+        border-radius: 9px;
+        clip: true;
+        flick := Flickable {
+            width: parent.width;
+            height: parent.height;
+            content-height: col.preferred-height;
+            col := VerticalLayout {
+                x: 0;
+                width: flick.width;
+                for t[i] in Tasks.open: TaskItem { t: t; index: i; first: i == 0; }
+                if Tasks.done.length > 0: HorizontalLayout {
+                    padding-left: 14px;
+                    padding-top: Tasks.open.length > 0 ? 16px : 10px;
+                    padding-bottom: 4px;
+                    SectionLabel { text: @tr("COMPLETED"); }
+                }
+                for t[i] in Tasks.done: TaskItem { t: t; index: i; finished: true; first: i == 0; }
+            }
+        }
+        ScrollThumb { x: parent.width - self.width - 3px; view: flick.height; track: parent.height; content: col.preferred-height; offset: flick.content-y; }
+    }
+    if Tasks.open.length + Tasks.done.length == 0: Rectangle { vertical-stretch: 1; }
+}
+
 component ExchangePane inherits VerticalLayout {
     spacing: Metrics.spacing;
     property <int> dot-count;
     property <string> dots: root.dot-count == 1 ? ".  " : root.dot-count == 2 ? ".. " : root.dot-count == 3 ? "..." : "   ";
     Timer {
         interval: 400ms;
-        running: Exchange.scanning || Exchange.busy;
+        running: Exchange.busy;
         triggered => { root.dot-count = Math.mod(root.dot-count + 1, 4); }
     }
-    property <int> hours: Exchange.minutes-since-scan / 60;
-    property <int> days: root.hours / 24;
-    property <string> scan-status: Exchange.scanning ? @tr("Scanning{} {}", root.dots, Exchange.progress)
-        : Exchange.minutes-since-scan < 0 ? @tr("Not scanned yet")
-        : Exchange.minutes-since-scan < 1 ? @tr("Last scan: just now")
-        : Exchange.minutes-since-scan < 60 ? @tr("Last scan: {n} minute ago" | "Last scan: {n} minutes ago" % Exchange.minutes-since-scan)
-        : root.hours < 24 ? @tr("Last scan: {n} hour ago" | "Last scan: {n} hours ago" % root.hours)
-        : @tr("Last scan: {n} day ago" | "Last scan: {n} days ago" % root.days);
     property <string> work-title: Exchange.work-kind == 0 ? @tr("Collecting for {}", Exchange.remote-name)
         : Exchange.work-kind == 1 ? @tr("Verifying the delivery") : @tr("Importing the delivery");
     property <bool> result-ok: Exchange.result-kind == 0 || Exchange.result-kind == 2;
@@ -1246,75 +1273,40 @@ component ExchangePane inherits VerticalLayout {
         : Exchange.result-kind == 3 ? @tr("Delivery imported with problems") : @tr("Delivery is incomplete or damaged – nothing was imported");
     property <string> result-hint: Exchange.result-kind <= 1 ? @tr("Give this folder to {} (e.g. on a drive); there it is imported with Exchange › Import. Instructions for importing by hand are inside.", Exchange.remote-name)
         : Exchange.result-kind == 4 ? @tr("Ask {} for a new delivery or copy the folder again.", Exchange.delivery-from)
-        : @tr("Scan again so that the manifest is up to date.");
+        : @tr("Scan again under Scan so that the manifest is up to date.");
     // Ergebnis gehört zu Sammeln (0, 1) oder Importieren (2–4)
     property <bool> show-result: Exchange.result-kind >= 0 && !Exchange.busy && (Exchange.result-kind <= 1 ? Exchange.view == 2 : Exchange.view == 3);
     property <bool> show-busy: Exchange.busy && (Exchange.work-kind == 0 ? Exchange.view == 2 : Exchange.view == 3);
 
-    // ── Scannen ──
-    if Exchange.view == 0: VerticalLayout {
+    // ── Vergleichen ──
+    if Exchange.view == 1 && !Exchange.has-manifest: VerticalLayout {
         spacing: 14px;
         PageHead {
-            title: @tr("Scan this system");
+            title: @tr("No scan yet");
             CheckButton {
-                text: @tr("Save manifest…");
-                enabled: Exchange.has-manifest && !Exchange.scanning;
-                clicked => { Exchange.save-manifest(); }
-            }
-            CheckButton {
-                text: @tr("Scan");
+                text: @tr("Go to Scan");
                 primary: true;
-                enabled: !Exchange.scanning && Exchange.selected-count > 0;
-                clicked => { Exchange.scan(); }
+                clicked => { Inventory.go-scan(); }
             }
         }
         Para {
-            text: @tr("Checksums are remembered – only new or changed files are read. The manifest lists what this system has; the other system opens it under Exchange › Compare.");
-        }
-        Section {
-            title: Exchange.system-name;
-            if Exchange.volumes.length == 0: Text {
-                text: @tr("No drive with “Avid MediaFiles/MXF” found.");
-                overflow: elide;
-                color: Theme.muted;
-            }
-            if Exchange.volumes.length == 0: Para {
-                text: @tr("Connect a drive with Avid media. If macOS asks whether MediaFiles Check may access files on removable or network volumes, allow it.");
-                color: Theme.faint;
-            }
-            if Exchange.volumes.length > 0: SectionLabel { text: @tr("DRIVES"); }
-            if Exchange.volumes.length > 0: DriveList {
-                rows: Exchange.volumes;
-                toggled(i) => { Exchange.toggle-volume(i); }
-            }
-        }
-        WorkLine { text: root.scan-status; eta: Exchange.scanning ? Exchange.scan-eta : -1; paused: Exchange.scanning && Exchange.paused; }
-        if Exchange.scanning: ScanButtons {
-            paused: Exchange.paused;
-            pause(on) => { Exchange.paused = on; Exchange.pause(on); }
-            cancel => { Exchange.cancel(); }
-        }
-        if Access.denied != "": AccessNote { }
-        if Exchange.error != "" || (Exchange.warnings > 0 && !Exchange.scanning): Para {
-            text: Exchange.error != "" ? Exchange.error : @tr("{n} warning" | "{n} warnings" % Exchange.warnings);
-            color: Exchange.error != "" ? Theme.error : Theme.warning;
-        }
-        Para {
-            text: @tr("The switches apply to Check › Drives too.");
-            color: Theme.faint;
+            text: @tr("Scan this system under Scan first. The scan also writes the manifest: the list of what this system has, with checksums – the other system opens it here under Compare.");
         }
     }
-
-    // ── Vergleichen ──
-    if Exchange.view == 1: VerticalLayout {
+    if Exchange.view == 1 && Exchange.has-manifest: VerticalLayout {
         spacing: 14px;
         PageHead {
             title: !Exchange.has-compare ? @tr("Compare with another system")
                 : Exchange.is-request ? @tr("Request from {}", Exchange.remote-name) : @tr("Compare with {}", Exchange.remote-name);
+            if !Exchange.has-compare: CheckButton {
+                text: @tr("Save manifest…");
+                enabled: Inventory.step != 1;
+                clicked => { Exchange.save-manifest(); }
+            }
             CheckButton {
                 text: Exchange.has-compare ? @tr("Other manifest…") : @tr("Open manifest…");
                 primary: !Exchange.has-compare;
-                enabled: Exchange.has-manifest && !Exchange.scanning;
+                enabled: Inventory.step != 1;
                 clicked => { Exchange.open-manifest(); }
             }
             if Exchange.has-compare: CheckButton {
@@ -1325,42 +1317,36 @@ component ExchangePane inherits VerticalLayout {
             }
         }
         if !Exchange.has-compare: Para {
-            text: Exchange.has-manifest ? @tr("Open the manifest of the other system, or a request saved under Projects › Request.") : @tr("Scan this system first (Exchange › Scan).");
+            text: @tr("Save manifest… writes what this system has (from the last scan) for the other system. Open manifest… opens the other system's manifest, or a request saved under Project links › Request.");
         }
         if Exchange.has-compare: Text {
             text: Exchange.is-request ? @tr("Request from {}", Exchange.remote-date) : @tr("Manifest from {}", Exchange.remote-date);
             font-size: 12px;
             color: Theme.muted;
         }
-        if Exchange.has-compare && Exchange.maps.length + Exchange.matched.length > 0: Section {
+        if Exchange.has-compare && Exchange.maps.length > 0: Section {
             title: @tr("ASSIGN DRIVES");
-            if Exchange.matched.length > 0: Para { text: @tr("Assigned: same name on both systems."); }
-            if Exchange.matched.length > 0: Card {
-                for m[i] in Exchange.matched: CardRow {
-                    first: i == 0;
-                    Text {
-                        text: m;
-                        width: 220px;
-                        overflow: elide;
-                        vertical-alignment: center;
-                        color: Theme.text;
-                    }
-                    Text {
-                        text: "→";
-                        vertical-alignment: center;
-                        color: Theme.muted;
-                    }
-                    Text {
-                        text: m;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                        vertical-alignment: center;
-                        color: Theme.muted;
-                    }
+            Para { text: @tr("Choose for every drive of this workstation where its files go over there. A drive of the same name is preselected; you can choose another one."); }
+            // Spaltenköpfe: links diese Workstation, rechts die andere (gleiche Breiten wie MapList)
+            HorizontalLayout {
+                padding-left: 15px;
+                spacing: 12px;
+                VerticalLayout {
+                    width: 220px;
+                    spacing: 2px;
+                    SectionLabel { text: @tr("THIS WORKSTATION"); }
+                    Text { text: Exchange.system-name; overflow: elide; font-size: 12px; color: Theme.text; }
+                }
+                // so breit wie der Pfeil in MapList
+                Text { text: "→"; color: transparent; }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    SectionLabel { text: @tr("OTHER WORKSTATION"); }
+                    Text { text: Exchange.remote-name; overflow: elide; font-size: 12px; color: Theme.text; }
                 }
             }
-            if Exchange.maps.length > 0: Para { text: @tr("Not assigned: these drives have another name on the other system. Choose the drive they go to."); }
-            if Exchange.maps.length > 0: MapList {
+            MapList {
                 rows: Exchange.maps;
                 changed(i, v) => { Exchange.map-changed(i, v); }
             }
@@ -1448,6 +1434,9 @@ component ExchangePane inherits VerticalLayout {
         }
     }
 
+    // ── Aufgaben ──
+    if Exchange.view == 4: TasksView { }
+
     // ── Sammeln: noch nichts ──
     if Exchange.view == 2 && !root.show-busy && !root.show-result: VerticalLayout {
         spacing: 14px;
@@ -1487,6 +1476,24 @@ component ExchangePane inherits VerticalLayout {
         if Exchange.has-delivery: Section {
             title: @tr("ASSIGN DRIVES");
             Para { text: @tr("Per drive of the other system: as it was there, or separated – media files to one drive, render files to another."); }
+            // Spaltenköpfe: links die Laufwerke der Lieferung (andere Workstation), rechts diese Workstation
+            HorizontalLayout {
+                padding-left: 15px;
+                spacing: 12px;
+                VerticalLayout {
+                    width: 170px;
+                    spacing: 2px;
+                    SectionLabel { text: @tr("OTHER WORKSTATION"); }
+                    Text { text: Exchange.delivery-from; overflow: elide; font-size: 12px; color: Theme.text; }
+                }
+                Rectangle { width: 165px; }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    SectionLabel { text: @tr("THIS WORKSTATION"); }
+                    Text { text: Exchange.system-name; overflow: elide; font-size: 12px; color: Theme.text; }
+                }
+            }
             Card {
                 for r[i] in Exchange.delivery-maps: VerticalLayout {
                     CardRow {
@@ -1552,53 +1559,21 @@ component ExchangePane inherits VerticalLayout {
         }
         if Exchange.has-delivery: Section {
             title: @tr("FOLDERS");
-            Para { text: @tr("Merge: into the folder of the same name. Own folder: “<sender>_<folder>” – if it exists already, the files go into it. A folder that ends up different from the other side needs its database rebuilt (task)."); }
             HorizontalLayout {
-                alignment: start;
-                spacing: 8px;
-                CheckButton {
-                    text: @tr("All merge");
-                    small: true;
-                    clicked => { Exchange.delivery-folder-changed(-1, 0); }
+                spacing: 10px;
+                Text {
+                    text: @tr("{n} folder merges, {} in own folders" | "{n} folders merge, {} in own folders" % Exchange.folders-merge, Exchange.folders-own);
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    color: Theme.text;
                 }
                 CheckButton {
-                    text: @tr("All in own folders");
+                    text: @tr("Choose folders…");
                     small: true;
-                    clicked => { Exchange.delivery-folder-changed(-1, 1); }
+                    clicked => { Exchange.show-folders(); }
                 }
             }
-            Card { ScrollBox {
-                limit: 240px;
-                for c[i] in Exchange.delivery-folders: CardRow {
-                    first: i == 0;
-                    Text {
-                        text: c.name;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                        vertical-alignment: center;
-                        color: Theme.text;
-                    }
-                    if c.choice == 1: Text {
-                        text: "→ " + c.own;
-                        max-width: 260px;
-                        overflow: elide;
-                        vertical-alignment: center;
-                        color: Theme.muted;
-                    }
-                    VerticalLayout { alignment: center; CheckButton {
-                        text: @tr("Merge");
-                        small: true;
-                        primary: c.choice == 0;
-                        clicked => { Exchange.delivery-folder-changed(i, 0); }
-                    } }
-                    VerticalLayout { alignment: center; CheckButton {
-                        text: @tr("Own folder");
-                        small: true;
-                        primary: c.choice == 1;
-                        clicked => { Exchange.delivery-folder-changed(i, 1); }
-                    } }
-                }
-            } }
         }
         if Exchange.has-delivery: Para {
             text: @tr("Quit Media Composer before importing. Every file is verified first, and only a complete delivery is imported. A media file is never overwritten.");
@@ -1611,142 +1586,11 @@ component ExchangePane inherits VerticalLayout {
     }
 }
 
-// Aufgaben: alles, was Handarbeit braucht (aus Lieferungen gespeichert, Datenbank-Runden und Umbenennungen live)
-export struct TaskRow {
-    text: string,
-    source: string,
-    // Knopf für den nächsten Schritt ("" = keiner)
-    action: string,
-    // gespeicherte Aufgabe (abhakbar) oder live aus dem Zustand der App
-    stored: bool,
-    // für diesen Schnittplatz (sonst geht sie mit einer Lieferung an den anderen)
-    mine: bool,
-}
-
-export global Tasks {
-    // 0 Offen, 1 Von Hand importieren, 2 Erledigt
-    in-out property <int> view;
-    in property <[TaskRow]> open;
-    in property <[TaskRow]> done;
-    callback action(int);
-    callback finish(int);
-    callback reopen(int);
-    callback clear-done();
-    // Rust intern: Liste neu aufbauen
-    callback reload();
-}
-
-component TaskList inherits Card {
-    in property <[TaskRow]> rows;
-    in property <bool> finished;
-    ScrollBox {
-        limit: 380px;
-        for t[i] in root.rows: Rectangle {
-            if i > 0: Rectangle { y: 0; height: 1px; background: Theme.row-line; }
-            VerticalLayout {
-                padding-left: 14px;
-                padding-right: 14px;
-                padding-top: 10px;
-                padding-bottom: 10px;
-                spacing: 6px;
-                HorizontalLayout {
-                    spacing: 10px;
-                    Dot { color: root.finished ? Theme.online : t.mine ? Theme.warning : Theme.line; }
-                    Text {
-                        text: t.text;
-                        width: Metrics.content-width - 80px;
-                        wrap: word-wrap;
-                        color: root.finished ? Theme.muted : Theme.text;
-                    }
-                }
-                HorizontalLayout {
-                    padding-left: 18px;
-                    spacing: 8px;
-                    Text {
-                        text: t.source;
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                        font-size: 11px;
-                        overflow: elide;
-                        color: Theme.muted;
-                    }
-                    if t.action != "" && !root.finished: CheckButton {
-                        text: t.action;
-                        small: true;
-                        clicked => { Tasks.action(i); }
-                    }
-                    if t.stored && !root.finished: CheckButton {
-                        text: @tr("Done");
-                        small: true;
-                        clicked => { Tasks.finish(i); }
-                    }
-                    if root.finished: CheckButton {
-                        text: @tr("Reopen");
-                        small: true;
-                        clicked => { Tasks.reopen(i); }
-                    }
-                }
-            }
-        }
-    }
-}
-
-component TasksPane inherits VerticalLayout {
-    spacing: 14px;
-    if Tasks.view == 0: VerticalLayout {
-        spacing: 14px;
-        PageHead {
-            title: Tasks.open.length == 0 ? @tr("Nothing to do by hand right now.") : @tr("{n} open task" | "{n} open tasks" % Tasks.open.length);
-        }
-        if Tasks.open.length > 0: TaskList { rows: Tasks.open; }
-        Para {
-            text: @tr("Tasks come from deliveries (Exchange) and from Maintain. A yellow dot is for this system; the others go with a delivery to the other system.");
-            color: Theme.faint;
-        }
-    }
-    if Tasks.view == 1: VerticalLayout {
-        spacing: 10px;
-        PageHead { title: @tr("Import a delivery by hand"); }
-        for t[i] in [
-            @tr("Quit Media Composer."),
-            @tr("Every folder of the delivery is named <drive>/<folder>. On that drive open “Avid MediaFiles/MXF/<folder>” (create it if it is missing)."),
-            @tr("Copy only the contents of the delivery folder into it – never drag the whole folder onto an existing folder: the Finder would replace it with all its media files."),
-            @tr("If you are asked to replace .mxf files: don't – cancel and check."),
-            @tr("Replace msmFMID.pmr and msmMMOB.mdb only in the folders listed in the delivery's Tasks.txt."),
-        ]: HorizontalLayout {
-            spacing: 10px;
-            Text { text: i + 1; font-size: 12px; color: Theme.faint; }
-            Text {
-                text: t;
-                width: Metrics.content-width - 40px;
-                wrap: word-wrap;
-                font-size: 12px;
-                font-weight: i == 2 ? 700 : 400;
-                color: i == 2 ? Theme.warning : Theme.text;
-            }
-        }
-        Para {
-            text: @tr("Easier and safe: Exchange › Import verifies everything and imports only a complete delivery.");
-            color: Theme.faint;
-        }
-    }
-    if Tasks.view == 2: VerticalLayout {
-        spacing: 14px;
-        PageHead {
-            title: @tr("Completed");
-            if Tasks.done.length > 0: CheckButton {
-                text: @tr("Clear list");
-                clicked => { Tasks.clear-done(); }
-            }
-        }
-        if Tasks.done.length == 0: Para { text: @tr("Nothing completed yet."); }
-        if Tasks.done.length > 0: TaskList { rows: Tasks.done; finished: true; }
-    }
-}
 
 // Seiten des Hauptfensters; jede gehört zu einem Reiter (tab-of) und einem Schritt der Seitenleiste (step-of)
 export struct RunRow {
     text: string,
+    detail: string,
     db-done: bool,
 }
 
@@ -1777,10 +1621,25 @@ export struct FolderRow {
 }
 
 export global Inventory {
+    // Ordner für Media Composer umbenannt (Rust, show_renamed): Datenbanken neu schreiben gesperrt
+    in property <bool> renames-pending;
     // 0 nichts gelesen, 1 liest, 2 Ergebnis da
     in property <int> step;
-    // Schritt in der Seitenleiste: 0 Auswahl, 1 Übersicht
-    in-out property <int> view;
+    // Schritt in der Seitenleiste des Reiters Medien: 1 Übersicht, 2 Aktionen, 3 Verlauf
+    in-out property <int> view: 1;
+    // Reiter Scannen: 0 Scannen, 1 Historie; Datum des geladenen/letzten Scans
+    in-out property <int> scan-view;
+    in property <string> current;
+    // Historie: Rückfrage „Alle löschen“ (-1 keine, 1 offen); einen Scan entfernen (-1 = alle)
+    in-out property <int> delete-ask: -1;
+    callback delete-scan(int);
+    // „Laden…“: Rust prüft Volumes und Projekte; fehlt etwas, steht es in load-missing (sonst leer)
+    callback ask-load(int);
+    in property <string> load-missing;
+    // die angeschlossenen Volumes für den Reiter Scannen; files = Zeit des aktuellen Scans, wenn es darin war
+    in property <[VolumeRow]> scan-volumes;
+    // Reiter Medien ohne Scan: zum Reiter Scannen
+    callback go-scan();
     in property <[DriveRow]> drives;
     in property <int> drive-count;
     in property <string> work-text;
@@ -1816,7 +1675,6 @@ export global Inventory {
     in property <string> plan-size;
     // betroffene Ordner, eine Zeile je Ziel (Rust)
     in property <string> plan-text;
-    in property <int> per-folder;
     // zwei Laufwerke: Namen der gelesenen Laufwerke, gewählte Indizes, je Richtung die Anzahl
     in property <[string]> drive-names;
     in-out property <int> imports;
@@ -1923,58 +1781,146 @@ component ActionRow inherits CardRow {
     }
 }
 
-component InventoryPane inherits VerticalLayout {
+// Checkbox (kein Schalter): 14 px, Haken in Akzentfarbe
+component CheckBox inherits Rectangle {
+    in property <bool> checked;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border-width: root.checked ? 0 : 1px;
+    border-color: Theme.muted;
+    background: root.checked ? Theme.accent : transparent;
+    if root.checked: Path {
+        width: 10px;
+        height: 10px;
+        viewbox-width: 10;
+        viewbox-height: 10;
+        commands: "M 1.5 5.2 L 4 7.7 L 8.6 2.3";
+        stroke: #ffffff;
+        stroke-width: 1.8px;
+    }
+}
+
+// Karte, die die ganze Höhe nimmt, die ihr Layout ihr gibt; der Inhalt scrollt darin
+component FillCard inherits Rectangle {
+    vertical-stretch: 1;
+    min-height: 60px;
+    background: Theme.card;
+    border-width: 1px;
+    border-color: Theme.card-line;
+    border-radius: 9px;
+    clip: true;
+    flick := Flickable {
+        y: 1px;
+        height: parent.height - 2px;
+        content-height: inner.preferred-height;
+        inner := VerticalLayout {
+            x: 0;
+            // fest 10 px Platz für den Rollbalken (abhängig vom Inhalt wäre eine Bindungsschleife mit umbrechendem Text)
+            width: flick.width - 10px;
+            @children
+        }
+    }
+    ScrollThumb { x: parent.width - self.width - 3px; view: flick.height; track: parent.height; content: inner.preferred-height; offset: flick.content-y; }
+}
+
+// Reiter „Scannen“: Laufwerke und Projekte wählen und scannen – der Scan ist die Grundlage aller anderen Reiter.
+// Die Daten liegen in `Inventory` (src/inventory_ui.rs).
+component ScanPane inherits VerticalLayout {
     spacing: Metrics.spacing;
 
-    // ── Auswahl ── (feste Höhe: die letzten Scans nehmen den Rest und scrollen in ihrer Karte)
-    if Inventory.view == 0 && Inventory.step != 1 && Inventory.task < 0: VerticalLayout {
+    // ── Auswahl ── (feste Höhe: die beiden Listen nehmen den Platz, den die Texte unten übrig lassen)
+    if Inventory.scan-view == 0 && Inventory.step != 1: VerticalLayout {
         spacing: 14px;
         height: Metrics.page-height;
-        alignment: start;
         PageHead {
             title: @tr("Drives & projects");
             CheckButton {
-                text: @tr("Scan");
+                text: @tr("Projects folder…");
+                clicked => { Projects.choose-folder(); }
+            }
+            CheckButton {
+                text: @tr("Scan volumes & projects");
                 primary: true;
                 enabled: Inventory.drive-count > 0;
                 clicked => { Inventory.scan(); }
             }
         }
         HorizontalLayout {
+            vertical-stretch: 1;
             spacing: 22px;
             VerticalLayout {
                 width: (Metrics.content-width - 22px) / 2;
-                alignment: start;
                 spacing: 10px;
-                SectionLabel { text: @tr("DRIVES"); }
-                if Inventory.drives.length == 0: Text {
-                    text: @tr("No drive with “Avid MediaFiles/MXF” found.");
-                    wrap: word-wrap;
-                    font-size: 12px;
-                    color: Theme.muted;
+                HorizontalLayout {
+                    height: 24px;
+                    SectionLabel { text: @tr("DRIVES"); vertical-alignment: center; }
                 }
-                if Inventory.drives.length > 0: DriveList {
-                    rows: Exchange.volumes;
-                    visible-rows: 4;
-                    toggled(i) => { Inventory.toggle-drive(i); }
+                // nur angeschlossene Laufwerke (Inventory.scan-volumes, gleiche Reihenfolge wie Drives in Rust)
+                FillCard {
+                    if Inventory.drives.length == 0: VerticalLayout {
+                        padding: 12px;
+                        Text {
+                        text: @tr("No drive with “Avid MediaFiles/MXF” found.");
+                        wrap: word-wrap;
+                        font-size: 12px;
+                        color: Theme.muted;
+                        }
+                    }
+                    for v[i] in Inventory.scan-volumes: Rectangle {
+                        height: row.preferred-height;
+                        row := ToggleRow {
+                            y: 0;
+                            first: true;
+                            toggled => { Inventory.toggle-drive(i); }
+                            spacing: 10px;
+                            Dot { color: Theme.online; }
+                            Text {
+                                text: v.name;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                                vertical-alignment: center;
+                                color: v.selected ? Theme.text : Theme.muted;
+                            }
+                            Text {
+                                text: v.files == "" ? @tr("not scanned yet") : @tr("scanned {}", v.files);
+                                font-size: 12px;
+                                vertical-alignment: center;
+                                color: v.files == "" ? Theme.faint : Theme.muted;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                width: 34px;
+                                Switch { on: v.selected; label: v.name; toggled => { Inventory.toggle-drive(i); } }
+                            }
+                        }
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
+                    }
                 }
             }
             VerticalLayout {
                 width: (Metrics.content-width - 22px) / 2;
-                alignment: start;
                 spacing: 10px;
-                SectionLabel { text: @tr("PROJECTS"); }
-                if Projects.projects.length == 0: Text {
-                    text: @tr("Choose the folder with your Avid projects under Projects. Without projects, the files are only sorted into media and render files – nothing can be called unused.");
-                    wrap: word-wrap;
-                    font-size: 12px;
-                    color: Theme.muted;
+                HorizontalLayout {
+                    height: 24px;
+                    spacing: 8px;
+                    SectionLabel { text: @tr("AVID MEDIA COMPOSER PROJECTS"); horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
                 }
-                if Projects.projects.length > 0: Card {
-                    ScrollBox {
-                        limit: 4 * 38px;
-                        for p[i] in Projects.projects: ToggleRow {
-                            first: i == 0;
+                FillCard {
+                    if Projects.projects.length == 0: VerticalLayout {
+                        padding: 12px;
+                        Text {
+                        text: @tr("Choose the folder your Avid projects are in. Without projects, the files are only sorted into media and render files – nothing can be called unused.");
+                        wrap: word-wrap;
+                        font-size: 12px;
+                        color: Theme.muted;
+                        }
+                    }
+                    for p[i] in Projects.projects: Rectangle {
+                        height: prow.preferred-height;
+                        prow := ToggleRow {
+                            y: 0;
+                            first: true;
                             toggled => { Projects.toggle(i); }
                             Text { text: p.name; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; color: p.selected ? Theme.text : Theme.muted; }
                             VerticalLayout {
@@ -1982,6 +1928,7 @@ component InventoryPane inherits VerticalLayout {
                                 Switch { on: p.selected; label: p.name; toggled => { Projects.toggle(i); } }
                             }
                         }
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
                     }
                 }
             }
@@ -1996,65 +1943,14 @@ component InventoryPane inherits VerticalLayout {
             font-size: 12px;
             color: Theme.error;
         }
-        if Inventory.scans.length > 0: SectionLabel { text: @tr("RECENT SCANS"); }
-        if Inventory.scans.length > 0: Card {
-            vertical-stretch: 1;
-            min-height: 0px;
-            FillScroll {
-            for sc[i] in Inventory.scans: CardRow {
-                first: i == 0;
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    padding-top: 8px;
-                    padding-bottom: 8px;
-                    spacing: 8px;
-                    HorizontalLayout {
-                        spacing: 10px;
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            spacing: 2px;
-                            Text { text: sc.name; overflow: elide; font-size: 12px; color: Theme.text; }
-                            Text { text: sc.detail; overflow: elide; font-size: 11px; color: Theme.muted; }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            CheckButton {
-                                text: @tr("Load…");
-                                small: true;
-                                clicked => { Inventory.load-ask = i; }
-                            }
-                        }
-                    }
-                    if Inventory.load-ask == i: Rectangle {
-                        border-radius: 6px;
-                        background: Theme.selection;
-                        VerticalLayout {
-                            padding: 10px;
-                            spacing: 8px;
-                            Text {
-                                width: Metrics.content-width - 52px;
-                                text: @tr("Are you sure nothing changed on these drives and in these projects since then? Otherwise the overview is no longer right – scan again instead.");
-                                wrap: word-wrap;
-                                font-size: 12px;
-                                color: Theme.text;
-                            }
-                            HorizontalLayout {
-                                spacing: 8px;
-                                alignment: end;
-                                CheckButton { text: @tr("Cancel"); small: true; clicked => { Inventory.load-ask = -1; } }
-                                CheckButton { text: @tr("Load"); small: true; primary: true; clicked => { Inventory.load-scan(i); } }
-                            }
-                        }
-                    }
-                }
-            }
+        if Inventory.step == 2 && Inventory.current != "": Para {
+            text: @tr("Current scan: {} · {n} file" | "Current scan: {} · {n} files" % Inventory.files, Inventory.current) + " – " + @tr("every tab works with it.");
+            color: Theme.text;
         }
-            }
     }
 
     // ── liest ──
-    if Inventory.step == 1: VerticalLayout {
+    if Inventory.scan-view == 0 && Inventory.step == 1: VerticalLayout {
         spacing: 14px;
         PageHead {
             title: @tr("Reading media files…");
@@ -2068,6 +1964,170 @@ component InventoryPane inherits VerticalLayout {
         }
         Para {
             text: @tr("The first scan reads the header of every media file; later scans only read new or changed files.");
+        }
+    }
+
+
+    // ── Historie: frühere Scans laden oder löschen ──
+    if Inventory.scan-view == 1: VerticalLayout {
+        spacing: 14px;
+        height: Metrics.page-height;
+        PageHead {
+            title: @tr("History");
+            CheckButton {
+                text: @tr("Delete all…");
+                enabled: Inventory.scans.length > 0;
+                clicked => { Inventory.delete-ask = 1; Inventory.load-ask = -1; }
+            }
+        }
+        // Rückfrage immer an derselben Stelle, Höhe fest – die Liste darunter springt nicht
+        Rectangle {
+            height: 40px;
+            border-radius: 6px;
+            background: Inventory.delete-ask >= 0 ? Theme.selection : transparent;
+            if Inventory.delete-ask < 0: Text {
+                x: 0;
+                width: parent.width;
+                text: Inventory.scans.length == 0 ? @tr("No scans yet.") : @tr("The newest 20 scans are kept.");
+                vertical-alignment: center;
+                overflow: elide;
+                font-size: 12px;
+                color: Theme.muted;
+            }
+            if Inventory.delete-ask >= 0: HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 6px;
+                spacing: 8px;
+                Text {
+                    horizontal-stretch: 1;
+                    text: @tr("Delete all {n} scan?" | "Delete all {n} scans?" % Inventory.scans.length);
+                    vertical-alignment: center;
+                    overflow: elide;
+                    font-size: 12px;
+                    color: Theme.text;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    CheckButton { text: @tr("Cancel"); small: true; clicked => { Inventory.delete-ask = -1; } }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    CheckButton { text: @tr("Delete"); small: true; primary: true; clicked => { Inventory.delete-scan(-1); } }
+                }
+            }
+        }
+        if Inventory.scans.length > 0: Card {
+            vertical-stretch: 1;
+            min-height: 0px;
+            FillScroll {
+            for sc[i] in Inventory.scans: CardRow {
+                first: i == 0;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 10px;
+                        // ×: entfernt diesen Scan sofort
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 22px;
+                                height: 22px;
+                                border-radius: 11px;
+                                background: x-touch.has-hover ? Theme.selection : transparent;
+                                accessible-role: button;
+                                accessible-label: @tr("Remove");
+                                accessible-action-default => { Inventory.delete-scan(i); }
+                                Path {
+                                    width: 8px;
+                                    height: 8px;
+                                    viewbox-width: 8;
+                                    viewbox-height: 8;
+                                    commands: "M 0 0 L 8 8 M 8 0 L 0 8";
+                                    stroke: x-touch.has-hover ? Theme.text : Theme.muted;
+                                    stroke-width: 1.5px;
+                                }
+                                x-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { Inventory.delete-scan(i); }
+                                }
+                            }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: sc.name; overflow: elide; font-size: 12px; color: Theme.text; }
+                            Text { text: sc.detail; overflow: elide; font-size: 11px; color: Theme.muted; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            CheckButton {
+                                text: @tr("Load…");
+                                small: true;
+                                clicked => { Inventory.delete-ask = -1; Inventory.ask-load(i); }
+                            }
+                        }
+                    }
+                    if Inventory.load-ask == i: Rectangle {
+                        border-radius: 6px;
+                        background: Theme.selection;
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 8px;
+                            // Volumes oder Projekt nicht erreichbar: erst anschließen, dann laden
+                            if Inventory.load-missing != "": Text {
+                                width: Metrics.content-width - 52px;
+                                text: @tr("Connect these first, then load again: {}", Inventory.load-missing);
+                                wrap: word-wrap;
+                                font-size: 12px;
+                                color: Theme.warning;
+                            }
+                            if Inventory.load-missing != "": HorizontalLayout {
+                                alignment: end;
+                                CheckButton { text: @tr("OK"); small: true; primary: true; clicked => { Inventory.load-ask = -1; } }
+                            }
+                            if Inventory.load-missing == "": Text {
+                                width: Metrics.content-width - 52px;
+                                text: @tr("Loading makes this scan the current one for every tab: Media, Project links and the Exchange manifest then show the state of that time (DBs are always checked fresh). Only load it if nothing changed on these volumes and in these projects since – otherwise scan again.");
+                                wrap: word-wrap;
+                                font-size: 12px;
+                                color: Theme.text;
+                            }
+                            if Inventory.load-missing == "": HorizontalLayout {
+                                spacing: 8px;
+                                alignment: end;
+                                CheckButton { text: @tr("Cancel"); small: true; clicked => { Inventory.load-ask = -1; } }
+                                CheckButton { text: @tr("Load"); small: true; primary: true; clicked => { Inventory.load-scan(i); } }
+                            }
+                        }
+                    }
+                }
+            }
+            }
+        }
+    }
+}
+
+component InventoryPane inherits VerticalLayout {
+    spacing: Metrics.spacing;
+
+    // ── noch kein Scan: der kommt aus dem Reiter „Scannen“ ──
+    if Inventory.view != 3 && Inventory.step != 2 && Inventory.task < 0: VerticalLayout {
+        spacing: 14px;
+        alignment: start;
+        PageHead {
+            title: @tr("No scan yet");
+            CheckButton {
+                text: @tr("Go to Scan");
+                primary: true;
+                clicked => { Inventory.go-scan(); }
+            }
+        }
+        Para {
+            text: Inventory.step == 1 ? @tr("The scan is running – see the Scan tab.") : @tr("Scan the drives and projects under Scan, or load an earlier scan from its History. Every tab works with that scan.");
         }
     }
 
@@ -2377,7 +2437,7 @@ ScrollBox {
             Para { text: Inventory.plan-text; color: Theme.muted; }
         }
         Para {
-            text: Inventory.task == 1 ? @tr("Render files go into folders like “Mac Studio-renderfiles-1” next to their folder, at most {} files each (Settings → Rebalancing). Within a drive nothing is copied.", Inventory.per-folder)
+            text: Inventory.task == 1 ? @tr("Render files go into folders like “Mac Studio-renderfiles-1” next to their folder, at most {} files each (Settings → Rebalancing). Within a drive nothing is copied.", Shared.limit)
                 : Inventory.task == 2 ? @tr("Each file goes into a folder of the same name on the other drive. Unknown files stay where they are.")
                 : @tr("The files go into “MediaFiles Check Aside” on their drive – Media Composer no longer sees them. Only the switched-on projects count: media of other projects on these drives would go offline.");
         }
@@ -2406,21 +2466,22 @@ ScrollBox {
             title: Inventory.done-copied ? @tr("Files copied") : @tr("Files moved");
             CheckButton {
                 text: @tr("Cancel");
-                clicked => { Inventory.task = -1; Inventory.view = 0; }
+                clicked => { Inventory.task = -1; Inventory.view = 1; }
             }
             CheckButton {
                 text: @tr("Start");
                 primary: true;
-                enabled: !Inventory.mc-running;
+                enabled: !Inventory.mc-running && !Inventory.renames-pending;
                 clicked => { Inventory.db(-1); }
             }
         }
+        if Inventory.renames-pending: RenameBlocked { }
         ScrollBox {
             limit: 160px;
             Para { text: Inventory.done-summary; color: Theme.text; }
         }
         Para {
-            text: @tr("Now the databases of the changed folders have to be rewritten. Start sets their databases aside (Media Composer writes new ones) and renames the folders Media Composer does not update itself – then go on under Maintain › Rename.");
+            text: @tr("Now the databases of the changed folders have to be rewritten. Start sets their databases aside (Media Composer writes new ones) and renames the folders Media Composer does not update itself – then go on under Check DBs › New databases.");
         }
         Para {
             text: @tr("Cancel leaves the databases as they are – you can start it later under Media › History.");
@@ -2434,32 +2495,32 @@ ScrollBox {
     // ── Verlauf ──
     if Inventory.view == 3 && Inventory.task < 0: VerticalLayout {
         spacing: 14px;
+        height: Metrics.page-height;
         PageHead { title: @tr("History"); }
-        if Inventory.runs.length == 0: Para { text: @tr("No runs yet."); }
-        ScrollBox {
-            limit: 320px;
-            spacing: Metrics.spacing;
-            if Inventory.runs.length > 0: Card {
+        HistoryNote { empty: Inventory.runs.length == 0; mc-running: Inventory.mc-running; blocked: Inventory.renames-pending; }
+        if Inventory.runs.length > 0: Card {
+            vertical-stretch: 1;
+            min-height: 0px;
+            FillScroll {
                 for r[i] in Inventory.runs: RunItem {
                     first: i == 0;
                     text: r.text;
+                    detail: r.detail;
                     db-done: r.db-done;
                     mc-running: Inventory.mc-running;
+                    blocked: Inventory.renames-pending;
                     db => { Inventory.db(i); }
                     undo => { Inventory.undo(i); }
                 }
             }
         }
-        if Inventory.mc-running: Text {
-            text: @tr("Quit Media Composer first.");
-            color: Theme.warning;
-        }
+        if Inventory.runs.length == 0: Rectangle { vertical-stretch: 1; }
     }
 }
 
 
 export enum Page { home, working, result, rename, question, notice, rebalance, rebalanced, runs, askname, dups, dupsdone,
-    maintain, rebalstart, dupsstart, exchange, projects, tasks, media }
+    maintain, rebalstart, dupsstart, exchange, projects, media, scan }
 
 // Schritt in der Seitenleiste: Name und darunter klein sein Stand (Variante C: keine Ziffern, kein Häkchen)
 export struct SideStep {
@@ -2540,7 +2601,7 @@ export struct RebalRow {
 }
 
 export component AppWindow inherits CheckWindow {
-    title: root.tab == 0 ? @tr("Exchange") : root.tab == 1 ? @tr("Check") : root.tab == 2 ? @tr("Projects") : root.tab == 3 ? @tr("Maintain") : root.tab == 5 ? @tr("Media") : @tr("Tasks");
+    title: root.tab == 0 ? @tr("Exchange") : root.tab == 1 ? @tr("Check DBs") : root.tab == 2 ? @tr("Project links") : root.tab == 3 ? @tr("Maintain MXFs") : root.tab == 5 ? @tr("Media") : @tr("Scan");
     width: 960px;
     // nie höher als der Bildschirm (Rust: nutzbare Höhe minus Titelleiste); längere Seiten scrollen
     in property <length> screen-height: 100000px;
@@ -2550,16 +2611,16 @@ export component AppWindow inherits CheckWindow {
     in property <bool> active: true;
 
     in property <string> language: "en";
-    in-out property <Page> page: Page.home;
-    // Reiter: 0 Austausch, 1 Prüfen, 2 Projekte, 3 Pflegen, 4 Aufgaben, 5 Medien; jeder merkt sich seine Seite
-    in-out property <int> tab: 1;
+    in-out property <Page> page: Page.scan;
+    // Reiter: 6 Scannen (zuerst), 0 Austausch, 1 Prüfen, 2 Projekte, 3 Pflegen, 4 Aufgaben, 5 Medien; jeder merkt sich seine Seite
+    in-out property <int> tab: 6;
     property <int> step;
     property <Page> page0: Page.exchange;
     property <Page> page1: Page.home;
     property <Page> page2: Page.projects;
     property <Page> page3: Page.maintain;
-    property <Page> page4: Page.tasks;
     property <Page> page5: Page.media;
+    property <Page> page6: Page.scan;
     in-out property <bool> has-result;
     // erster Start: Überblick über die Reiter (Rust merkt sich das Schließen in welcome-seen)
     in-out property <bool> show-welcome;
@@ -2568,38 +2629,37 @@ export component AppWindow inherits CheckWindow {
     // -1: Seite gehört zu keinem bestimmten Reiter (Fortschritt, Hinweis) – sie bleibt im aktuellen
     pure function tab-of(p: Page) -> int {
         if p == Page.exchange { return 0; }
-        if p == Page.home || p == Page.result { return 1; }
+        if p == Page.home || p == Page.result || p == Page.rename || p == Page.maintain || p == Page.question { return 1; }
         if p == Page.projects { return 2; }
-        if p == Page.tasks { return 4; }
         if p == Page.media { return 5; }
+        if p == Page.scan { return 6; }
         if p == Page.working || p == Page.notice { return -1; }
         return 3;
     }
     pure function step-of(p: Page) -> int {
-        if p == Page.result { return 1; }
-        if p == Page.rebalstart || p == Page.rebalance || p == Page.askname || p == Page.rebalanced { return 1; }
-        if p == Page.dupsstart || p == Page.dups || p == Page.dupsdone { return 2; }
-        if p == Page.runs { return 3; }
+        // DBs prüfen: 0 Datenbanken (Ergebnis, Umbenennen), 1 Neue Datenbanken; MXFs pflegen: 0 Rebalancing, 1 Duplikate, 2 Verlauf
+        if p == Page.maintain || p == Page.question { return 1; }
+        if p == Page.dupsstart || p == Page.dups || p == Page.dupsdone { return 1; }
+        if p == Page.runs { return 2; }
         if p == Page.working || p == Page.notice { return -1; }
         return 0;
     }
     // erste Seite eines Schritts
     pure function start-of(t: int, s: int) -> Page {
         if t == 0 { return Page.exchange; }
-        if t == 1 { return s == 1 && root.has-result ? Page.result : Page.home; }
+        if t == 1 { return s == 1 ? Page.maintain : root.has-result ? Page.result : Page.home; }
         if t == 2 { return Page.projects; }
-        if t == 4 { return Page.tasks; }
         if t == 5 { return Page.media; }
-        return s == 1 ? Page.rebalstart : s == 2 ? Page.dupsstart : s == 3 ? Page.runs : Page.maintain;
+        if t == 6 { return Page.scan; }
+        return s == 1 ? Page.dupsstart : s == 2 ? Page.runs : Page.rebalstart;
     }
     // Rust: „zurück zum Anfang“ = Anfang des Schritts, in dem man gerade ist
     public function home() {
-        // Prüfen: zurück zu den Laufwerken (der Schritt „Ergebnis“ würde wieder das Ergebnis zeigen)
-        root.page = root.tab == 1 ? Page.home : root.start-of(root.tab, root.step);
+        root.page = root.start-of(root.tab, root.step);
     }
-    function select-tab(t: int) {
+    public function select-tab(t: int) {
         root.tab = t;
-        root.page = t == 0 ? root.page0 : t == 1 ? root.page1 : t == 2 ? root.page2 : t == 3 ? root.page3 : t == 5 ? root.page5 : root.page4;
+        root.page = t == 0 ? root.page0 : t == 1 ? root.page1 : t == 2 ? root.page2 : t == 3 ? root.page3 : t == 5 ? root.page5 : root.page6;
         if root.step-of(root.page) >= 0 { root.step = root.step-of(root.page); }
     }
     changed page => {
@@ -2611,37 +2671,33 @@ export component AppWindow inherits CheckWindow {
         if root.tab == 1 { root.page1 = root.page; }
         if root.tab == 2 { root.page2 = root.page; }
         if root.tab == 3 { root.page3 = root.page; }
-        if root.tab == 4 { root.page4 = root.page; }
         if root.tab == 5 { root.page5 = root.page; }
+        if root.tab == 6 { root.page6 = root.page; }
     }
     property <int> runs-open: root.rebalance-pending + root.dup-pending;
     property <[SideStep]> steps: root.tab == 0 ? [
-            { name: @tr("Scan"), status: Exchange.scanning ? @tr("scanning…") : Exchange.has-manifest ? @tr("scanned") : "", enabled: true },
             { name: @tr("Compare"), status: Exchange.has-compare ? Exchange.remote-name : "", enabled: true },
             { name: @tr("Collect"), status: Exchange.busy && Exchange.work-kind == 0 ? @tr("collecting…") : Exchange.result-kind == 0 ? @tr("delivery ready") : "", enabled: true },
             { name: @tr("Import"), status: Exchange.busy && Exchange.work-kind > 0 ? @tr("importing…") : Exchange.has-delivery ? Exchange.delivery-from : "", enabled: true },
+            { name: @tr("Tasks"), status: Tasks.open.length == 0 ? "" : @tr("{n} open" | "{n} open" % Tasks.open.length), enabled: true },
         ] : root.tab == 1 ? [
-            { name: @tr("Drives"), status: @tr("{} of {} on", root.selected-count, root.drives.length), enabled: true },
-            { name: @tr("Result"), status: !root.has-result ? "" : root.checked-folders == 0 ? @tr("no folders") : root.bad-folders == 0 ? @tr("all match") : @tr("{n} folder differs" | "{n} folders differ" % root.bad-folders), enabled: root.has-result },
+            { name: @tr("MXF databases"), status: !root.has-result ? "" : root.checked-folders == 0 ? @tr("no folders") : root.bad-folders == 0 ? @tr("all match") : @tr("{n} folder differs" | "{n} folders differ" % root.bad-folders), enabled: true },
+            { name: @tr("New databases"), status: root.renamed.length == 0 ? "" : @tr("{n} folder renamed" | "{n} folders renamed" % root.renamed.length), enabled: true },
         ] : root.tab == 2 ? [
-            { name: @tr("Choose projects"), status: Projects.projects.length == 0 ? "" : @tr("{} of {} on", Projects.selected-count, Projects.projects.length), enabled: true },
             { name: @tr("Missing media"), status: Projects.step != 2 ? "" : @tr("{n} file" | "{n} files" % Projects.missing), enabled: Projects.step == 2 },
             { name: @tr("AMA clips"), status: Projects.step != 2 ? "" : @tr("{n} file" | "{n} files" % Projects.ama), enabled: Projects.step == 2 },
-            { name: @tr("Request"), status: "", enabled: Projects.step == 2 && Projects.missing > 0 },
+            { name: @tr("Request"), status: Projects.step != 2 || Projects.request-count == 0 ? "" : @tr("{n} file" | "{n} files" % Projects.request-count), enabled: Projects.step == 2 && Projects.missing > 0 },
         ] : root.tab == 3 ? [
-            { name: @tr("Rename"), status: root.renamed.length == 0 ? "" : @tr("{n} folder renamed" | "{n} folders renamed" % root.renamed.length), enabled: true },
             { name: @tr("Rebalancing"), status: root.rebalance-pending > 0 ? @tr("databases pending") : "", enabled: true },
             { name: @tr("Duplicates"), status: root.dup-pending > 0 ? @tr("databases pending") : "", enabled: true },
             { name: @tr("History"), status: root.rebalanced.length + root.dup-runs.length == 0 ? "" : @tr("{n} run" | "{n} runs" % (root.rebalanced.length + root.dup-runs.length)), enabled: true },
-        ] : root.tab == 5 ? [
-            { name: @tr("Drives & projects"), status: @tr("{} of {} on", Inventory.drive-count, Inventory.drives.length), enabled: true },
+        ] : root.tab == 6 ? [
+            { name: @tr("Scan"), status: Inventory.step == 1 ? @tr("scanning…") : Inventory.step == 2 ? @tr("{n} file" | "{n} files" % Inventory.files) : @tr("{} of {} volumes on", Inventory.drive-count, Inventory.drives.length), enabled: true },
+            { name: @tr("History"), status: Inventory.scans.length == 0 ? "" : @tr("{n} scan" | "{n} scans" % Inventory.scans.length), enabled: true },
+        ] : [
             { name: @tr("Overview"), status: Inventory.step == 1 ? @tr("reading…") : Inventory.step != 2 ? "" : @tr("{n} file" | "{n} files" % Inventory.files), enabled: Inventory.step == 2 },
             { name: @tr("Actions"), status: "", enabled: Inventory.step == 2 },
             { name: @tr("History"), status: Inventory.runs.length == 0 ? "" : @tr("{n} run" | "{n} runs" % Inventory.runs.length), enabled: true },
-        ] : [
-            { name: @tr("Open"), status: Tasks.open.length == 0 ? "" : Tasks.open.length, enabled: true },
-            { name: @tr("Import by hand"), status: @tr("instructions"), enabled: true },
-            { name: @tr("Completed"), status: Tasks.done.length == 0 ? "" : Tasks.done.length, enabled: true },
         ];
     in property <[DriveRow]> drives;
     in property <int> selected-count;
@@ -2693,30 +2749,24 @@ export component AppWindow inherits CheckWindow {
     out property <string> txt-choose-delivery: @tr("Choose the delivery folder");
     out property <string> txt-quit-mc: @tr("Quit Media Composer first.");
     out property <string> txt-task-check: @tr("Check…");
-    out property <string> txt-task-rewrite: @tr("Rewrite databases");
-    out property <string> txt-task-rebalancing: @tr("Maintain › Rebalancing");
-    out property <string> txt-task-duplicates: @tr("Maintain › Duplicates");
-    out property <string> txt-task-media: @tr("Media › History");
-    out property <string> txt-task-start: @tr("Start");
-    out property <string> txt-task-rename-back: @tr("Rename {} folders back after Media Composer has written their databases", "{}");
-    out property <string> txt-task-maintain: @tr("Maintain › Rename");
-    out property <string> txt-task-open: @tr("Open");
     out property <string> txt-task-for: @tr("Delivery for {}", "{}");
     out property <string> txt-task-from: @tr("Delivery from {}", "{}");
     out property <string> txt-reading-drives: @tr("Reading the media databases of the drives…");
+    out property <string> txt-checksums: @tr("Checksums for Exchange");
     out property <string> txt-tasks-for: @tr("Tasks – {}", "{}"); // Rust fills in the system
+    out property <string> txt-folders-heading: @tr("Folders of the delivery from {}", "{}"); // Rust fills in the sender
     out property <string> txt-one-file: @tr("1 file");
     out property <string> txt-relink: @tr("on the drives – relink");
     out property <string> txt-files-n: @tr("{} files", "{}"); // Rust fills in the number
     out property <string> txt-subclip: @tr("subclip");
     out property <string> txt-sequence: @tr("sequence");
     out property <string> txt-more-rows: @tr("… more in the saved list");
-    out property <string> txt-more: @tr("… and {} more (see report)", "{}"); // Rust fills in the number
+    out property <string> txt-more: @tr("… and {} more", "{}"); // Rust fills in the number
 
-    callback toggle-drive(int);
+    // Prüfen: Namen der Volumes des aktuellen Scans (angeschlossen), auf denen geprüft wird
+    in property <string> check-volumes;
     callback check-drives();
     callback check-folder();
-    callback save-report();
     callback back();
     callback show-rename();
     callback rename();
@@ -2757,7 +2807,7 @@ export component AppWindow inherits CheckWindow {
         triggered => { root.dot-count = Math.mod(root.dot-count + 1, 4); }
     }
 
-    // only measured (Check › Result sizes its list by them), never shown
+    // only measured (Check DBs › Result sizes its list by them), never shown
     note-height := Text {
         visible: false;
         width: Metrics.content-width;
@@ -2783,27 +2833,35 @@ export component AppWindow inherits CheckWindow {
                 padding-bottom: 7px;
                 spacing: 4px;
                 SettingsTab {
+                    icon: @image-url("../assets/tabs/scan.png");
+                    text: @tr("Scan");
+                    selected: root.tab == 6;
+                    clicked => { root.select-tab(6); }
+                }
+                SettingsTab {
                     icon: @image-url("../assets/tabs/exchange.png");
                     text: @tr("Exchange");
                     selected: root.tab == 0;
+                    attention: Tasks.open.length > 0;
                     clicked => { root.select-tab(0); }
                 }
                 SettingsTab {
                     icon: @image-url("../assets/tabs/check.png");
-                    text: @tr("Check");
+                    text: @tr("Check DBs");
                     selected: root.tab == 1;
+                    attention: root.renamed.length > 0;
                     clicked => { root.select-tab(1); }
                 }
                 SettingsTab {
                     icon: @image-url("../assets/tabs/maintain.png");
-                    text: @tr("Maintain");
+                    text: @tr("Maintain MXFs");
                     selected: root.tab == 3;
-                    attention: root.renamed.length > 0 || root.runs-open > 0;
+                    attention: root.runs-open > 0;
                     clicked => { root.select-tab(3); }
                 }
                 SettingsTab {
                     icon: @image-url("../assets/tabs/projects.png");
-                    text: @tr("Projects");
+                    text: @tr("Project links");
                     selected: root.tab == 2;
                     clicked => { root.select-tab(2); }
                 }
@@ -2812,13 +2870,6 @@ export component AppWindow inherits CheckWindow {
                     text: @tr("Media");
                     selected: root.tab == 5;
                     clicked => { root.select-tab(5); }
-                }
-                SettingsTab {
-                    icon: @image-url("../assets/tabs/tasks.png");
-                    text: @tr("Tasks");
-                    selected: root.tab == 4;
-                    attention: Tasks.open.length > 0;
-                    clicked => { root.select-tab(4); }
                 }
             }
         }
@@ -2873,12 +2924,12 @@ export component AppWindow inherits CheckWindow {
                 alignment: start;
                 for st[i] in root.steps: SideItem {
                     step: st;
-                    selected: i == (root.tab == 2 ? Projects.view : root.tab == 0 ? Exchange.view : root.tab == 4 ? Tasks.view : root.tab == 5 ? Inventory.view : root.step);
+                    selected: i == (root.tab == 2 ? Projects.view : root.tab == 0 ? Exchange.view - 1 : root.tab == 5 ? Inventory.view - 1 : root.tab == 6 ? Inventory.scan-view : root.step);
                     clicked => {
-                        if root.tab == 4 { Tasks.view = i; }
-                        if root.tab == 5 { Inventory.view = i; Inventory.task = Inventory.task == 4 ? 4 : -1; }
+                        if root.tab == 5 { Inventory.view = i + 1; Inventory.task = Inventory.task == 4 ? 4 : -1; }
+                        if root.tab == 6 { Inventory.scan-view = i; Inventory.load-ask = -1; Inventory.delete-ask = -1; }
                         if root.tab == 2 { Projects.view = i; }
-                        if root.tab == 0 { Exchange.view = i; }
+                        if root.tab == 0 { Exchange.view = i + 1; }
                         root.page = root.start-of(root.tab, i);
                     }
                 }
@@ -2901,42 +2952,31 @@ export component AppWindow inherits CheckWindow {
         spacing: 22px;
 
         // ── Start ──────────────────────────────────────────────
-        // ── Prüfen › Laufwerke ──
+        // ── DBs prüfen › Laufwerke ──
         if root.page == Page.home: VerticalLayout {
             spacing: 14px;
             PageHead {
-                title: @tr("Check drives");
+                title: Inventory.current == "" ? @tr("No scan yet") : @tr("Check the MXF databases");
                 CheckButton {
                     text: @tr("Check folder…");
                     clicked => { root.check-folder(); }
                 }
-                CheckButton {
+                if Inventory.current == "": CheckButton {
+                    text: @tr("Go to Scan");
+                    primary: true;
+                    clicked => { Inventory.go-scan(); }
+                }
+                if Inventory.current != "": CheckButton {
                     text: @tr("Check");
                     primary: true;
-                    enabled: root.selected-count > 0;
+                    enabled: root.check-volumes != "";
                     clicked => { root.check-drives(); }
                 }
             }
-            Para {
-                text: @tr("Compares the MXF files in every folder with the folder's Avid database and lists every difference. Nothing is changed.");
-            }
-            if root.drives.length == 0: Text {
-                text: @tr("No drive with “Avid MediaFiles/MXF” found.");
-                overflow: elide;
-                color: Theme.muted;
-            }
-            if root.drives.length == 0: Para {
-                text: @tr("Connect a drive with Avid media. If macOS asks whether MediaFiles Check may access files on removable or network volumes, allow it.");
-                color: Theme.faint;
-            }
-            if root.drives.length > 0: SectionLabel { text: @tr("DRIVES"); }
-            if root.drives.length > 0: DriveList {
-                rows: Exchange.volumes;
-                toggled(i) => { root.toggle-drive(i); }
-            }
-            Para {
-                text: @tr("The switches apply to Exchange › Scan too.");
-                color: Theme.faint;
+            CheckIntro { }
+            if Inventory.current != "": Para {
+                text: root.check-volumes == "" ? @tr("None of the volumes of the current scan is connected.") : @tr("Volumes of the current scan: {}", root.check-volumes);
+                color: root.check-volumes == "" ? Theme.warning : Theme.muted;
             }
             if Access.denied != "": AccessNote { }
             StatusLine {
@@ -2945,11 +2985,11 @@ export component AppWindow inherits CheckWindow {
             }
         }
 
-        // ── Pflegen › Umbenennen ──
+        // ── DBs prüfen › Neue Datenbanken ──
         if root.page == Page.maintain: VerticalLayout {
             spacing: 14px;
             PageHead {
-                title: @tr("Rename for Media Composer");
+                title: @tr("New databases through renaming");
                 if root.renamed.length > 0: CheckButton {
                     text: @tr("Start Media Composer");
                     enabled: !root.mc-running;
@@ -2962,12 +3002,15 @@ export component AppWindow inherits CheckWindow {
                     clicked => { root.rename-back(); }
                 }
             }
+            Para {
+                text: @tr("Media Composer only rewrites the database files (msmFMID.pmr, msmMMOB.mdb) of folders named like its own: a number such as “1”, or “<computer>.<number>” on network drives. To get new database files for any other folder, MediaFiles Check gives it such a name for a while – Media Composer scans it and writes new databases – and then gives it its old name back.");
+            }
             FlowStrip {
                 parts: [@tr("Rename"), @tr("Media Composer writes"), @tr("Rename back")];
                 current: root.renamed.length == 0 ? 0 : root.renamed-ready ? 2 : 1;
             }
             if root.renamed.length == 0: Para {
-                text: @tr("No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check › Result) or when rebalancing and setting duplicates aside.");
+                text: @tr("No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check) or when rebalancing and setting duplicates aside.");
             }
             if root.renamed.length > 0: Card {
 ScrollBox {
@@ -3000,7 +3043,7 @@ ScrollBox {
             }
         }
 
-        // ── Pflegen › Rebalancing ──
+        // ── MXFs pflegen › Rebalancing ──
         if root.page == Page.rebalstart: VerticalLayout {
             spacing: 14px;
             PageHead {
@@ -3034,7 +3077,7 @@ ScrollBox {
             }
         }
 
-        // ── Pflegen › Duplikate ──
+        // ── MXFs pflegen › Duplikate ──
         if root.page == Page.dupsstart: VerticalLayout {
             spacing: 14px;
             PageHead {
@@ -3072,9 +3115,9 @@ ScrollBox {
 
         if root.page == Page.exchange: ExchangePane { }
 
-        if root.page == Page.tasks: TasksPane { }
 
         if root.page == Page.media: InventoryPane { }
+        if root.page == Page.scan: ScanPane { }
 
         // ── Fortschritt ────────────────────────────────────────
         if root.page == Page.working: Section {
@@ -3100,14 +3143,15 @@ ScrollBox {
                 title: root.checked-folders == 0 ? @tr("No MXF folders found")
                             : root.bad-folders == 0 ? @tr("{n} folder matches its database" | "All {n} folders match their database" % root.checked-folders)
                             : @tr("{n} folder of {} differs from its database" | "{n} folders of {} differ from their database" % root.bad-folders, root.checked-folders);
-                if root.bad-folders > 0: CheckButton {
-                    text: @tr("Save report…");
-                    clicked => { root.save-report(); }
+                CheckButton {
+                    text: @tr("Check folder…");
+                    clicked => { root.check-folder(); }
                 }
                 CheckButton {
-                    text: @tr("Done");
+                    text: @tr("Check again");
                     primary: true;
-                    clicked => { root.back(); }
+                    enabled: root.check-volumes != "";
+                    clicked => { root.check-drives(); }
                 }
             }
             if root.checked-folders == 0: Para {
@@ -3134,9 +3178,11 @@ ScrollBox {
                     alignment: start;
                     CheckButton {
                         text: @tr("Rename for Media Composer…");
+                        enabled: root.renamed.length == 0;
                         clicked => { root.show-rename(); }
                     }
                 }
+                if root.renamed.length > 0: RenameBlocked { }
             }
         }
 
@@ -3152,7 +3198,7 @@ ScrollBox {
                 CheckButton {
                     text: @tr("Rename");
                     primary: true;
-                    enabled: !root.mc-running;
+                    enabled: !root.mc-running && root.renamed.length == 0;
                     clicked => { root.rename(); }
                 }
             }
@@ -3183,7 +3229,7 @@ ScrollBox {
                     }
                 }
                 Para {
-                    text: @tr("The original names and all media files are remembered. Once Media Composer has rebuilt the databases, rename the folders back under Maintain › Rename.");
+                    text: @tr("The original names and all media files are remembered. Once Media Composer has rebuilt the databases, rename the folders back under Check DBs › New databases.");
                 }
                 Para {
                     text: root.mc-running ? @tr("Quit Media Composer first.") : @tr("Media Composer must stay closed while renaming.");
@@ -3326,10 +3372,11 @@ ScrollBox {
                 CheckButton {
                     text: @tr("Start");
                     primary: true;
-                    enabled: !root.mc-running;
+                    enabled: !root.mc-running && root.renamed.length == 0;
                     clicked => { root.rebalance-db(-1); }
                 }
             }
+            if root.renamed.length > 0: RenameBlocked { }
             VerticalLayout {
                 spacing: 10px;
                 ScrollBox {
@@ -3337,10 +3384,10 @@ ScrollBox {
                     Para { text: root.rebalance-summary; color: Theme.text; }
                 }
                 Para {
-                    text: @tr("Now the databases of the changed folders have to be rewritten. Start sets their databases aside (Media Composer writes new ones) and renames the folders Media Composer does not update itself – then go on under Maintain › Rename.");
+                    text: @tr("Now the databases of the changed folders have to be rewritten. Start sets their databases aside (Media Composer writes new ones) and renames the folders Media Composer does not update itself – then go on under Check DBs › New databases.");
                 }
                 Para {
-                    text: @tr("Cancel leaves the databases as they are – you can start it later under Maintain › History.");
+                    text: @tr("Cancel leaves the databases as they are – you can start it later under Maintain MXFs › History.");
                 }
                 Para {
                     text: root.mc-running ? @tr("Quit Media Composer first.") : "";
@@ -3477,7 +3524,7 @@ ScrollBox {
                 }
 }
                 if root.dup-groups.length > 0: Para {
-                    text: @tr("Click a copy to keep it. The others go into “MediaFiles Check Duplicates” on their drive – nothing is deleted, you can undo it under Maintain › History.");
+                    text: @tr("Click a copy to keep it. The others go into “MediaFiles Check Duplicates” on their drive – nothing is deleted, you can undo it under Maintain MXFs › History.");
                 }
                 if root.dup-groups.length > 0: Para {
                     text: root.mc-running ? @tr("Quit Media Composer first.") : @tr("Media Composer must stay closed while moving – on network drives on every workstation.");
@@ -3498,10 +3545,11 @@ ScrollBox {
                 CheckButton {
                     text: @tr("Start");
                     primary: true;
-                    enabled: !root.mc-running;
+                    enabled: !root.mc-running && root.renamed.length == 0;
                     clicked => { root.dup-db(-1); }
                 }
             }
+            if root.renamed.length > 0: RenameBlocked { }
             VerticalLayout {
                 spacing: 10px;
                 ScrollBox {
@@ -3509,10 +3557,10 @@ ScrollBox {
                     Para { text: root.dup-done-summary; color: Theme.text; }
                 }
                 Para {
-                    text: @tr("Now the databases of the changed folders have to be rewritten. Start sets their databases aside (Media Composer writes new ones) and renames the folders Media Composer does not update itself – then go on under Maintain › Rename.");
+                    text: @tr("Now the databases of the changed folders have to be rewritten. Start sets their databases aside (Media Composer writes new ones) and renames the folders Media Composer does not update itself – then go on under Check DBs › New databases.");
                 }
                 Para {
-                    text: @tr("Cancel leaves the databases as they are – you can start it later under Maintain › History.");
+                    text: @tr("Cancel leaves the databases as they are – you can start it later under Maintain MXFs › History.");
                 }
                 Para {
                     text: root.mc-running ? @tr("Quit Media Composer first.") : "";
@@ -3524,44 +3572,37 @@ ScrollBox {
         // ── Rebalancing: frühere Läufe (Datenbanken neu schreiben, rückgängig machen) ──
         // ── Verlauf: alle Läufe von Rebalancing und Duplikaten (Datenbanken neu schreiben, rückgängig machen) ──
         if root.page == Page.runs: VerticalLayout {
-            spacing: Metrics.spacing;
+            spacing: 14px;
+            height: Metrics.page-height;
             PageHead { title: @tr("History"); }
-            ScrollBox {
-                limit: 300px;
-                spacing: Metrics.spacing;
-                Section {
-                    title: @tr("REBALANCING");
-                    if root.rebalanced.length == 0: Para { text: @tr("No runs yet."); }
-                    if root.rebalanced.length > 0: Card {
-                        for r[i] in root.rebalanced: RunItem {
-                            first: i == 0;
-                            text: r.text;
-                            db-done: r.db-done;
-                            mc-running: root.mc-running;
-                            db => { root.rebalance-db(i); }
-                            undo => { root.undo-rebalance(i); }
-                        }
+            HistoryNote { empty: root.rebalanced.length + root.dup-runs.length == 0; mc-running: root.mc-running; blocked: root.renamed.length > 0; }
+            if root.rebalanced.length + root.dup-runs.length > 0: Card {
+                vertical-stretch: 1;
+                min-height: 0px;
+                FillScroll {
+                    for r[i] in root.rebalanced: RunItem {
+                        first: i == 0;
+                        text: r.text;
+                        detail: r.detail;
+                        db-done: r.db-done;
+                        mc-running: root.mc-running;
+                        blocked: root.renamed.length > 0;
+                        db => { root.rebalance-db(i); }
+                        undo => { root.undo-rebalance(i); }
                     }
-                }
-                Section {
-                    title: @tr("DUPLICATES");
-                    if root.dup-runs.length == 0: Para { text: @tr("No runs yet."); }
-                    if root.dup-runs.length > 0: Card {
-                        for r[i] in root.dup-runs: RunItem {
-                            first: i == 0;
-                            text: r.text;
-                            db-done: r.db-done;
-                            mc-running: root.mc-running;
-                            db => { root.dup-db(i); }
-                            undo => { root.undo-dup(i); }
-                        }
+                    for r[i] in root.dup-runs: RunItem {
+                        first: i == 0 && root.rebalanced.length == 0;
+                        text: r.text;
+                        detail: r.detail;
+                        db-done: r.db-done;
+                        mc-running: root.mc-running;
+                        blocked: root.renamed.length > 0;
+                        db => { root.dup-db(i); }
+                        undo => { root.undo-dup(i); }
                     }
                 }
             }
-            if root.mc-running: StatusLine {
-                text: @tr("Quit Media Composer first.");
-                color: Theme.warning;
-            }
+            if root.rebalanced.length + root.dup-runs.length == 0: Rectangle { vertical-stretch: 1; }
         }
 
         if root.page == Page.notice: VerticalLayout {
@@ -3626,11 +3667,11 @@ ScrollBox {
                     color: Theme.text;
                 }
                 for t[i] in [
+                    { a: @tr("Scan"), b: @tr("reads the drives and projects once – every other tab works with that scan.") },
                     { a: @tr("Exchange"), b: @tr("keeps the media of two edit systems in step – formerly MediaFiles Ferry.") },
                     { a: @tr("Check"), b: @tr("compares every MXF folder with its Avid database.") },
                     { a: @tr("Maintain"), b: @tr("renames folders for Media Composer, rebalances full folders, sets duplicates aside.") },
                     { a: @tr("Projects"), b: @tr("finds the media your bins need that are on none of the drives.") },
-                    { a: @tr("Tasks"), b: @tr("lists everything that has to be done by hand.") },
                 ]: HorizontalLayout {
                     spacing: 10px;
                     Text { text: t.a; width: 90px; font-size: 12px; font-weight: 600; color: Theme.text; }
@@ -4397,7 +4438,7 @@ export component SettingsWindow inherits CheckWindow {
 // Avid-Projekte: Überordner wählen, Projekte einschalten, Bins lesen, fehlende Medien auflisten und für Ferry anfordern.
 // step: 0 Auswahl, 1 läuft, 2 Ergebnis
 
-// Fehlende Medien bzw. AMA-Clips pro Bin (Projekte › Medien anzeigen…): eigenes, größeres Fenster, das Hauptfenster bleibt gleich groß
+// Fehlende Medien bzw. AMA-Clips pro Bin (Projekt-Verlinkungen › Medien anzeigen…): eigenes, größeres Fenster, das Hauptfenster bleibt gleich groß
 // Textzeilen in eigenem, frei skalierbarem Fenster (Aufgaben eines Vergleichs)
 export component LinesWindow inherits CheckWindow {
     in property <string> heading;
@@ -4460,23 +4501,96 @@ export component LinesWindow inherits CheckWindow {
     }
 }
 
-// Checkbox (kein Schalter): 14 px, Haken in Akzentfarbe
-component CheckBox inherits Rectangle {
-    in property <bool> checked;
-    width: 14px;
-    height: 14px;
-    border-radius: 3px;
-    border-width: root.checked ? 0 : 1px;
-    border-color: Theme.muted;
-    background: root.checked ? Theme.accent : transparent;
-    if root.checked: Path {
-        width: 10px;
-        height: 10px;
-        viewbox-width: 10;
-        viewbox-height: 10;
-        commands: "M 1.5 5.2 L 4 7.7 L 8.6 2.3";
-        stroke: #ffffff;
-        stroke-width: 1.8px;
+
+// Austausch › Importieren: pro Ordner der Lieferung zusammenführen oder eigener Ordner (eigenes Fenster, die Seite scrollt nicht)
+export component FoldersWindow inherits CheckWindow {
+    in property <string> heading;
+    in property <[ChoiceRow]> rows;
+    // Zeile, Wahl (0 zusammenführen, 1 eigener Ordner); Zeile -1 = alle
+    callback changed(int, int);
+    callback close();
+    title: root.heading;
+    preferred-width: 820px;
+    preferred-height: 560px;
+    min-width: 600px;
+    min-height: 300px;
+    VerticalLayout {
+        padding: 24px;
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.heading;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                overflow: elide;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+            }
+            CheckButton { text: @tr("Done"); primary: true; clicked => { root.close(); } }
+        }
+        Text {
+            text: @tr("Merge: into the folder of the same name. Own folder: “<sender>_<folder>” – if it exists already, the files go into it. A folder that ends up different from the other side needs its database rebuilt (task).");
+            // a fixed width, or Slint measures wrapped lines one too few
+            width: root.width - 48px;
+            wrap: word-wrap;
+            font-size: 12px;
+            color: Theme.muted;
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+            CheckButton { text: @tr("All merge"); small: true; clicked => { root.changed(-1, 0); } }
+            CheckButton { text: @tr("All in own folders"); small: true; clicked => { root.changed(-1, 1); } }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.card;
+            border-width: 1px;
+            border-color: Theme.card-line;
+            border-radius: 9px;
+            clip: true;
+            flick := Flickable {
+                width: parent.width;
+                height: parent.height;
+                content-height: col.preferred-height;
+                col := VerticalLayout {
+                    x: 0;
+                    width: flick.width - 12px;
+                    for c[i] in root.rows: CardRow {
+                        first: i == 0;
+                        Text {
+                            text: c.name;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            color: Theme.text;
+                        }
+                        if c.choice == 1: Text {
+                            text: "→ " + c.own;
+                            max-width: 260px;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            color: Theme.muted;
+                        }
+                        VerticalLayout { alignment: center; CheckButton {
+                            text: @tr("Merge");
+                            small: true;
+                            primary: c.choice == 0;
+                            clicked => { root.changed(i, 0); }
+                        } }
+                        VerticalLayout { alignment: center; CheckButton {
+                            text: @tr("Own folder");
+                            small: true;
+                            primary: c.choice == 1;
+                            clicked => { root.changed(i, 1); }
+                        } }
+                    }
+                }
+            }
+            ScrollThumb { x: parent.width - self.width - 3px; view: flick.height; track: parent.height; content: col.preferred-height; offset: flick.content-y; }
+        }
     }
 }
 

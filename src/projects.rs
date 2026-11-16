@@ -2,8 +2,9 @@
 //! not on the connected drives; write those as a request for MediaFiles Ferry.
 use crate::avb::{Bin, MobId, MobKind, id_hex};
 use crate::{PMR, folders, key, read_pmr_entries};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -143,15 +144,29 @@ pub fn available_media(drives: &[PathBuf], patience: std::time::Duration, gate: 
     a
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ClipKind {
     Master,
     Subclip,
     Sequence,
 }
 
+/// Maps with keys JSON cannot take (mob IDs, tuples) stored as a list of pairs (saved scans).
+mod pairs {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    pub fn serialize<'a, S: Serializer, K: Serialize + 'a, V: Serialize + 'a, M>(m: &'a M, s: S) -> Result<S::Ok, S::Error>
+    where
+        &'a M: IntoIterator<Item = (&'a K, &'a V)>,
+    {
+        s.collect_seq(m)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>, K: Deserialize<'de>, V: Deserialize<'de>, M: FromIterator<(K, V)>>(d: D) -> Result<M, D::Error> {
+        Ok(Vec::<(K, V)>::deserialize(d)?.into_iter().collect())
+    }
+}
+
 /// Where a missing media file is used.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Use {
     pub project: String,
     /// bin path relative to the project
@@ -160,7 +175,7 @@ pub struct Use {
     pub kind: ClipKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Missing {
     pub id: MobId,
     /// the master clip the file belongs to, else the file's name in the bin, else the first clip that uses it
@@ -175,7 +190,7 @@ pub struct Missing {
 }
 
 /// Missing media files of one bin with the same name (e.g. the video and audio files of one clip).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MissingGroup {
     pub name: String,
     pub files: usize,
@@ -187,7 +202,8 @@ pub struct MissingGroup {
     pub ids: Vec<MobId>,
 }
 
-#[derive(Debug, Default)]
+/// Saved with a scan (History), so a loaded scan shows its missing media without reading the bins again.
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ScanResult {
     pub projects: usize,
     pub bins: usize,
@@ -201,6 +217,7 @@ pub struct ScanResult {
     /// AMA-linked files – left out of the request
     pub ama: usize,
     /// (project, bin) -> the AMA-linked files its clips use, grouped by name (`relink` always false)
+    #[serde(with = "pairs")]
     pub ama_by_bin: BTreeMap<(String, String), Vec<MissingGroup>>,
     /// AMA-linked files whose master clip has a namesake in the project with all its media on the drives
     /// (e.g. linked first, imported later) – they don't matter, only counted
@@ -209,13 +226,16 @@ pub struct ScanResult {
     /// clip whose sound was never imported – Media Composer still shows the clip online) – left out
     pub no_media: usize,
     /// (project, bin) -> its missing media files, grouped by name
+    #[serde(with = "pairs")]
     pub by_bin: BTreeMap<(String, String), Vec<MissingGroup>>,
     /// missing render files (precomputed effects) – not requested, Media Composer renders them again
     pub renders: usize,
     /// missing (and AMA) file -> name of its source: camera clip, tape or imported file (`Bin::source_name`)
+    #[serde(with = "pairs")]
     pub originals: HashMap<MobId, String>,
     /// missing file -> its MXF file name, if a database on the drives still lists it (set by the caller from
     /// `Available::gone`; bins don't store it)
+    #[serde(with = "pairs")]
     pub mxf_names: HashMap<MobId, String>,
 }
 
@@ -230,32 +250,149 @@ fn kind_of(kind: MobKind, usage: i32) -> Option<ClipKind> {
     }
 }
 
+/// A source mob of a bin (file, tape or import source) as far as the project scan needs it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+struct SourceMob {
+    id: MobId,
+    /// class of the descriptor's locator ("MSML" = Avid-managed media)
+    locator: Option<String>,
+    ama: bool,
+    /// a media file (`Mob::is_file`), not a tape or import source
+    file: bool,
+    name: String,
+    /// its tape / camera clip / imported file and whether it is sound (`Bin::source_name`)
+    source: Option<(String, bool)>,
+}
+
+/// An item of a bin (what Media Composer lists, plus hidden mobs) with the media it reaches.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+struct ItemSum {
+    id: MobId,
+    name: String,
+    /// master clip, subclip or sequence (`kind_of`); None for render masters and other mobs
+    clip: Option<ClipKind>,
+    /// master clip of a render file (usage 1)
+    render: bool,
+    /// a composition (its media are not looked up from other bins)
+    composition: bool,
+    /// `Bin::media_of`: media files, and mobs it uses that are stored in another bin
+    media: Vec<MobId>,
+    unresolved: Vec<MobId>,
+    /// `Bin::renders_of` likewise (only for clips)
+    renders: Vec<MobId>,
+    renders_unresolved: Vec<MobId>,
+}
+
+/// Everything the project scans take from one bin – read once, kept in the bin cache while the bin is unchanged.
+#[derive(Debug, Clone, Default)]
+pub struct BinSummary {
+    // shared: the same file mobs and clips are copied into many bins (a test project: 6 million items, most of
+    // them copies – unshared they took 9 GB of memory)
+    sources: Vec<Arc<SourceMob>>,
+    items: Vec<Arc<ItemSum>>,
+}
+
+/// Hands out one shared copy of each equal value.
+#[derive(Default)]
+struct Pool {
+    sources: HashSet<Arc<SourceMob>>,
+    items: HashSet<Arc<ItemSum>>,
+}
+
+impl Pool {
+    fn source(&mut self, m: SourceMob) -> Arc<SourceMob> {
+        if let Some(a) = self.sources.get(&m) {
+            return a.clone();
+        }
+        let a = Arc::new(m);
+        self.sources.insert(a.clone());
+        a
+    }
+    fn item(&mut self, it: ItemSum) -> Arc<ItemSum> {
+        if let Some(a) = self.items.get(&it) {
+            return a.clone();
+        }
+        let a = Arc::new(it);
+        self.items.insert(a.clone());
+        a
+    }
+}
+
+impl BinSummary {
+    fn of(bin: &Bin, pool: &mut Pool) -> BinSummary {
+        let sources = bin
+            .mobs
+            .iter()
+            .filter(|m| m.kind == MobKind::Source)
+            .map(|m| SourceMob {
+                id: m.id,
+                locator: m.locator.clone(),
+                ama: m.ama,
+                file: m.is_file(),
+                name: m.name.clone(),
+                source: if m.is_file() { bin.source_name(m).map(|n| (n, matches!(m.descriptor.as_deref(), Some("PCMA" | "WAVE" | "AIFC")))) } else { None },
+            })
+            .map(|m| pool.source(m))
+            .collect();
+        let items = bin
+            .items
+            .iter()
+            .map(|&item| {
+                let mob = &bin.mobs[item];
+                let clip = kind_of(mob.kind, mob.usage);
+                let (mut unresolved, mut renders_unresolved) = (HashSet::new(), HashSet::new());
+                let media = bin.media_of(item, &mut unresolved);
+                let renders = if clip.is_some() { bin.renders_of(item, &mut renders_unresolved) } else { vec![] };
+                ItemSum {
+                    id: mob.id,
+                    name: mob.name.clone(),
+                    clip,
+                    render: mob.kind == MobKind::Master && mob.usage == 1,
+                    composition: mob.kind == MobKind::Composition,
+                    media,
+                    unresolved: sorted(unresolved),
+                    renders,
+                    renders_unresolved: sorted(renders_unresolved),
+                }
+            })
+            .map(|it| pool.item(it))
+            .collect();
+        BinSummary { sources, items }
+    }
+}
+
+fn sorted(set: HashSet<MobId>) -> Vec<MobId> {
+    let mut v: Vec<MobId> = set.into_iter().collect();
+    v.sort();
+    v
+}
+
 /// What one bin contributes to `Refs`: with `uses`, the media and renders of its clips, subclips and sequences (mobs
 /// from other bins go to `waiting`); always its clips' media into `media_of`, for clips used from other bins.
-fn use_bin(bin: &Bin, r: &mut Refs, media_of: &mut HashMap<MobId, Vec<MobId>>, waiting: &mut Vec<(MobId, bool)>, uses: bool) {
+fn use_bin(bin: &BinSummary, r: &mut Refs, media_of: &mut HashMap<MobId, Vec<MobId>>, waiting: &mut Vec<(MobId, bool)>, uses: bool) {
     // only Avid-managed media (AMA-linked and other linked files are not in Avid MediaFiles)
-    let managed = |ids: Vec<MobId>| -> Vec<MobId> { ids.into_iter().filter(|id| bin.mob(id).is_none_or(|m| !m.ama && m.locator.as_deref().is_none_or(|l| l == "MSML"))).collect() };
-    for &item in &bin.items {
-        let mob = &bin.mobs[item];
-        let (mut gone, mut gone_renders) = (HashSet::new(), HashSet::new());
-        let media = managed(bin.media_of(item, &mut gone));
-        if mob.kind != MobKind::Composition {
-            media_of.insert(mob.id, media.clone());
+    let src: HashMap<MobId, &SourceMob> = bin.sources.iter().map(|s| (s.id, s.as_ref())).collect();
+    let managed = |ids: &[MobId]| -> Vec<MobId> { ids.iter().copied().filter(|id| src.get(id).is_none_or(|m| !m.ama && m.locator.as_deref().is_none_or(|l| l == "MSML"))).collect() };
+    for item in &bin.items {
+        let media = managed(&item.media);
+        if !item.composition {
+            media_of.insert(item.id, media.clone());
         }
         // a render's own master clip is no use of it – only an effect that still points to it is
-        if !uses || kind_of(mob.kind, mob.usage).is_none() {
+        if !uses || item.clip.is_none() {
             continue;
         }
-        r.renders.extend(managed(bin.renders_of(item, &mut gone_renders)));
+        r.renders.extend(managed(&item.renders));
         r.media.extend(media);
-        waiting.extend(gone.into_iter().map(|id| (id, false)));
-        waiting.extend(gone_renders.into_iter().map(|id| (id, true)));
+        waiting.extend(item.unresolved.iter().map(|id| (*id, false)));
+        waiting.extend(item.renders_unresolved.iter().map(|id| (*id, true)));
     }
 }
 
 /// Media and renders one bin uses; clips it takes from other bins of its project are looked up there.
 pub fn bin_refs(path: &Path) -> Result<Refs, String> {
-    let bin = Bin::read(path)?;
+    let mut pool = Pool::default();
+    let bin = BinSummary::of(&Bin::read(path)?, &mut pool);
     let mut r = Refs { bins: 1, ..Default::default() };
     let (mut media_of, mut waiting) = (HashMap::new(), vec![]);
     use_bin(&bin, &mut r, &mut media_of, &mut waiting, true);
@@ -264,7 +401,7 @@ pub fn bin_refs(path: &Path) -> Result<Refs, String> {
     {
         for other in bins(project).iter().filter(|b| b.as_path() != path) {
             match Bin::read(other) {
-                Ok(b) => use_bin(&b, &mut Refs::default(), &mut media_of, &mut vec![], false),
+                Ok(b) => use_bin(&BinSummary::of(&b, &mut pool), &mut Refs::default(), &mut media_of, &mut vec![], false),
                 Err(e) => r.failed.push((other.clone(), e)),
             }
         }
@@ -287,63 +424,236 @@ pub struct Refs {
     pub failed: Vec<(PathBuf, String)>,
 }
 
-/// Reads every bin of the projects (see `Refs`). Clips stored in another bin of the same project are resolved over
-/// the project. progress gets (bins done, bins total, bin). Cancelled through `gate`: an incomplete result.
-pub fn references(projects: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str), gate: &crate::Gate) -> Refs {
-    let all: Vec<(usize, PathBuf)> = projects.iter().enumerate().flat_map(|(i, p)| bins(p).into_iter().map(move |b| (i, b))).collect();
-    let mut r = Refs { bins: all.len(), ..Default::default() };
-    // per project: mob -> its media files; mobs from another bin, waiting for the end of the project (render?)
-    let mut media_of: HashMap<MobId, Vec<MobId>> = HashMap::new();
-    let mut waiting: Vec<(MobId, bool)> = vec![];
-    let finish = |media_of: &mut HashMap<MobId, Vec<MobId>>, waiting: &mut Vec<(MobId, bool)>, r: &mut Refs| {
-        for (mob, render) in waiting.drain(..) {
+/// Raised when `BinSummary` or the file layout changes: an older cache is read anew.
+const BIN_CACHE_VERSION: u32 = 5;
+
+/// Bin path -> (size, modification date, summary). Media Composer rewrites the whole bin file when it saves it, so a
+/// bin with the same size and date has not changed and is not read again.
+#[derive(Default)]
+struct BinCache {
+    bins: HashMap<String, (u64, u128, BinSummary)>,
+    pool: Pool,
+}
+
+type DiskSource = (u32, Option<String>, bool, bool, String, Option<(String, bool)>);
+/// id, name, flags (clip kind 1 master, 2 subclip, 3 sequence; +4 render master, +8 composition), and as indexes
+/// into `lists`: media, unresolved, renders, renders unresolved
+type DiskItem = (u32, String, u8, u32, u32, u32, u32);
+
+/// On disk everything is stored once and referred to by index: mob IDs (`ids`, hex), lists of them, source mobs and
+/// items – the same clips, file mobs and sequences are copied into many bins (a test project with 1845 bins:
+/// 6 million items, most of them copies).
+#[derive(Serialize, Deserialize, Default)]
+struct BinCacheFile {
+    version: u32,
+    ids: Vec<String>,
+    lists: Vec<Vec<u32>>,
+    sources: Vec<DiskSource>,
+    items: Vec<DiskItem>,
+    /// path, size, date, its sources and its items (indexes into `sources` / `items`)
+    bins: Vec<(String, u64, u128, Vec<u32>, Vec<u32>)>,
+}
+
+fn from_hex(t: &str) -> MobId {
+    let bytes: Vec<u8> = (0..t.len()).step_by(2).filter_map(|i| t.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok())).collect();
+    bytes.try_into().unwrap_or([0; 32])
+}
+
+/// Hands out the index of a value, storing it on first sight.
+struct Table<T: std::hash::Hash + Eq + Clone> {
+    values: Vec<T>,
+    index: HashMap<T, u32>,
+}
+
+impl<T: std::hash::Hash + Eq + Clone> Table<T> {
+    fn new() -> Self {
+        Table { values: vec![], index: HashMap::new() }
+    }
+    fn at(&mut self, v: T) -> u32 {
+        if let Some(i) = self.index.get(&v) {
+            return *i;
+        }
+        self.values.push(v.clone());
+        self.index.insert(v, self.values.len() as u32 - 1);
+        self.values.len() as u32 - 1
+    }
+}
+
+impl BinCache {
+    fn load(path: &Path) -> BinCache {
+        let Some(f) = fs::read(path).ok().and_then(|b| serde_json::from_slice::<BinCacheFile>(&b).ok()).filter(|f| f.version == BIN_CACHE_VERSION) else { return BinCache::default() };
+        let ids: Vec<MobId> = f.ids.iter().map(|h| from_hex(h)).collect();
+        let id = |i: &u32| ids.get(*i as usize).copied().unwrap_or([0; 32]);
+        let list = |i: &u32| f.lists.get(*i as usize).map(|v| v.iter().map(id).collect::<Vec<_>>()).unwrap_or_default();
+        let sources: Vec<Arc<SourceMob>> = f.sources.iter().map(|(i, locator, ama, file, name, source)| Arc::new(SourceMob { id: id(i), locator: locator.clone(), ama: *ama, file: *file, name: name.clone(), source: source.clone() })).collect();
+        let items: Vec<Arc<ItemSum>> = f
+            .items
+            .iter()
+            .map(|(i, name, flags, media, unresolved, renders, renders_unresolved)| ItemSum {
+                id: id(i),
+                name: name.clone(),
+                clip: match flags & 3 {
+                    1 => Some(ClipKind::Master),
+                    2 => Some(ClipKind::Subclip),
+                    3 => Some(ClipKind::Sequence),
+                    _ => None,
+                },
+                render: flags & 4 != 0,
+                composition: flags & 8 != 0,
+                media: list(media),
+                unresolved: list(unresolved),
+                renders: list(renders),
+                renders_unresolved: list(renders_unresolved),
+            })
+            .map(Arc::new)
+            .collect();
+        let bins = f
+            .bins
+            .into_iter()
+            .map(|(p, size, date, s, it)| {
+                let summary = BinSummary {
+                    sources: s.iter().filter_map(|i| sources.get(*i as usize).cloned()).collect(),
+                    items: it.iter().filter_map(|i| items.get(*i as usize).cloned()).collect(),
+                };
+                (p, (size, date, summary))
+            })
+            .collect();
+        let pool = Pool { sources: sources.into_iter().collect(), items: items.into_iter().collect() };
+        BinCache { bins, pool }
+    }
+
+    fn save(&self, path: &Path) {
+        let (mut ids, mut lists, mut sources, mut items) = (Table::new(), Table::new(), Table::new(), Table::new());
+        let mut list = |v: &[MobId], ids: &mut Table<MobId>| -> u32 { lists.at(v.iter().map(|m| ids.at(*m)).collect::<Vec<u32>>()) };
+        let mut bins = vec![];
+        for (p, (size, date, s)) in &self.bins {
+            let src: Vec<u32> = s.sources.iter().map(|m| sources.at((ids.at(m.id), m.locator.clone(), m.ama, m.file, m.name.clone(), m.source.clone()))).collect();
+            let its: Vec<u32> = s
+                .items
+                .iter()
+                .map(|it| {
+                    let kind = match it.clip {
+                        Some(ClipKind::Master) => 1,
+                        Some(ClipKind::Subclip) => 2,
+                        Some(ClipKind::Sequence) => 3,
+                        None => 0,
+                    };
+                    let flags = kind | if it.render { 4 } else { 0 } | if it.composition { 8 } else { 0 };
+                    let entry = (ids.at(it.id), it.name.clone(), flags, list(&it.media, &mut ids), list(&it.unresolved, &mut ids), list(&it.renders, &mut ids), list(&it.renders_unresolved, &mut ids));
+                    items.at(entry)
+                })
+                .collect();
+            bins.push((p.clone(), *size, *date, src, its));
+        }
+        let file = BinCacheFile { version: BIN_CACHE_VERSION, ids: ids.values.iter().map(id_hex).collect(), lists: lists.values, sources: sources.values, items: items.values, bins };
+        if let Ok(data) = serde_json::to_vec(&file) {
+            let tmp = path.with_extension("tmp");
+            if fs::write(&tmp, data).is_ok() {
+                let _ = fs::rename(tmp, path);
+            }
+        }
+    }
+}
+
+fn stamp(path: &Path) -> Option<(u64, u128)> {
+    let m = fs::metadata(path).ok()?;
+    Some((m.len(), m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos()))
+}
+
+/// The bins of some projects, read (or taken from the cache) once for `references_of` and `scan_of`:
+/// per project its folder and its bins with their summary or why they could not be read.
+pub type ProjectBins = Vec<(PathBuf, Vec<(PathBuf, Result<BinSummary, String>)>)>;
+
+/// Reads the bins of the projects. `cache` (a JSON file) keeps every bin's summary: a bin with the same size and
+/// date is not read again. progress gets (bins done, bins total, project/bin). Cancelled through `gate`: the bins
+/// not reached are left out (the caller throws the result away).
+pub fn read_projects(projects: &[PathBuf], cache: Option<&Path>, progress: &mut dyn FnMut(usize, usize, &str), gate: &crate::Gate) -> ProjectBins {
+    let mut bc = cache.map(BinCache::load).unwrap_or_default();
+    let lists: Vec<Vec<PathBuf>> = projects.iter().map(|p| bins(p)).collect();
+    let total = lists.iter().map(Vec::len).sum();
+    let (mut done, mut changed) = (0, false);
+    let mut out = vec![];
+    for (project, list) in projects.iter().zip(lists) {
+        let mut read = vec![];
+        for path in list {
+            if gate.cancelled() {
+                break;
+            }
+            let rel = path.strip_prefix(project).map(|p| p.display().to_string()).unwrap_or_else(|_| name_of(&path));
+            progress(done, total, &format!("{}/{rel}", name_of(project)));
+            done += 1;
+            let key = path.to_string_lossy().into_owned();
+            let st = stamp(&path);
+            let summary = match (st, bc.bins.get(&key)) {
+                (Some((size, date)), Some((s, d, sum))) if size == *s && date == *d => Ok(sum.clone()),
+                _ => Bin::read(&path).map(|b| BinSummary::of(&b, &mut bc.pool)),
+            };
+            if let (Some((size, date)), Ok(s)) = (st, &summary)
+                && bc.bins.get(&key).is_none_or(|(s0, d0, _)| (*s0, *d0) != (size, date))
+            {
+                bc.bins.insert(key, (size, date, s.clone()));
+                changed = true;
+            }
+            read.push((path, summary));
+        }
+        out.push((project.clone(), read));
+    }
+    if let Some(path) = cache {
+        // bins that are gone (deleted, or a project folder that moved) would only make the file grow
+        let before = bc.bins.len();
+        bc.bins.retain(|p, _| Path::new(p).exists());
+        // writing it costs memory and seconds: only when a bin changed
+        if changed || bc.bins.len() != before || !path.exists() {
+            bc.save(path);
+        }
+    }
+    out
+}
+
+/// Every bin of the projects (see `Refs`). Clips stored in another bin of the same project are resolved over the
+/// project.
+pub fn references_of(projects: &ProjectBins) -> Refs {
+    let mut r = Refs { bins: projects.iter().map(|p| p.1.len()).sum(), ..Default::default() };
+    for (_, list) in projects {
+        // per project: mob -> its media files; mobs from another bin, waiting for the end of the project (render?)
+        let (mut media_of, mut waiting) = (HashMap::new(), vec![]);
+        for (path, bin) in list {
+            match bin {
+                Ok(b) => use_bin(b, &mut r, &mut media_of, &mut waiting, true),
+                Err(e) => r.failed.push((path.clone(), e.clone())),
+            }
+        }
+        for (mob, render) in waiting {
             let set = if render { &mut r.renders } else { &mut r.media };
             set.extend(media_of.get(&mob).into_iter().flatten());
         }
-        media_of.clear();
-    };
-    let mut current = usize::MAX;
-    for (i, (pi, path)) in all.iter().enumerate() {
-        if gate.cancelled() {
-            break;
-        }
-        if *pi != current {
-            finish(&mut media_of, &mut waiting, &mut r);
-            current = *pi;
-        }
-        progress(i, all.len(), &format!("{}/{}", name_of(&projects[*pi]), name_of(path)));
-        let bin = match Bin::read(path) {
-            Ok(b) => b,
-            Err(e) => {
-                r.failed.push((path.clone(), e));
-                continue;
-            }
-        };
-        use_bin(&bin, &mut r, &mut media_of, &mut waiting, true);
     }
-    finish(&mut media_of, &mut waiting, &mut r);
     r
 }
 
+/// `read_projects` + `references_of`.
+pub fn references(projects: &[PathBuf], cache: Option<&Path>, progress: &mut dyn FnMut(usize, usize, &str), gate: &crate::Gate) -> Refs {
+    references_of(&read_projects(projects, cache, progress, gate))
+}
+
 /// Reads every bin of the projects and collects the media files their clips, subclips and sequences need that are
-/// not in `available`. References to clips stored in another bin of the same project are resolved over the project.
-/// progress gets (bins done, bins total, bin). Cancelled through `gate`: an incomplete result the caller throws away.
+/// not in `available` (`read_projects` + `scan_of`).
 pub fn scan(projects: &[PathBuf], available: &HashSet<MobId>, progress: &mut dyn FnMut(usize, usize, &str), gate: &crate::Gate) -> ScanResult {
-    let all: Vec<(usize, PathBuf)> = projects.iter().enumerate().flat_map(|(i, p)| bins(p).into_iter().map(move |b| (i, b))).collect();
-    let mut r = ScanResult { projects: projects.len(), bins: all.len(), ..Default::default() };
+    scan_of(&read_projects(projects, None, progress, gate), available)
+}
+
+/// The media files the clips, subclips and sequences of the bins need that are not in `available`. References to
+/// clips stored in another bin of the same project are resolved over the project.
+pub fn scan_of(projects: &ProjectBins, available: &HashSet<MobId>) -> ScanResult {
+    let mut r = ScanResult { projects: projects.len(), bins: projects.iter().map(|p| p.1.len()).sum(), ..Default::default() };
     let mut missing: HashMap<MobId, Missing> = HashMap::new();
     let mut by_bin: BTreeMap<(String, String), BTreeMap<MobId, BTreeSet<(String, ClipKind)>>> = BTreeMap::new();
     // missing file mobs: locator class, name, AMA, source; and the sources of the files that are on the drives
     let mut files: HashMap<MobId, (Option<String>, String, bool, Option<(String, bool)>)> = HashMap::new();
     let mut on_drives: HashSet<(String, bool)> = HashSet::new();
-    let source = |bin: &Bin, m: &crate::avb::Mob| bin.source_name(m).map(|n| (n, matches!(m.descriptor.as_deref(), Some("PCMA" | "WAVE" | "AIFC"))));
     let mut renders: HashSet<MobId> = HashSet::new();
     // missing file -> the master clip it belongs to
     let mut owners: HashMap<MobId, String> = HashMap::new();
-    // per project: master/subclip mob -> media files, and uses still waiting for a mob from another bin
-    let mut media_of: HashMap<MobId, Vec<MobId>> = HashMap::new();
-    let mut waiting: Vec<(MobId, Use)> = vec![];
-    let mut current = usize::MAX;
     // (project, key of the name) of master clips whose media are all on the drives
     let mut online_masters: HashSet<(String, String)> = HashSet::new();
 
@@ -357,65 +667,53 @@ pub fn scan(projects: &[PathBuf], available: &HashSet<MobId>, progress: &mut dyn
         }
         missing.entry(id).or_insert_with(|| Missing { id, name: String::new(), unmanaged: false, relink: false, first: u });
     };
-    let finish_project = |media_of: &mut HashMap<MobId, Vec<MobId>>, waiting: &mut Vec<(MobId, Use)>, missing: &mut HashMap<MobId, Missing>, record: &mut dyn FnMut(MobId, Use, &mut HashMap<MobId, Missing>)| {
-        for (mob, u) in waiting.drain(..) {
-            for id in media_of.get(&mob).into_iter().flatten() {
-                record(*id, u.clone(), missing);
-            }
-        }
-        media_of.clear();
-    };
 
-    for (i, (pi, path)) in all.iter().enumerate() {
-        if gate.cancelled() {
-            break;
+    for (project, list) in projects {
+        // per project: master/subclip mob -> media files, and uses still waiting for a mob from another bin
+        let mut media_of: HashMap<MobId, Vec<MobId>> = HashMap::new();
+        let mut waiting: Vec<(MobId, Use)> = vec![];
+        for (path, bin) in list {
+            let bin = match bin {
+                Ok(b) => b,
+                Err(e) => {
+                    r.failed.push((path.clone(), e.clone()));
+                    continue;
+                }
+            };
+            let rel = path.strip_prefix(project).map(|p| p.display().to_string()).unwrap_or_else(|_| name_of(path));
+            for m in bin.sources.iter().filter(|m| m.file) {
+                if available.contains(&m.id) {
+                    on_drives.extend(m.source.clone());
+                } else {
+                    files.entry(m.id).or_insert_with(|| (m.locator.clone(), m.name.clone(), m.ama, m.source.clone()));
+                }
+            }
+            for item in &bin.items {
+                if item.render {
+                    renders.extend(item.media.iter().filter(|id| !available.contains(*id)));
+                    continue;
+                }
+                let Some(kind) = item.clip else { continue };
+                r.clips += 1;
+                let u = Use { project: name_of(project), bin: rel.clone(), clip: item.name.clone(), kind };
+                if kind == ClipKind::Master && !item.media.is_empty() && item.unresolved.is_empty() && item.media.iter().all(|id| available.contains(id)) {
+                    online_masters.insert((u.project.clone(), crate::key(&item.name)));
+                }
+                if kind != ClipKind::Sequence {
+                    media_of.insert(item.id, item.media.clone());
+                }
+                for id in &item.media {
+                    record(*id, u.clone(), &mut missing);
+                }
+                waiting.extend(item.unresolved.iter().map(|id| (*id, u.clone())));
+            }
         }
-        if *pi != current {
-            finish_project(&mut media_of, &mut waiting, &mut missing, &mut record);
-            current = *pi;
-        }
-        let project = &projects[*pi];
-        let rel = path.strip_prefix(project).map(|p| p.display().to_string()).unwrap_or_else(|_| name_of(path));
-        progress(i, all.len(), &format!("{}/{rel}", name_of(project)));
-        let bin = match Bin::read(path) {
-            Ok(b) => b,
-            Err(e) => {
-                r.failed.push((path.clone(), e));
-                continue;
+        for (mob, u) in waiting {
+            for id in media_of.get(&mob).into_iter().flatten() {
+                record(*id, u.clone(), &mut missing);
             }
-        };
-        for m in bin.mobs.iter().filter(|m| m.is_file()) {
-            if available.contains(&m.id) {
-                on_drives.extend(source(&bin, m));
-            } else {
-                files.entry(m.id).or_insert_with(|| (m.locator.clone(), m.name.clone(), m.ama, source(&bin, m)));
-            }
-        }
-        for &item in &bin.items {
-            let mob = &bin.mobs[item];
-            if mob.kind == MobKind::Master && mob.usage == 1 {
-                let mut unresolved = HashSet::new();
-                renders.extend(bin.media_of(item, &mut unresolved).into_iter().filter(|id| !available.contains(id)));
-                continue;
-            }
-            let Some(kind) = kind_of(mob.kind, mob.usage) else { continue };
-            r.clips += 1;
-            let u = Use { project: name_of(project), bin: rel.clone(), clip: mob.name.clone(), kind };
-            let mut unresolved = HashSet::new();
-            let media = bin.media_of(item, &mut unresolved);
-            if kind == ClipKind::Master && !media.is_empty() && unresolved.is_empty() && media.iter().all(|id| available.contains(id)) {
-                online_masters.insert((u.project.clone(), crate::key(&mob.name)));
-            }
-            if kind != ClipKind::Sequence {
-                media_of.insert(mob.id, media.clone());
-            }
-            for id in media {
-                record(id, u.clone(), &mut missing);
-            }
-            waiting.extend(unresolved.into_iter().map(|id| (id, u.clone())));
         }
     }
-    finish_project(&mut media_of, &mut waiting, &mut missing, &mut record);
     drop(record);
 
     // named after its master clip (file mobs are often called just "File"), else the file mob, else the first use.

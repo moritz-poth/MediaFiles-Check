@@ -40,7 +40,7 @@ pub struct Choice {
 pub struct Compare {
     pub local: Manifest,
     pub remote: Manifest,
-    /// eigene Volumes ohne gleichnamiges Gegenstück; options = Volumes drüben, letzter Index = nicht senden
+    /// alle eigenen Volumes; options = Volumes drüben, letzter Index = nicht senden; gleichnamige sind vorausgewählt
     pub drives: Vec<Choice>,
     /// Anforderung aus MediaFiles Check: fester Plan, nichts zuzuordnen
     pub request: Option<Plan>,
@@ -53,12 +53,13 @@ impl Compare {
         let drives = local
             .volumes
             .iter()
-            .filter(|lv| !remote_names.iter().any(|r| key(r) == key(&lv.name)))
             .map(|lv| {
+                // the saved choice first, else the drive of the same name over there (user 2026-11-16: preselected, not fixed)
+                let same = || remote_names.iter().position(|n| key(n) == key(&lv.name)).map_or(0, |i| i + 1);
                 let selected = match saved.and_then(|m| m.get(&lv.name)) {
                     Some(r) if r.is_empty() => remote_names.len() + 1,
-                    Some(r) => remote_names.iter().position(|n| key(n) == key(r)).map_or(0, |i| i + 1),
-                    None => 0,
+                    Some(r) => remote_names.iter().position(|n| key(n) == key(r)).map_or_else(same, |i| i + 1),
+                    None => same(),
                 };
                 Choice { name: lv.name.clone(), options: remote_names.clone(), selected }
             })
@@ -221,19 +222,23 @@ mod tests {
     }
 
     #[test]
-    fn drives_without_counterpart_must_be_assigned_and_are_remembered() {
+    fn drives_are_preselected_by_name_assigned_otherwise_and_remembered() {
         let local = Manifest { system: "A".into(), volumes: vec![vol("Data", &[("1", &["a"])]), vol("Audio", &[("2", &["b"])])], ..Default::default() };
         let remote = Manifest { system: "B".into(), volumes: vec![vol("Data", &[]), vol("Audio_B", &[])], ..Default::default() };
         let mut c = Compare::new(local.clone(), remote.clone(), &Mappings::default());
-        assert_eq!(c.drives.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["Audio"]);
+        assert_eq!(c.drives.iter().map(|d| (d.name.as_str(), d.selected)).collect::<Vec<_>>(), [("Data", 1), ("Audio", 0)]);
         assert!(!c.ready());
         assert_eq!(media(&c.plan()).0, 1, "unassigned drive is not sent");
-        c.drives[0].selected = 2; // Audio_B
+        c.drives[1].selected = 2; // Audio_B
         assert!(c.ready());
         assert_eq!(media(&c.plan()).0, 2);
+        // a drive of the same name can go elsewhere
+        c.drives[0].selected = 2; // Data -> Audio_B
+        assert_eq!(c.plan().copies.iter().filter(|x| x.from_volume == "Data").map(|x| x.to_volume.as_str()).next(), Some("Audio_B"));
         let mut m = Mappings::default();
         c.remember(&mut m);
-        assert_eq!(Compare::new(local, remote, &m).drives[0].selected, 2);
+        let again = Compare::new(local, remote, &m);
+        assert_eq!((again.drives[0].selected, again.drives[1].selected), (2, 2));
     }
 
     #[test]
