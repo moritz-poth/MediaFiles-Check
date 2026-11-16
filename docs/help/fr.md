@@ -114,7 +114,7 @@ Un dossier et ses dossiers rééquilibrés (`<nom>-rebalanced-1`, `-2` …) vont
 
 1. Quittez Media Composer – sur les disques réseau, sur chaque poste – et choisissez les groupes.
 2. Cliquez sur **Rééquilibrer**. Pour un dossier que Media Composer crée lui-même (`1`, `<nom de l’ordinateur>.1`), nous recommandons de lui donner d’abord un nom propre. Rien n’est copié ni supprimé ; un dossier rééquilibré sans fichiers média part en entier dans `MediaFiles Check Database Backups`.
-3. Ensuite, les bases de données des dossiers modifiés doivent être réécrites. **Lancer** met leurs fichiers de base dans `MediaFiles Check Database Backups` sur le même disque et renomme les dossiers que Media Composer ne met pas à jour lui-même ; continuez sous Vérifier BD › Nouvelles bases. **Annuler** laisse les bases telles quelles – cela reste dans Tâches et Historique.
+3. Ensuite, les bases de données des dossiers modifiés doivent être réécrites. **Rééquilibrage terminé** montre chaque groupe dans une liste. **Mettre de côté les anciennes bases** met leurs fichiers de base dans `MediaFiles Check Database Backups` sur le même disque et renomme les dossiers que Media Composer ne met pas à jour lui-même. La page suivante explique la suite ; **Faire réécrire les bases** mène à Vérifier BD › Nouvelles bases. **Annuler** laisse les bases telles quelles – la page Rééquilibrage le signale alors et propose **Mettre de côté les anciennes bases** pour chaque opération en attente.
 
 Chaque changement de limite demande d’abord confirmation ; la prochaine recherche **Chercher les dossiers MXF pleins…** répartit à nouveau chaque groupe.
 
@@ -128,7 +128,7 @@ Le point vert marque la copie qui reste (celle que connaît la base de son dossi
 
 ## Historique
 
-Entretien MXF › **Historique** liste chaque opération de rééquilibrage et de doublons, la plus récente en haut. Une opération dont les bases ne sont pas encore réécrites l’indique et propose **Réécrire les bases** : ses dossiers modifiés voient leurs bases mises de côté, pour que Media Composer en écrive de nouvelles, et les dossiers qu’il ne met pas à jour lui-même sont renommés (à renommer à l’origine sous Vérifier BD › Nouvelles bases).
+Entretien MXF › **Historique** liste chaque opération de rééquilibrage et de doublons, la plus récente en haut ; pendant un rééquilibrage, chaque groupe terminé s’y ajoute aussitôt. Une opération dont les bases ne sont pas encore réécrites l’indique.
 
 **Annuler** remet tout en place (jamais par-dessus un fichier existant) – renommez d’abord les dossiers renommés à l’origine. **×** retire une entrée, **Tout supprimer…** toutes (toujours après confirmation) ; rien ne change sur les disques, mais l’opération ne peut plus être annulée.
 

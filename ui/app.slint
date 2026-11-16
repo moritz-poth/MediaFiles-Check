@@ -328,7 +328,8 @@ component RunItem inherits CardRow {
     in property <bool> mc-running;
     // umbenannte Ordner offen: „Datenbanken neu schreiben“ gesperrt
     in property <bool> blocked;
-    // Verlauf von MXFs pflegen: × zum Entfernen (user 2026-11-16)
+    // Verlauf von MXFs pflegen: × zum Entfernen, kein Neu-schreiben (das läuft nach dem Lauf und über DBs prüfen › Neue Datenbanken, user 2026-11-16)
+    in property <bool> can-rewrite: true;
     in property <bool> removable;
     callback db();
     callback undo();
@@ -376,7 +377,7 @@ component RunItem inherits CardRow {
         alignment: center;
         HorizontalLayout {
             spacing: 8px;
-            if !root.db-done: CheckButton {
+            if !root.db-done && root.can-rewrite: CheckButton {
                 text: @tr("Rewrite databases");
                 small: true;
                 enabled: !root.mc-running && !root.blocked;
@@ -2723,6 +2724,8 @@ export component AppWindow inherits CheckWindow {
     }
     changed page => {
         page-flick.content-y = 0;
+        // die Erklärung nach „Alte Datenbanken beiseitelegen“ gilt nur für diese eine Ergebnisseite
+        if root.page != Page.notice { root.notice-db = false; }
         if root.page == Page.working { root.work-tab = root.tab; root.work-step = root.step; }
         if root.tab-of(root.page) >= 0 && root.tab-of(root.page) != root.tab { root.tab = root.tab-of(root.page); }
         if root.step-of(root.page) >= 0 { root.step = root.step-of(root.page); }
@@ -2801,7 +2804,12 @@ export component AppWindow inherits CheckWindow {
     in property <[RunRow]> rebalanced;
     // Läufe, deren Datenbanken noch nicht neu geschrieben sind
     in property <int> rebalance-pending;
-    in property <string> rebalance-summary;
+    // Rebalancing erledigt: eine Zeile je Gruppe (text = Laufwerk: Ordner, detail = verschoben / Ordner)
+    in property <[RunRow]> rebalance-summary;
+    // Ergebnisseite nach „Alte Datenbanken beiseitelegen“: erklärt den nächsten Schritt, Knopf führt zu DBs prüfen › Neue Datenbanken
+    in-out property <bool> notice-db;
+    // Läufe, die mit Abbrechen liegen blieben: alle ihre Datenbanken beiseitelegen
+    callback rewrite-all();
     out property <string> txt-settings-menu: @tr("Settings…");
     out property <string> txt-mc-not-started: @tr("Media Composer could not be started.");
     out property <string> txt-choose-folder: @tr("Choose a drive or MXF folder");
@@ -3136,17 +3144,21 @@ ScrollBox {
             Para {
                 text: @tr("Splits MXF folders with more than {} files (database included): the oldest media files move into new folders.", Shared.limit);
             }
-            if root.rebalance-pending > 0: HorizontalLayout {
-                spacing: 10px;
+            // Hinweis volle Breite, Knopf darunter – passt in jeder Sprache
+            if root.rebalance-pending > 0: VerticalLayout {
+                spacing: 8px;
                 Para {
-                    width: Metrics.content-width - 140px;
                     text: @tr("{n} run is waiting for new databases." | "{n} runs are waiting for new databases." % root.rebalance-pending);
                     color: Theme.warning;
                 }
-                CheckButton {
-                    text: @tr("History");
-                    small: true;
-                    clicked => { root.page = Page.runs; }
+                HorizontalLayout {
+                    alignment: start;
+                    CheckButton {
+                        text: @tr("Set old databases aside");
+                        small: true;
+                        enabled: !root.mc-running && root.renamed.length == 0 && !root.work-busy;
+                        clicked => { root.rewrite-all(); }
+                    }
                 }
             }
         }
@@ -3170,17 +3182,21 @@ ScrollBox {
             Para {
                 text: @tr("Finds media files that are on the selected drives more than once – by their Media Composer ID, also when renamed.");
             }
-            if root.dup-pending > 0: HorizontalLayout {
-                spacing: 10px;
+            // Hinweis volle Breite, Knopf darunter – passt in jeder Sprache
+            if root.dup-pending > 0: VerticalLayout {
+                spacing: 8px;
                 Para {
-                    width: Metrics.content-width - 140px;
                     text: @tr("Databases not rewritten yet");
                     color: Theme.warning;
                 }
-                CheckButton {
-                    text: @tr("History");
-                    small: true;
-                    clicked => { root.page = Page.runs; }
+                HorizontalLayout {
+                    alignment: start;
+                    CheckButton {
+                        text: @tr("Set old databases aside");
+                        small: true;
+                        enabled: !root.mc-running && root.renamed.length == 0 && !root.work-busy;
+                        clicked => { root.rewrite-all(); }
+                    }
                 }
             }
         }
@@ -3465,8 +3481,10 @@ ScrollBox {
         }
 
         // ── Rebalancing: danach Datenbanken neu schreiben ─────
+        // Rebalancing erledigt: klassische Liste, scrollt in sich – die Seite selbst nie (user 2026-11-16)
         if root.page == Page.rebalanced: VerticalLayout {
-            spacing: Metrics.spacing;
+            spacing: 14px;
+            height: Metrics.page-height;
             PageHead {
                 title: @tr("Rebalanced");
                 CheckButton {
@@ -3474,29 +3492,40 @@ ScrollBox {
                     clicked => { root.back(); }
                 }
                 CheckButton {
-                    text: @tr("Start");
+                    text: @tr("Set old databases aside");
                     primary: true;
                     enabled: !root.mc-running && root.renamed.length == 0;
                     clicked => { root.rebalance-db(-1); }
                 }
             }
             if root.renamed.length > 0: RenameBlocked { }
-            VerticalLayout {
-                spacing: 10px;
-                ScrollBox {
-                    limit: 200px;
-                    Para { text: root.rebalance-summary; color: Theme.text; }
+            Para {
+                text: @tr("Now the databases of the changed folders have to be rewritten. “Set old databases aside” moves their databases into “MediaFiles Check Database Backups” (Media Composer then writes new ones) and renames the folders Media Composer does not update itself – then go on under Check DBs › New databases.");
+            }
+            Card {
+                vertical-stretch: 1;
+                min-height: 0px;
+                FillScroll {
+                    for r[i] in root.rebalance-summary: CardRow {
+                        first: i == 0;
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            padding-top: 8px;
+                            padding-bottom: 8px;
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: r.text; overflow: elide; font-size: 12px; color: Theme.text; }
+                            Text { text: r.detail; overflow: elide; font-size: 11px; color: Theme.muted; }
+                        }
+                    }
                 }
-                Para {
-                    text: @tr("Now the databases of the changed folders have to be rewritten. Start sets their databases aside (Media Composer writes new ones) and renames the folders Media Composer does not update itself – then go on under Check DBs › New databases.");
-                }
-                Para {
-                    text: @tr("Cancel leaves the databases as they are – you can start it later under Maintain MXFs › History.");
-                }
-                Para {
-                    text: root.mc-running ? @tr("Quit Media Composer first.") : "";
-                    color: Theme.warning;
-                }
+            }
+            Para {
+                text: @tr("Cancel leaves the databases as they are – you can set them aside later under Maintain MXFs › Rebalancing.");
+            }
+            Para {
+                text: root.mc-running ? @tr("Quit Media Composer first.") : "";
+                color: Theme.warning;
             }
         }
 
@@ -3647,7 +3676,7 @@ ScrollBox {
                     clicked => { root.back(); }
                 }
                 CheckButton {
-                    text: @tr("Start");
+                    text: @tr("Set old databases aside");
                     primary: true;
                     enabled: !root.mc-running && root.renamed.length == 0;
                     clicked => { root.dup-db(-1); }
@@ -3661,10 +3690,10 @@ ScrollBox {
                     Para { text: root.dup-done-summary; color: Theme.text; }
                 }
                 Para {
-                    text: @tr("Now the databases of the changed folders have to be rewritten. Start sets their databases aside (Media Composer writes new ones) and renames the folders Media Composer does not update itself – then go on under Check DBs › New databases.");
+                    text: @tr("Now the databases of the changed folders have to be rewritten. “Set old databases aside” moves their databases into “MediaFiles Check Database Backups” (Media Composer then writes new ones) and renames the folders Media Composer does not update itself – then go on under Check DBs › New databases.");
                 }
                 Para {
-                    text: @tr("Cancel leaves the databases as they are – you can start it later under Maintain MXFs › History.");
+                    text: @tr("Cancel leaves the databases as they are – you can set them aside later under Maintain MXFs › Duplicates.");
                 }
                 Para {
                     text: root.mc-running ? @tr("Quit Media Composer first.") : "";
@@ -3698,7 +3727,7 @@ ScrollBox {
                         detail: r.detail;
                         db-done: r.db-done;
                         mc-running: root.mc-running;
-                        db => { if r.kind == 0 { root.rebalance-db(r.index); } else { root.dup-db(r.index); } }
+                        can-rewrite: false;
                         removable: true;
                         remove => { root.forget-run(r.kind, r.index); }
                         undo => { if r.kind == 0 { root.undo-rebalance(r.index); } else { root.undo-dup(r.index); } }
@@ -3711,17 +3740,27 @@ ScrollBox {
         if root.page == Page.notice: VerticalLayout {
             spacing: Metrics.spacing;
             PageHead {
-                title: @tr("Result");
-                CheckButton {
+                title: root.notice-db ? @tr("Old databases set aside") : @tr("Result");
+                if !root.notice-db: CheckButton {
                     text: @tr("Done");
                     primary: true;
                     clicked => { root.back(); }
                 }
+                if root.notice-db: CheckButton {
+                    text: @tr("Have databases rewritten");
+                    primary: true;
+                    clicked => { root.notice-db = false; root.page = Page.maintain; }
+                }
+            }
+            // nach „Alte Datenbanken beiseitelegen“: was geschah, was jetzt zu tun ist (user 2026-11-16)
+            if root.notice-db: Para {
+                text: @tr("The old databases (msmFMID.pmr, msmMMOB.mdb) of the changed folders are now in “MediaFiles Check Database Backups” on the same drive. Folders Media Composer does not update itself have been renamed for a while. Next, under Check DBs › New databases: start Media Composer – it writes new databases for these folders – then quit it and rename the folders back.");
+                color: Theme.text;
             }
             VerticalLayout {
                 spacing: 10px;
                 ScrollBox {
-                    limit: 360px;
+                    limit: root.notice-db ? 260px : 360px;
                     spacing: 10px;
                     for r in root.notice: Text {
                         // room for the scroll bar of the box

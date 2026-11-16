@@ -1947,7 +1947,12 @@ fn show_rebalanced(app: &AppWindow, lang: &str) {
     if moved && let Err(e) = journal.save(&path) {
         log::write(&format!("rebalanced.json not saved: {e}"));
     }
-    let entries = journal.entries;
+    show_rebalanced_entries(app, lang, &journal.entries);
+}
+
+/// History rows from journal entries – also called by the running rebalancing after each group (its own copy,
+/// so the UI never reads rebalanced.json while the run writes it).
+fn show_rebalanced_entries(app: &AppWindow, lang: &str, entries: &[Rebalanced]) {
     app.set_rebalance_pending(entries.iter().filter(|r| !r.db_done).count() as i32);
     let rows: Vec<RunRow> = entries
         .iter()
@@ -2033,6 +2038,7 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
     let (tx, rx) = std::sync::mpsc::channel::<(Vec<(Rebalanced, rebalance::Moved)>, Vec<NoticeRow>)>();
     let mut progress = work_progress(app.as_weak());
     let total: usize = chosen.iter().map(|(p, _)| p.count).sum();
+    let live = app.as_weak();
     std::thread::spawn(move || {
         // one run at a time; released when this thread ends
         let _work = work;
@@ -2051,6 +2057,13 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
                     let res = reserved.entry(p.mxf.clone()).or_insert_with(|| away.iter().filter(|a| a.0 == p.mxf).map(|a| mediafiles_check::key(&a.1)).collect());
                     let result = rebalance::plan(&p.mxf, &p.main, rebalance::per_folder(limit), name.as_deref(), p.mc_folder, res, Some(&mut counted)).and_then(|fresh| rebalance::execute(&fresh, &mut journal, &path));
                     log::write(&format!("rebalance {} (limit {limit}{}): {}", p.mxf.join(&p.main).display(), name.as_ref().map_or(String::new(), |n| format!(", renamed to {n}")), result.as_ref().map_or_else(|e| e.to_string(), |(e, m)| format!("{} moved, {} skipped, folders {:?}", m.moved, m.skipped.len(), e.folders))));
+                    // History in the sidebar grows group by group, not all at the end (user 2026-11-16)
+                    let (w, entries) = (live.clone(), journal.entries.clone());
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(a) = w.upgrade() {
+                            show_rebalanced_entries(&a, &a.get_language(), &entries);
+                        }
+                    });
                     match result {
                         Ok(r) => done.push(r),
                         Err(e) => errors.push(notice(3, &drive_and_folder(&p.mxf.join(&p.main)), &e.to_string(), 0)),
@@ -2068,19 +2081,18 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
         let Some(app) = weak.upgrade() else { return };
         let lang = app.get_language().to_string();
         show_rebalanced(&app, &lang);
-        let mut summary: Vec<String> = vec![];
+        // one list row per group (user 2026-11-16: a long text was unreadable with many folders)
+        let mut summary: Vec<RunRow> = vec![];
         for (r, m) in &done {
-            summary.push(
-                pick(&lang, [
-                    "{folder}: {n} media files moved, {k} rebalanced folders.",
-                    "{folder}: {n} Mediendateien verschoben, {k} rebalanced-Ordner.",
-                    "{folder} : {n} fichiers média déplacés, {k} dossiers rééquilibrés.",
-                    "{folder}: {n} archivos de medios movidos, {k} carpetas reequilibradas.",
-                ])
-                .replace("{folder}", &r.original)
-                .replace("{n}", &m.moved.to_string())
-                .replace("{k}", &r.folders.len().to_string()),
-            );
+            let detail = pick(&lang, [
+                "{n} media files moved · {k} rebalanced folders",
+                "{n} Mediendateien verschoben · {k} rebalanced-Ordner",
+                "{n} fichiers média déplacés · {k} dossiers rééquilibrés",
+                "{n} archivos de medios movidos · {k} carpetas reequilibradas",
+            ])
+            .replace("{n}", &m.moved.to_string())
+            .replace("{k}", &r.folders.len().to_string());
+            summary.push(RunRow { text: drive_and_folder(&r.mxf.join(&r.original)).into(), detail: detail.into(), ..Default::default() });
             if !m.skipped.is_empty() {
                 errors.push(notice(7, &short_list(&m.skipped), "", m.skipped.len()));
             }
@@ -2093,7 +2105,7 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
             app.set_page(Page::Notice);
             return;
         }
-        app.set_rebalance_summary(summary.join("\n").into());
+        app.set_rebalance_summary(ModelRc::new(VecModel::from(summary)));
         app.set_mc_running(media_composer_running());
         app.set_page(Page::Rebalanced);
     });
@@ -3105,6 +3117,44 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    // Rebalancing / Duplicates start page: runs left waiting (Cancel on the done page) – set aside all their databases
+    app.on_rewrite_all({
+        let (weak, renames) = (app.as_weak(), renames.clone());
+        move || {
+            let app = weak.unwrap();
+            if media_composer_running() {
+                app.set_mc_running(true);
+                return;
+            }
+            if renames_open(&renames.borrow()) {
+                log::write("refused: folders still renamed for Media Composer");
+                return;
+            }
+            let mut st = renames.borrow_mut();
+            let mut rows = rewrite_runs(&mut st, |_| true);
+            let path = dup_journal_path();
+            match duplicates::load::<duplicates::Journal>(&path) {
+                Err(e) => rows.push(notice(3, "duplicates.json", &e.to_string(), 0)),
+                Ok(mut journal) => {
+                    for run in journal.entries.iter_mut().filter(|r| !r.db_done) {
+                        rows.extend(rewrite_folders(&mut st, &run.changed));
+                        run.db_done = true;
+                    }
+                    if let Err(e) = duplicates::save(&journal, &path) {
+                        rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
+                    }
+                }
+            }
+            show_renamed(&app, &mut st);
+            let lang = app.get_language().to_string();
+            show_rebalanced(&app, &lang);
+            show_dup_runs(&app, &lang);
+            app.set_notice(ModelRc::new(VecModel::from(rows)));
+            app.set_notice_db(true);
+            app.set_page(Page::Notice);
+        }
+    });
+
     app.on_dup_db({
         let (weak, dups, renames) = (app.as_weak(), dups.clone(), renames.clone());
         move |i| {
@@ -3136,6 +3186,8 @@ fn main() -> Result<(), slint::PlatformError> {
             show_renamed(&app, &mut renames.borrow_mut());
             show_dup_runs(&app, &app.get_language());
             app.set_notice(ModelRc::new(VecModel::from(rows)));
+            // the result page explains the next step and leads to Check DBs › New databases
+            app.set_notice_db(true);
             app.set_page(Page::Notice);
         }
     });
@@ -3343,6 +3395,8 @@ fn main() -> Result<(), slint::PlatformError> {
             show_renamed(&app, &mut st);
             show_rebalanced(&app, &app.get_language());
             app.set_notice(ModelRc::new(VecModel::from(rows)));
+            // the result page explains the next step and leads to Check DBs › New databases
+            app.set_notice_db(true);
             app.set_page(Page::Notice);
         }
     });

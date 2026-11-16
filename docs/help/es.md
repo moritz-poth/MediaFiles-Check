@@ -114,7 +114,7 @@ Una carpeta y sus carpetas reequilibradas (`<nombre>-rebalanced-1`, `-2` …) va
 
 1. Cierra Media Composer (en unidades de red, en cada puesto) y elige los grupos.
 2. Haz clic en **Reequilibrar**. Para una carpeta que crea Media Composer (`1`, `<nombre del equipo>.1`) recomendamos darle antes un nombre propio. No se copia ni se borra nada; una carpeta reequilibrada sin archivos de medios va entera a `MediaFiles Check Database Backups`.
-3. Después hay que reescribir las bases de datos de las carpetas modificadas. **Iniciar** pone sus archivos de base de datos en `MediaFiles Check Database Backups` en la misma unidad y renombra las carpetas que Media Composer no actualiza por sí mismo; sigue en Comprobar BD › Bases nuevas. **Cancelar** deja las bases de datos como están; queda en Tareas e Historial.
+3. Después hay que reescribir las bases de datos de las carpetas modificadas. **Reequilibrado hecho** muestra cada grupo en una lista. **Apartar las bases antiguas** pone sus archivos de base de datos en `MediaFiles Check Database Backups` en la misma unidad y renombra las carpetas que Media Composer no actualiza por sí mismo. La página siguiente explica el paso siguiente; **Hacer reescribir las bases** lleva a Comprobar BD › Bases nuevas. **Cancelar** deja las bases de datos como están; la página Reequilibrado lo indica entonces y ofrece **Apartar las bases antiguas** para cada operación pendiente.
 
 Cada cambio del límite pregunta antes; la siguiente **Buscar carpetas MXF llenas…** vuelve a repartir cada grupo.
 
@@ -128,7 +128,7 @@ El punto verde marca la copia que se queda (la que conoce la base de datos de su
 
 ## Historial
 
-Mantenimiento MXF › **Historial** muestra cada operación de reequilibrado y de duplicados, la más reciente arriba. Una operación cuyas bases aún no se han reescrito lo indica y tiene **Reescribir bases de datos**: aparta las bases de sus carpetas cambiadas, para que Media Composer escriba otras nuevas, y renombra las carpetas que él no actualiza solo (devuélveles el nombre en Comprobar BD › Bases nuevas).
+Mantenimiento MXF › **Historial** muestra cada operación de reequilibrado y de duplicados, la más reciente arriba; durante un reequilibrado, cada grupo terminado aparece al momento. Una operación cuyas bases aún no se han reescrito lo indica.
 
 **Deshacer** lo devuelve todo (nunca encima de un archivo existente); antes devuelve el nombre a las carpetas renombradas. **×** quita una entrada, **Borrar todos…** todas (ambos preguntan antes); en las unidades no cambia nada, pero la operación ya no se puede deshacer.
 

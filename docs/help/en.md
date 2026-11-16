@@ -114,7 +114,7 @@ A folder and its rebalanced folders (`<name>-rebalanced-1`, `-2` …) belong tog
 
 1. Quit Media Composer – on network drives on every workstation – and choose the groups.
 2. Click **Rebalance**. For a folder Media Composer creates itself (`1`, `<computer name>.1`) we recommend giving it a name of its own first. Nothing is copied or deleted; a rebalanced folder left without media files goes into `MediaFiles Check Database Backups` as a whole.
-3. Afterwards the databases of the changed folders have to be rewritten. **Start** puts their database files into `MediaFiles Check Database Backups` on the same drive and renames the folders Media Composer does not update itself; continue under Check DBs › New databases. **Cancel** leaves the databases as they are – it stays in Tasks and History.
+3. Afterwards the databases of the changed folders have to be rewritten. **Rebalanced** lists every group in a list of its own. **Set old databases aside** puts their database files into `MediaFiles Check Database Backups` on the same drive and renames the folders Media Composer does not update itself. The page after it explains the next step; **Have databases rewritten** takes you to Check DBs › New databases. **Cancel** leaves the databases as they are – the Rebalancing page then says so and offers **Set old databases aside** for every waiting run.
 
 Every change of the limit asks first; the next **Find full MXF folders…** lays out every group anew.
 
@@ -128,7 +128,7 @@ The green dot marks the copy that stays (the one its folder's database knows, ot
 
 ## History
 
-Maintain MXFs › **History** lists every rebalancing and duplicates run, newest first. A run whose databases are not rewritten yet says so and has **Rewrite databases**: it puts the databases of its changed folders aside, so Media Composer writes new ones, and renames the folders it does not update itself (rename them back under Check DBs › New databases).
+Maintain MXFs › **History** lists every rebalancing and duplicates run, newest first; it grows group by group while a rebalancing is running. A run whose databases are not rewritten yet says so.
 
 **Undo** moves everything back (never over an existing file) – rename renamed folders back first. **×** removes one entry, **Delete all…** all of them (both ask first); nothing on the drives changes, but the run can then no longer be undone. While a run or an undo is going, its progress shows the folder and file it is working on.
 

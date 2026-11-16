@@ -881,6 +881,27 @@ msgstr "Aucune opération pour l’instant."
 msgid "No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check) or when rebalancing and setting duplicates aside."
 msgstr "Aucun dossier n’est renommé pour l’instant. Les dossiers sont renommés pour Media Composer depuis un résultat (Vérifier) ou lors du rééquilibrage et de la mise de côté de doublons."
 
+msgid "Set old databases aside"
+msgstr "Mettre de côté les anciennes bases"
+
+msgid "Old databases set aside"
+msgstr "Anciennes bases mises de côté"
+
+msgid "Have databases rewritten"
+msgstr "Faire réécrire les bases"
+
+msgid "Cancel leaves the databases as they are – you can set them aside later under Maintain MXFs › Rebalancing."
+msgstr "« Annuler » laisse les bases telles quelles – vous pourrez les mettre de côté plus tard sous Entretien MXF › Rééquilibrage."
+
+msgid "Cancel leaves the databases as they are – you can set them aside later under Maintain MXFs › Duplicates."
+msgstr "« Annuler » laisse les bases telles quelles – vous pourrez les mettre de côté plus tard sous Entretien MXF › Doublons."
+
+msgid "Now the databases of the changed folders have to be rewritten. “Set old databases aside” moves their databases into “MediaFiles Check Database Backups” (Media Composer then writes new ones) and renames the folders Media Composer does not update itself – then go on under Check DBs › New databases."
+msgstr "Il faut maintenant réécrire les bases des dossiers modifiés. « Mettre de côté les anciennes bases » déplace leurs bases dans « MediaFiles Check Database Backups » (Media Composer en écrit alors de nouvelles) et renomme les dossiers que Media Composer ne met pas à jour lui-même – la suite se passe sous Vérifier BD › Nouvelles bases."
+
+msgid "The old databases (msmFMID.pmr, msmMMOB.mdb) of the changed folders are now in “MediaFiles Check Database Backups” on the same drive. Folders Media Composer does not update itself have been renamed for a while. Next, under Check DBs › New databases: start Media Composer – it writes new databases for these folders – then quit it and rename the folders back."
+msgstr "Les anciennes bases (msmFMID.pmr, msmMMOB.mdb) des dossiers modifiés se trouvent maintenant dans « MediaFiles Check Database Backups » sur le même disque. Les dossiers que Media Composer ne met pas à jour lui-même ont été renommés pour un temps. Ensuite, sous Vérifier BD › Nouvelles bases : lancez Media Composer – il écrit de nouvelles bases pour ces dossiers –, puis quittez-le et renommez les dossiers à l’origine."
+
 msgid "Rebalancing"
 msgstr "Rééquilibrage"
 
@@ -895,9 +916,6 @@ msgstr "Bases de données pas encore réécrites"
 
 msgid "Rewrite databases"
 msgstr "Réécrire les bases"
-
-msgid "Cancel leaves the databases as they are – you can start it later under Maintain MXFs › History."
-msgstr "« Annuler » laisse les bases de données telles quelles – vous pouvez le lancer plus tard sous Entretien MXF › Historique."
 
 msgid "New folders get the name of the full folder with “-rebalanced-1”, “-2” … (“Mac Studio.1” becomes “Mac Studio-rebalanced-1”). After a change of the limit, the next “Find full MXF folders…” lays them out anew."
 msgstr "Les nouveaux dossiers prennent le nom du dossier plein suivi de « -rebalanced-1 », « -2 »… (« Mac Studio.1 » devient « Mac Studio-rebalanced-1 »). Après un changement de limite, la prochaine recherche « Chercher les dossiers MXF pleins… » les répartit à nouveau."

@@ -114,7 +114,7 @@ Ein Ordner und seine rebalanced-Ordner (`<Name>-rebalanced-1`, `-2` …) gehöre
 
 1. Media Composer beenden – bei Netzlaufwerken auf jedem Arbeitsplatz – und die Gruppen wählen.
 2. **Rebalancing starten** klicken. Für einen Ordner, den Media Composer selbst anlegt (`1`, `<Rechnername>.1`), empfehlen wir vorher einen eigenen Namen. Nichts wird kopiert oder gelöscht; ein rebalanced-Ordner ohne Mediendateien wandert als Ganzes nach `MediaFiles Check Database Backups`.
-3. Danach müssen die Datenbanken der geänderten Ordner neu geschrieben werden. **Starten** legt ihre Datenbankdateien nach `MediaFiles Check Database Backups` auf demselben Laufwerk und benennt die Ordner um, die Media Composer nicht selbst aktualisiert; weiter unter DBs prüfen › Neue Datenbanken. **Abbrechen** lässt die Datenbanken, wie sie sind – es bleibt in Aufgaben und Verlauf stehen.
+3. Danach müssen die Datenbanken der geänderten Ordner neu geschrieben werden. **Rebalancing erledigt** zeigt jede Gruppe in einer eigenen Liste. **Alte Datenbanken beiseitelegen** legt ihre Datenbankdateien nach `MediaFiles Check Database Backups` auf demselben Laufwerk und benennt die Ordner um, die Media Composer nicht selbst aktualisiert. Die Seite danach erklärt den nächsten Schritt; **Datenbanken neu schreiben lassen** führt zu DBs prüfen › Neue Datenbanken. **Abbrechen** lässt die Datenbanken, wie sie sind – die Seite Rebalancing weist dann darauf hin und bietet **Alte Datenbanken beiseitelegen** für jeden wartenden Lauf an.
 
 Jede Änderung der Grenze fragt vorher nach; das nächste **Volle MXF-Ordner suchen…** verteilt jede Gruppe neu.
 
@@ -128,7 +128,7 @@ Der grüne Punkt zeigt die Kopie, die bleibt (die, die die Datenbank ihres Ordne
 
 ## Verlauf
 
-MXFs pflegen › **Verlauf** listet jeden Lauf von Rebalancing und Duplikaten, neueste zuerst. Steht bei einem Lauf „Datenbanken noch nicht neu geschrieben“, hat er **Datenbanken neu schreiben**: Das legt die Datenbanken seiner geänderten Ordner beiseite, damit Media Composer neue schreibt, und benennt die Ordner um, die Media Composer nicht selbst aktualisiert (zurückbenennen unter DBs prüfen › Neue Datenbanken).
+MXFs pflegen › **Verlauf** listet jeden Lauf von Rebalancing und Duplikaten, neueste zuerst; während eines Rebalancings kommt jede fertige Gruppe sofort dazu. Ein Lauf, dessen Datenbanken noch nicht neu geschrieben sind, sagt das.
 
 **Rückgängig** schiebt alles zurück (nie über eine vorhandene Datei) – umbenannte Ordner vorher zurückbenennen. **×** entfernt einen Eintrag, **Alle löschen…** alle (beides mit Rückfrage); auf den Laufwerken ändert sich nichts, der Lauf lässt sich danach aber nicht mehr rückgängig machen. Während ein Lauf oder ein Rückgängig läuft, zeigt der Fortschritt den Ordner und die Datei, an der er gerade ist.
 
