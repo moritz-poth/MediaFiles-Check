@@ -490,17 +490,16 @@ impl Drop for WorkGuard {
 
 /// Progress of a run on the Working page from its thread: the file being read and how far into its folder
 /// (at most ten updates a second, the last one always).
-/// Progress over the whole run: every call is one file of `total`; shows the time left like a scan.
-fn work_progress(weak: slint::Weak<AppWindow>, total: usize) -> impl FnMut(usize, usize, &str) {
-    let (mut done, mut eta) = (0usize, Eta::default());
-    move |_, _, place| {
-        done += 1;
-        let Some(left) = eta.tick(done.min(total) as u64, total.max(1) as u64) else { return };
-        let (w, text, value) = (weak.clone(), shorten(place, LINE_CHARS), done as f32 / total.max(1) as f32);
+/// Progress of a run: (done, total, place) with the time left, like a scan.
+fn work_progress(weak: slint::Weak<AppWindow>) -> impl FnMut(usize, usize, &str) {
+    let mut eta = Eta::default();
+    move |i, n, place| {
+        let Some(left) = eta.tick((i + 1).min(n) as u64, n.max(1) as u64) else { return };
+        let (w, text, value) = (weak.clone(), shorten(place, LINE_CHARS), ((i + 1) as f32 / n.max(1) as f32).min(1.0));
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(a) = w.upgrade() {
                 a.set_work_text(text.into());
-                a.set_work_value(value.min(1.0));
+                a.set_work_value(value);
                 a.set_work_eta(left);
             }
         });
@@ -2018,11 +2017,17 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
     app.set_work_what(3);
     app.set_page(Page::Working);
     let (tx, rx) = std::sync::mpsc::channel::<(Vec<(Rebalanced, rebalance::Moved)>, Vec<NoticeRow>)>();
-    let mut progress = work_progress(app.as_weak(), chosen.iter().map(|(p, _)| p.count).sum());
+    let mut progress = work_progress(app.as_weak());
+    let total: usize = chosen.iter().map(|(p, _)| p.count).sum();
     std::thread::spawn(move || {
         // one run at a time; released when this thread ends
         let _work = work;
         let (mut done, mut errors) = (vec![], vec![]);
+        let mut read = 0;
+        let mut counted = |_: usize, _: usize, place: &str| {
+            progress(read, total, place);
+            read += 1;
+        };
         let path = rebalance_journal_path();
         match rebalance::Journal::load(&path) {
             Err(e) => errors.push(notice(3, "rebalanced.json", &e.to_string(), 0)),
@@ -2030,7 +2035,7 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
                 let mut reserved: HashMap<PathBuf, HashSet<String>> = HashMap::new();
                 for (p, name) in &chosen {
                     let res = reserved.entry(p.mxf.clone()).or_insert_with(|| away.iter().filter(|a| a.0 == p.mxf).map(|a| mediafiles_check::key(&a.1)).collect());
-                    let result = rebalance::plan(&p.mxf, &p.main, rebalance::per_folder(limit), name.as_deref(), p.mc_folder, res, &mut progress).and_then(|fresh| rebalance::execute(&fresh, &mut journal, &path));
+                    let result = rebalance::plan(&p.mxf, &p.main, rebalance::per_folder(limit), name.as_deref(), p.mc_folder, res, Some(&mut counted)).and_then(|fresh| rebalance::execute(&fresh, &mut journal, &path));
                     log::write(&format!("rebalance {} (limit {limit}{}): {}", p.mxf.join(&p.main).display(), name.as_ref().map_or(String::new(), |n| format!(", renamed to {n}")), result.as_ref().map_or_else(|e| e.to_string(), |(e, m)| format!("{} moved, {} skipped, folders {:?}", m.moved, m.skipped.len(), e.folders))));
                     match result {
                         Ok(r) => done.push(r),
@@ -3190,7 +3195,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // one run at a time; released when this thread ends
                 let _work = work;
                 check_access(&access, &roots, &gate);
-                let mut progress = work_progress(access.clone(), rebalance::mxf_count(&roots));
+                let mut progress = work_progress(access.clone());
                 let _ = tx.send(rebalance::full_folders(&roots, limit, &away, &|mxf, name| is_mc_folder(mxf, name, &computer), &gate, &mut progress));
             });
             let (timer, weak, rebal) = (Rc::new(slint::Timer::default()), weak.clone(), rebal.clone());
@@ -3548,7 +3553,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    // shortcut: polls /Volumes every 2 s on the start page; a hanging network share could stall it – use DiskArbitration if that happens
+    // shortcut: polls /Volumes every 2 s on the start pages (also Scan: drives mounted later appear); a hanging network share could stall it – use DiskArbitration if that happens
     let timer = slint::Timer::default();
     timer.start(slint::TimerMode::Repeated, Duration::from_secs(2), {
         let (weak, drives, renames, task_acts) = (app.as_weak(), drives.clone(), renames.clone(), task_acts.clone());
@@ -3557,7 +3562,7 @@ fn main() -> Result<(), slint::PlatformError> {
             #[cfg(target_os = "macos")]
             mac_menu::ensure();
             match app.get_page() {
-                Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Rewrite | Page::Exchange | Page::Projects | Page::Media => {
+                Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Rewrite | Page::Exchange | Page::Projects | Page::Media | Page::Scan => {
                     sync_drives(&app, &drives);
                     inventory_ui::show_runs(&app);
                     show_renamed(&app, &mut renames.borrow_mut());

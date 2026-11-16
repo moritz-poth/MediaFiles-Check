@@ -2036,8 +2036,10 @@ component ScanPane inherits VerticalLayout {
 
 
     // ── Historie: frühere Scans laden oder löschen ──
+    // feste Breite: sonst folgt die Spalte dem Inhalt und Rand/Knöpfe wandern, sobald die Lade-Rückfrage aufgeht
     if Inventory.scan-view == 1: VerticalLayout {
         spacing: 14px;
+        width: Metrics.content-width;
         height: Metrics.page-height;
         PageHead {
             title: @tr("History");
@@ -2138,6 +2140,7 @@ component ScanPane inherits VerticalLayout {
                             }
                         }
                     }
+                    // Rückfrage in der Zeile; Textbreite = Seite minus Zeilenrand 28, Box 20, Rahmen 2, Scrollleiste 12 + Luft; vorher 52 → Spalte/Fenster wuchs, Knopf verschob sich (user 2026-11-16)
                     if Inventory.load-ask == i: Rectangle {
                         border-radius: 6px;
                         background: Theme.selection;
@@ -2145,23 +2148,31 @@ component ScanPane inherits VerticalLayout {
                             padding: 10px;
                             spacing: 8px;
                             // Volumes oder Projekt nicht erreichbar: erst anschließen, dann laden
-                            if Inventory.load-missing != "": Text {
-                                width: Metrics.content-width - 52px;
-                                text: @tr("Connect these first, then load again: {}", Inventory.load-missing);
-                                wrap: word-wrap;
-                                font-size: 12px;
-                                color: Theme.warning;
+                            // Füller: feste Textbreite würde sonst die ganze Zeile schmal halten
+                            if Inventory.load-missing != "": HorizontalLayout {
+                                Text {
+                                    width: Metrics.content-width - 72px;
+                                    text: @tr("Connect these first, then load again: {}", Inventory.load-missing);
+                                    wrap: word-wrap;
+                                    font-size: 12px;
+                                    color: Theme.warning;
+                                }
+                                Rectangle { }
                             }
                             if Inventory.load-missing != "": HorizontalLayout {
                                 alignment: end;
                                 CheckButton { text: @tr("OK"); small: true; primary: true; clicked => { Inventory.load-ask = -1; } }
                             }
-                            if Inventory.load-missing == "": Text {
-                                width: Metrics.content-width - 52px;
-                                text: @tr("Loading makes this scan the current one for every tab: Media, Project links and the Exchange manifest then show the state of that time (DBs are always checked fresh). Only load it if nothing changed on these volumes and in these projects since – otherwise scan again.");
-                                wrap: word-wrap;
-                                font-size: 12px;
-                                color: Theme.text;
+                            // Füller: feste Textbreite würde sonst die ganze Zeile schmal halten
+                            if Inventory.load-missing == "": HorizontalLayout {
+                                Text {
+                                    width: Metrics.content-width - 72px;
+                                    text: @tr("Loading makes this scan the current one for every tab: Media, Project links and the Exchange manifest then show the state of that time (DBs are always checked fresh). Only load it if nothing changed on these volumes and in these projects since – otherwise scan again.");
+                                    wrap: word-wrap;
+                                    font-size: 12px;
+                                    color: Theme.text;
+                                }
+                                Rectangle { }
                             }
                             if Inventory.load-missing == "": HorizontalLayout {
                                 spacing: 8px;

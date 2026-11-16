@@ -79,13 +79,12 @@ fn subdirs(mxf: &Path) -> Vec<String> {
     v
 }
 
-/// MXF files in all folders of these drives: the total for the progress of `full_folders`.
-pub fn mxf_count(volumes: &[PathBuf]) -> usize {
-    let mxf_files = |d: &Path| fs::read_dir(d).map(|rd| rd.flatten().filter(|e| {
+/// MXF files in a folder, by name only (no metadata, no header).
+fn mxf_names(dir: &Path) -> usize {
+    fs::read_dir(dir).map(|rd| rd.flatten().filter(|e| {
         let n = e.file_name().to_string_lossy().to_lowercase();
         !n.starts_with('.') && n.ends_with(".mxf")
-    }).count()).unwrap_or(0);
-    volumes.iter().map(|v| crate::mxf_dir(v)).map(|mxf| subdirs(&mxf).iter().map(|d| mxf_files(&mxf.join(d))).sum::<usize>()).sum()
+    }).count()).unwrap_or(0)
 }
 
 /// The rebalanced folders of `main` in this MXF folder, by number.
@@ -190,11 +189,13 @@ fn layout(mut files: Vec<(u128, String, String, Option<crate::avb::MobId>)>, per
 }
 
 /// Master clip ID of each MXF file of a folder: from its msmFMID.pmr, else (database set aside) from the file header.
-fn masters(dir: &Path, names: &[String], progress: &mut dyn FnMut(usize, usize, &str)) -> HashMap<String, crate::avb::MobId> {
+/// `progress` None: only what the database lists, no header is read (the search for full folders).
+fn masters(dir: &Path, names: &[String], progress: Option<&mut (dyn FnMut(usize, usize, &str) + '_)>) -> HashMap<String, crate::avb::MobId> {
     let mut out: HashMap<String, crate::avb::MobId> = HashMap::new();
     if let Some(entries) = fs::read(dir.join(crate::PMR)).ok().and_then(|d| crate::read_pmr_entries(&d).ok()) {
         out.extend(entries.into_iter().filter(|e| e.id2 != [0; 32]).map(|e| (key(&e.name), e.id2)));
     }
+    let Some(progress) = progress else { return out };
     let folder = dir.file_name().unwrap_or_default().to_string_lossy().into_owned();
     for (i, n) in names.iter().enumerate() {
         // reading headers is what takes the time (no database or files it does not list)
@@ -210,15 +211,15 @@ fn masters(dir: &Path, names: &[String], progress: &mut dyn FnMut(usize, usize, 
 
 /// Lays out the group of `main` for `per` media files per folder. `reserved` holds folder names (keys) already
 /// planned or in use elsewhere in the same MXF folder (e.g. renamed for Media Composer), so nothing picks them twice.
-/// `progress` gets (file, files of the folder, "folder/file") while headers are read.
-pub fn plan(mxf: &Path, main: &str, per: usize, rename_to: Option<&str>, mc_folder: bool, reserved: &mut HashSet<String>, progress: &mut dyn FnMut(usize, usize, &str)) -> io::Result<Plan> {
+/// `progress` gets (file, files of the folder, "folder/file") while headers are read; None reads none.
+pub fn plan(mxf: &Path, main: &str, per: usize, rename_to: Option<&str>, mc_folder: bool, reserved: &mut HashSet<String>, mut progress: Option<&mut dyn FnMut(usize, usize, &str)>) -> io::Result<Plan> {
     let members = members(mxf, main);
     let mut files = vec![];
     for folder in std::iter::once(main.to_string()).chain(members.iter().cloned()) {
         let dated = mxf_dated(&mxf.join(&folder))?;
         let names: Vec<String> = dated.iter().map(|d| d.1.clone()).collect();
         // all in one folder (undo): which clip a file belongs to does not matter, no header is read
-        let master = if per == usize::MAX { HashMap::new() } else { masters(&mxf.join(&folder), &names, progress) };
+        let master = if per == usize::MAX { HashMap::new() } else { masters(&mxf.join(&folder), &names, progress.as_deref_mut()) };
         files.extend(dated.into_iter().map(|(t, n)| {
             let m = master.get(&key(&n)).copied();
             (t, n, folder.clone(), m)
@@ -277,27 +278,46 @@ pub fn plan(mxf: &Path, main: &str, per: usize, rename_to: Option<&str>, mc_fold
 /// `gate`: an incomplete list the caller throws away.
 pub fn full_folders(volumes: &[PathBuf], limit: usize, renamed: &[(PathBuf, String)], is_mc: &dyn Fn(&Path, &str) -> bool, gate: &crate::Gate, progress: &mut dyn FnMut(usize, usize, &str)) -> Vec<Plan> {
     let per = per_folder(limit);
-    let mut plans = vec![];
+    // first by counting names only: a lone folder within the limit never moves, its headers are not read (user 2026-11-16: too slow)
+    let mut work = vec![];
     for v in volumes {
         let mxf = crate::mxf_dir(v);
         let dirs = subdirs(&mxf);
-        let away: Vec<&String> = renamed.iter().filter(|r| r.0 == mxf).map(|r| &r.1).collect();
-        let mut reserved: HashSet<String> = away.iter().map(|n| key(n)).collect();
-        let bases: HashSet<String> = dirs.iter().chain(away.iter().copied()).filter(|d| member_of(d).is_none()).map(|d| key(base_name(d))).collect();
+        let away: Vec<String> = renamed.iter().filter(|r| r.0 == mxf).map(|r| r.1.clone()).collect();
+        let bases: HashSet<String> = dirs.iter().chain(away.iter()).filter(|d| member_of(d).is_none()).map(|d| key(base_name(d))).collect();
         // a rebalanced folder whose main folder exists belongs to that group; one without stands for itself
-        let mains: Vec<&String> = dirs.iter().filter(|d| member_of(d).is_none_or(|(b, _)| !bases.contains(&key(b)))).collect();
         let mut seen: HashSet<String> = HashSet::new();
-        for main in mains {
-            if gate.cancelled() {
-                return plans;
-            }
+        let mut mains = vec![];
+        for main in dirs.iter().filter(|d| member_of(d).is_none_or(|(b, _)| !bases.contains(&key(b)))) {
             // "Mac Studio" and "Mac Studio.1" would share their rebalanced folders: only the first takes them
             if !seen.insert(key(base_name(main))) {
                 continue;
             }
-            let Ok(mut p) = plan(&mxf, main, per, None, is_mc(&mxf, main), &mut reserved, progress) else { continue };
             let base = key(base_name(main));
-            p.blocked = away.iter().any(|a| key(base_name(a)) == base || member_of(a).is_some_and(|(b, _)| key(b) == base));
+            let blocked = away.iter().any(|a| key(base_name(a)) == base || member_of(a).is_some_and(|(b, _)| key(b) == base));
+            let members = members(&mxf, main);
+            let files = mxf_names(&mxf.join(main)) + members.iter().map(|m| mxf_names(&mxf.join(m))).sum::<usize>();
+            if members.is_empty() && !blocked && files <= per {
+                continue;
+            }
+            mains.push((main.clone(), blocked, files));
+        }
+        work.push((mxf, away, mains));
+    }
+    let total: usize = work.iter().map(|w| w.2.len()).sum();
+    let mut done = 0;
+    let mut plans = vec![];
+    for (mxf, away, mains) in work {
+        let mut reserved: HashSet<String> = away.iter().map(|n| key(n)).collect();
+        for (main, blocked, _) in mains {
+            if gate.cancelled() {
+                return plans;
+            }
+            progress(done, total, &main);
+            done += 1;
+            // the clips come from the database only; the run itself reads the headers (user 2026-11-16)
+            let Ok(mut p) = plan(&mxf, &main, per, None, is_mc(&mxf, &main), &mut reserved, None) else { continue };
+            p.blocked = blocked;
             if p.needed() {
                 plans.push(p);
             }
@@ -599,7 +619,7 @@ pub fn undo(r: &Rebalanced) -> io::Result<Undone> {
     if let Some(name) = r.rebalanced_folders().iter().find(|n| !r.mxf.join(n).is_dir()) {
         return Err(io::Error::new(io::ErrorKind::NotFound, format!("{name} not found – if it is renamed for Media Composer, rename it back first")));
     }
-    let p = plan(&r.mxf, &r.original, usize::MAX, None, false, &mut HashSet::new(), &mut |_, _, _| {})?;
+    let p = plan(&r.mxf, &r.original, usize::MAX, None, false, &mut HashSet::new(), None)?;
     let m = apply(&p)?;
     let mut out = Undone { moved_back: m.moved, skipped: m.skipped, kept: m.kept, renamed_back: None };
     set_aside_database(&main)?;
@@ -683,21 +703,21 @@ mod tests {
         let jp = mxf.join("../../rebalanced.json");
         let mut j = Journal::default();
         // limit 52: the oldest 50 into 1-rebalanced-1, 5 stay
-        let p = plan(&mxf, "1", per_folder(52), None, true, &mut HashSet::new(), &mut |_, _, _| {}).unwrap();
+        let p = plan(&mxf, "1", per_folder(52), None, true, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap();
         assert_eq!((p.folders.clone(), p.stays), (vec![("1-rebalanced-1".to_string(), 50)], 5));
         execute(&p, &mut j, &jp).unwrap();
         assert_eq!(files(&mxf.join("1-rebalanced-1"))[0], "f00.mxf");
         assert_eq!(files(&dir), ["f50.mxf", "f51.mxf", "f52.mxf", "f53.mxf", "f54.mxf"]);
         // same limit again: nothing to do
-        assert!(!plan(&mxf, "1", 50, None, true, &mut HashSet::new(), &mut |_, _, _| {}).unwrap().needed());
+        assert!(!plan(&mxf, "1", 50, None, true, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap().needed());
         // lower limit: the 5 youngest of rebalanced-1 go back, nothing else moves
-        let p = plan(&mxf, "1", 45, None, true, &mut HashSet::new(), &mut |_, _, _| {}).unwrap();
+        let p = plan(&mxf, "1", 45, None, true, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap();
         assert_eq!(p.moves.len(), 5);
         assert!(p.moves.iter().all(|m| m.from == "1-rebalanced-1" && m.to == "1"));
         execute(&p, &mut j, &jp).unwrap();
         assert_eq!((count(&mxf.join("1-rebalanced-1")), count(&dir)), (45, 10));
         // much lower: 10 per folder, oldest first
-        let p = plan(&mxf, "1", 10, None, true, &mut HashSet::new(), &mut |_, _, _| {}).unwrap();
+        let p = plan(&mxf, "1", 10, None, true, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap();
         assert_eq!(p.folders.iter().map(|f| f.0.as_str()).collect::<Vec<_>>(), ["1-rebalanced-1", "1-rebalanced-2", "1-rebalanced-3", "1-rebalanced-4", "1-rebalanced-5"]);
         execute(&p, &mut j, &jp).unwrap();
         assert_eq!(files(&mxf.join("1-rebalanced-2"))[0], "f10.mxf");
@@ -708,7 +728,7 @@ mod tests {
         fs::create_dir(mxf.join("1-rebalanced-5/Creating")).unwrap();
         fs::write(mxf.join("1-rebalanced-5/.DS_Store"), b"").unwrap();
         fs::write(mxf.join("1-rebalanced-4/notes.txt"), b"mine").unwrap(); // not a leftover: kept
-        let p = plan(&mxf, "1", 30, None, true, &mut HashSet::new(), &mut |_, _, _| {}).unwrap();
+        let p = plan(&mxf, "1", 30, None, true, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap();
         assert_eq!(p.emptied, ["1-rebalanced-2", "1-rebalanced-3", "1-rebalanced-4", "1-rebalanced-5"]);
         let (e, m) = execute(&p, &mut j, &jp).unwrap();
         assert!(m.kept == ["1-rebalanced-4"] && m.skipped.is_empty());
@@ -733,7 +753,7 @@ mod tests {
         let mxf = dir.parent().unwrap().to_path_buf();
         let jp = mxf.join("../../rebalanced.json");
         let mut j = Journal::default();
-        let p = plan(&mxf, "1", 5, None, true, &mut HashSet::new(), &mut |_, _, _| {}).unwrap();
+        let p = plan(&mxf, "1", 5, None, true, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap();
         execute(&p, &mut j, &jp).unwrap();
         fs::create_dir(mxf.join("Taken")).unwrap();
         let none = HashSet::new();
@@ -744,7 +764,7 @@ mod tests {
         assert_eq!(check_name(&mxf, "", false, &none), Some(NameProblem::Empty));
         assert_eq!(check_name(&mxf, "Projekt", false, &none), None);
         // renamed: the main folder gets the name, the old rebalanced folders are folded into the new group
-        let p = plan(&mxf, "1", 5, Some("Projekt"), true, &mut HashSet::new(), &mut |_, _, _| {}).unwrap();
+        let p = plan(&mxf, "1", 5, Some("Projekt"), true, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap();
         assert_eq!(p.folders.iter().map(|f| f.0.as_str()).collect::<Vec<_>>(), ["Projekt-rebalanced-1", "Projekt-rebalanced-2"]);
         assert_eq!(p.emptied, ["1-rebalanced-1", "1-rebalanced-2"]);
         let (e, _) = execute(&p, &mut j, &jp).unwrap();
@@ -775,7 +795,7 @@ mod tests {
         assert!(full_folders(std::slice::from_ref(&drive), 12, &[], &|_, _| false, &crate::Gate::default(), &mut |_, _, _| {}).iter().all(|p| p.moves.is_empty()));
         // same file name in the target already: left where it is
         fs::write(mxf.join("Mac Studio-rebalanced-1/f00.mxf"), b"other").unwrap();
-        let p = plan(&mxf, "Mac Studio.1", 4, None, false, &mut HashSet::new(), &mut |_, _, _| {}).unwrap();
+        let p = plan(&mxf, "Mac Studio.1", 4, None, false, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap();
         let mut j = Journal::default();
         let (_, m) = execute(&p, &mut j, &mxf.join("../../j.json")).unwrap();
         assert!(m.skipped.contains(&"f00.mxf".to_string()));
