@@ -151,7 +151,17 @@ fn load(dest: &Path) -> io::Result<Delivery> {
     if d.format != DELIVERY_FORMAT {
         return Err(not_delivery());
     }
+    // the delivery comes from another system: every path must be exactly "volume/folder/file", nothing that
+    // leads out of the delivery or out of the target MXF folder
+    if let Some(bad) = d.files.iter().find(|f| !safe_path(&f.path)) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}: invalid path in the delivery", bad.path)));
+    }
     Ok(d)
+}
+
+fn safe_path(p: &str) -> bool {
+    let parts: Vec<&str> = p.split('/').collect();
+    parts.len() == 3 && parts.iter().all(|x| !x.is_empty() && *x != "." && *x != ".." && !x.contains('\\') && !x.contains('\0'))
 }
 
 /// Lieferung lesen, ohne etwas zu prüfen (für die Übersicht vor dem Einspielen).
@@ -487,5 +497,21 @@ mod tests {
         fs::write(dir.join("ferry-lieferung.json"), serde_json::to_vec(&d).unwrap()).unwrap();
         assert_eq!(load_delivery(&dir).unwrap().from, "A");
         assert!(load_delivery(&tmp("empty")).is_err());
+    }
+
+    #[test]
+    fn delivery_paths_must_stay_inside() {
+        for ok in ["V/1/a.mxf", "V/Mac Studio_1/msmFMID.pmr"] {
+            assert!(safe_path(ok), "{ok}");
+        }
+        for bad in ["../x/a.mxf", "V/../a.mxf", "V/1/../../a", "/V/1/a.mxf", "V/1/sub/a.mxf", "V//a.mxf", "V/1/.", "V/1", "V\\1/x/a"] {
+            assert!(!safe_path(bad), "{bad}");
+        }
+        let dir = std::env::temp_dir().join(format!("mfc-delivery-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let d = Delivery { format: DELIVERY_FORMAT.into(), from: "A".into(), to: "B".into(), created: 0, files: vec![Delivered { path: "V/../../evil".into(), size: 1, hash: "x".into() }], db_folders: Default::default(), tasks: vec![] };
+        fs::write(dir.join(DELIVERY_FILE), serde_json::to_vec(&d).unwrap()).unwrap();
+        assert!(load(&dir).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 }
