@@ -8,6 +8,33 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+msgid "No databases are waiting. After rebalancing or setting duplicates aside, the changed folders show here."
+msgstr "Keine Datenbanken warten. Nach einem Rebalancing oder dem Beiseitelegen von Duplikaten stehen die geänderten Ordner hier."
+
+msgid "UNDOING THE REBALANCING"
+msgstr "MACHE DAS REBALANCING RÜCKGÄNGIG"
+
+msgid "{n} run is waiting for new databases."
+msgid_plural "{n} runs are waiting for new databases."
+msgstr[0] "{n} Rebalancing wartet auf neue Datenbanken."
+msgstr[1] "{n} Rebalancings warten auf neue Datenbanken."
+
+msgid "Rewrite DBs"
+msgstr "DBs neu schreiben"
+
+msgid "Rebalancing and setting duplicates aside changed these folders, so their databases no longer fit. Start puts their msmFMID.pmr and msmMMOB.mdb into “MediaFiles Check Database Backups” on the same drive, so Media Composer writes new ones the next time it starts. Folders Media Composer does not update itself are renamed for it – rename them back afterwards under Check DBs › New databases."
+msgstr "Rebalancing und Beiseitelegen von Duplikaten haben diese Ordner verändert, ihre Datenbanken passen nicht mehr. Starten legt ihre msmFMID.pmr und msmMMOB.mdb nach „MediaFiles Check Database Backups“ auf demselben Laufwerk, damit Media Composer beim nächsten Start neue schreibt. Ordner, die Media Composer nicht selbst aktualisiert, werden dafür umbenannt – danach unter DBs prüfen › Neue Datenbanken zurückbenennen."
+
+msgid "{n} run waiting"
+msgid_plural "{n} runs waiting"
+msgstr[0] "{n} Lauf wartet"
+msgstr[1] "{n} Läufe warten"
+
+msgid "Remove all {n} entry from the History? Nothing on the drives changes; they can no longer be undone."
+msgid_plural "Remove all {n} entries from the History? Nothing on the drives changes; they can no longer be undone."
+msgstr[0] "Den {n} Eintrag aus dem Verlauf entfernen? Auf den Laufwerken ändert sich nichts; er lässt sich danach nicht mehr rückgängig machen."
+msgstr[1] "Alle {n} Einträge aus dem Verlauf entfernen? Auf den Laufwerken ändert sich nichts; sie lassen sich danach nicht mehr rückgängig machen."
+
 msgid "REWRITE DATABASES WITH MEDIA COMPOSER"
 msgstr "DATENBANKEN MIT MEDIA COMPOSER NEU SCHREIBEN"
 
@@ -895,11 +922,6 @@ msgstr "Datenbanken neu schreiben"
 
 msgid "Cancel leaves the databases as they are – you can start it later under Maintain MXFs › History."
 msgstr "„Abbrechen“ lässt die Datenbanken, wie sie sind – starten kannst du es später unter MXFs pflegen › Verlauf."
-
-msgid "{n} run is waiting for new databases (History)."
-msgid_plural "{n} runs are waiting for new databases (History)."
-msgstr[0] "{n} Rebalancing wartet auf neue Datenbanken (Verlauf)."
-msgstr[1] "{n} Rebalancings warten auf neue Datenbanken (Verlauf)."
 
 msgid "New folders get the name of the full folder with “-rebalanced-1”, “-2” … (“Mac Studio.1” becomes “Mac Studio-rebalanced-1”). After a change of the limit, the next “Find full folders…” lays them out anew."
 msgstr "Neue Ordner heißen wie der volle Ordner mit „-rebalanced-1“, „-2“ … („Mac Studio.1“ wird zu „Mac Studio-rebalanced-1“). Nach einer Änderung der Grenze verteilt das nächste „Volle Ordner suchen…“ sie neu."

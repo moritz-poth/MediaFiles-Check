@@ -128,7 +128,9 @@ Le point vert marque la copie qui reste (celle que connaît la base de son dossi
 
 ## Historique
 
-Entretien MXF › **Historique** liste chaque opération de rééquilibrage et de doublons : **Réécrire les bases** fait l’étape des bases plus tard, **Annuler** remet tout en place (jamais par-dessus un fichier existant) – renommez d’abord à l’origine les dossiers renommés.
+Entretien MXF › **Réécrire les BD** liste chaque opération dont les bases ne sont pas encore réécrites. **Lancer** met de côté les bases de tous les dossiers modifiés, pour que Media Composer en écrive de nouvelles, et renomme les dossiers qu’il ne met pas à jour lui-même (à renommer à l’origine sous Vérifier BD › Nouvelles bases).
+
+Entretien MXF › **Historique** liste chaque opération de rééquilibrage et de doublons, la plus récente en haut. **Annuler** remet tout en place (jamais par-dessus un fichier existant) – renommez d’abord les dossiers renommés à l’origine. **×** retire une entrée, **Tout supprimer…** toutes (après confirmation) ; rien ne change sur les disques, mais l’opération ne peut plus être annulée.
 
 ## Liens de projet
 

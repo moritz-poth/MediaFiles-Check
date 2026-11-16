@@ -128,7 +128,9 @@ El punto verde marca la copia que se queda (la que conoce la base de datos de su
 
 ## Historial
 
-Mantenimiento MXF › **Historial** muestra cada operación de reequilibrado y de duplicados: **Reescribir bases de datos** hace el paso de las bases más tarde, **Deshacer** lo devuelve todo (nunca sobre un archivo existente); recupera antes el nombre de las carpetas renombradas.
+Mantenimiento MXF › **Reescribir BD** muestra cada operación cuyas bases aún no se han reescrito. **Iniciar** aparta las bases de todas las carpetas cambiadas, para que Media Composer escriba otras nuevas, y renombra las carpetas que él no actualiza solo (devuélveles el nombre en Comprobar BD › Bases nuevas).
+
+Mantenimiento MXF › **Historial** muestra cada operación de reequilibrado y de duplicados, la más reciente arriba. **Deshacer** lo devuelve todo (nunca encima de un archivo existente); antes devuelve el nombre a las carpetas renombradas. **×** quita una entrada, **Borrar todos…** todas (pregunta antes); en las unidades no cambia nada, pero la operación ya no se puede deshacer.
 
 ## Vínculos de proyecto
 

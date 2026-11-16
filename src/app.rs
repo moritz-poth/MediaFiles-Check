@@ -474,6 +474,49 @@ fn gate(at: ScanAt) -> Arc<Gate> {
     GATES.with(|x| x.borrow()[at as usize].clone())
 }
 
+/// Only one run on the Working page at a time (user test 2026-11-16: two rebalancing runs at once moved files
+/// away from each other and lost a History entry). Held by the run's thread, released when it ends.
+static WORK_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+struct WorkGuard(slint::Weak<AppWindow>);
+
+impl Drop for WorkGuard {
+    fn drop(&mut self) {
+        WORK_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+        let w = self.0.clone();
+        let _ = slint::invoke_from_event_loop(move || w.upgrade().into_iter().for_each(|a| a.set_work_busy(false)));
+    }
+}
+
+/// Progress of a run on the Working page from its thread: the file being read and how far into its folder
+/// (at most ten updates a second, the last one always).
+fn work_progress(weak: slint::Weak<AppWindow>) -> impl FnMut(usize, usize, &str) {
+    let mut last = std::time::Instant::now() - Duration::from_secs(1);
+    move |i, n, place| {
+        if last.elapsed() < Duration::from_millis(100) && i + 1 < n {
+            return;
+        }
+        last = std::time::Instant::now();
+        let (w, text, value) = (weak.clone(), shorten(place, LINE_CHARS), (i + 1) as f32 / n.max(1) as f32);
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(a) = w.upgrade() {
+                a.set_work_text(text.into());
+                a.set_work_value(value);
+            }
+        });
+    }
+}
+
+fn begin_work(app: &AppWindow) -> Option<WorkGuard> {
+    if WORK_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        log::write("refused: another run is still going");
+        app.set_page(Page::Working);
+        return None;
+    }
+    app.set_work_busy(true);
+    Some(WorkGuard(app.as_weak()))
+}
+
 /// Shows Pause/Cancel on Check's Working page for a scan and returns its gate.
 fn work_gate(app: &AppWindow) -> Arc<Gate> {
     app.set_work_paused(false);
@@ -1278,11 +1321,14 @@ fn start_check(app: &AppWindow, roots: Vec<PathBuf>, last: Last) {
     app.set_work_value(0.0);
     app.set_work_text("".into());
     app.set_work_eta(-1);
+    let Some(work) = begin_work(&app) else { return };
     app.set_work_what(0);
     app.set_page(Page::Working);
     let (weak, gate) = (app.as_weak(), work_gate(app));
     log::write(&format!("check {}", roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ")));
     std::thread::spawn(move || {
+        // one run at a time; released when this thread ends
+        let _work = work;
         check_access(&weak, &roots, &gate);
         let (progress, mut eta) = (weak.clone(), Eta::default());
         let reports = check(&roots, &mut |i, n, place| {
@@ -1891,7 +1937,8 @@ fn show_rebalanced(app: &AppWindow, lang: &str) {
     app.set_rebalance_pending(entries.iter().filter(|r| !r.db_done).count() as i32);
     let rows: Vec<RunRow> = entries
         .iter()
-        .map(|r| {
+        .enumerate()
+        .map(|(i, r)| {
             let mut text = pick(lang, [
                 "{folder} → {k} rebalanced folders, {n} files moved",
                 "{folder} → {k} rebalanced-Ordner, {n} Dateien verschoben",
@@ -1905,10 +1952,36 @@ fn show_rebalanced(app: &AppWindow, lang: &str) {
                 text += &pick(lang, [" (was {})", " (war {})", " (avant : {})", " (antes {})"]).replace("{}", old);
             }
             let detail = pick(lang, ["Rebalancing · {}", "Rebalancing · {}", "Rééquilibrage · {}", "Reequilibrado · {}"]).replace("{}", &r.date);
-            RunRow { text: text.into(), detail: detail.into(), db_done: r.db_done }
+            RunRow { text: text.into(), detail: detail.into(), db_done: r.db_done, kind: 0, index: i as i32, date: r.date.clone().into() }
         })
         .collect();
     app.set_rebalanced(ModelRc::new(VecModel::from(rows)));
+    show_history(app);
+}
+
+/// Maintain › History: rebalancing and duplicate runs together, newest first (user 2026-11-16).
+fn show_history(app: &AppWindow) {
+    let mut rows: Vec<RunRow> = app.get_rebalanced().iter().chain(app.get_dup_runs().iter()).collect();
+    rows.sort_by(|a, b| b.date.cmp(&a.date));
+    app.set_history(ModelRc::new(VecModel::from(rows)));
+}
+
+/// Removes a run from its journal without undoing it (× in the History; kind 0 rebalancing, 1 duplicates;
+/// index -1 = all of both).
+fn forget_runs(kind: i32, index: i32) -> Result<(), String> {
+    let (rp, dp) = (rebalance_journal_path(), dup_journal_path());
+    if kind == 0 || index < 0 {
+        let mut j = rebalance::Journal::load(&rp).map_err(|e| e.to_string())?;
+        if index < 0 { j.entries.clear() } else if (index as usize) < j.entries.len() { j.entries.remove(index as usize); }
+        j.save(&rp).map_err(|e| e.to_string())?;
+    }
+    if kind == 1 || index < 0 {
+        let mut j: duplicates::Journal = duplicates::load(&dp).map_err(|e| e.to_string())?;
+        if index < 0 { j.entries.clear() } else if (index as usize) < j.entries.len() { j.entries.remove(index as usize); }
+        duplicates::save(&j, &dp).map_err(|e| e.to_string())?;
+    }
+    log::write(&format!("history: removed {}", if index < 0 { "all".to_string() } else { format!("{kind}/{index}") }));
+    Ok(())
 }
 
 /// Next Media Composer folder to ask about (rename it first?), or run the rebalancing when all are answered.
@@ -1940,10 +2013,14 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
     let away = renamed_away(&renames.borrow());
     app.set_work_value(0.0);
     app.set_work_text("".into());
+    let Some(work) = begin_work(&app) else { return };
     app.set_work_what(3);
     app.set_page(Page::Working);
     let (tx, rx) = std::sync::mpsc::channel::<(Vec<(Rebalanced, rebalance::Moved)>, Vec<NoticeRow>)>();
+    let mut progress = work_progress(app.as_weak());
     std::thread::spawn(move || {
+        // one run at a time; released when this thread ends
+        let _work = work;
         let (mut done, mut errors) = (vec![], vec![]);
         let path = rebalance_journal_path();
         match rebalance::Journal::load(&path) {
@@ -1952,7 +2029,7 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
                 let mut reserved: HashMap<PathBuf, HashSet<String>> = HashMap::new();
                 for (p, name) in &chosen {
                     let res = reserved.entry(p.mxf.clone()).or_insert_with(|| away.iter().filter(|a| a.0 == p.mxf).map(|a| mediafiles_check::key(&a.1)).collect());
-                    let result = rebalance::plan(&p.mxf, &p.main, rebalance::per_folder(limit), name.as_deref(), p.mc_folder, res).and_then(|fresh| rebalance::execute(&fresh, &mut journal, &path));
+                    let result = rebalance::plan(&p.mxf, &p.main, rebalance::per_folder(limit), name.as_deref(), p.mc_folder, res, &mut progress).and_then(|fresh| rebalance::execute(&fresh, &mut journal, &path));
                     log::write(&format!("rebalance {} (limit {limit}{}): {}", p.mxf.join(&p.main).display(), name.as_ref().map_or(String::new(), |n| format!(", renamed to {n}")), result.as_ref().map_or_else(|e| e.to_string(), |(e, m)| format!("{} moved, {} skipped, folders {:?}", m.moved, m.skipped.len(), e.folders))));
                     match result {
                         Ok(r) => done.push(r),
@@ -2110,15 +2187,17 @@ fn show_dup_runs(app: &AppWindow, lang: &str) {
     let rows: Vec<RunRow> = runs
         .entries
         .iter()
-        .map(|r| {
+        .enumerate()
+        .map(|(i, r)| {
             let text = pick(lang, ["{n} copies set aside ({size})", "{n} Kopien zur Seite gelegt ({size})", "{n} copies mises de côté ({size})", "{n} copias apartadas ({size})"])
                 .replace("{n}", &r.moved.len().to_string())
                 .replace("{size}", &size_text(r.bytes()));
             let detail = pick(lang, ["Duplicates · {}", "Duplikate · {}", "Doublons · {}", "Duplicados · {}"]).replace("{}", &r.date);
-            RunRow { text: text.into(), detail: detail.into(), db_done: r.db_done }
+            RunRow { text: text.into(), detail: detail.into(), db_done: r.db_done, kind: 1, index: i as i32, date: r.date.clone().into() }
         })
         .collect();
     app.set_dup_runs(ModelRc::new(VecModel::from(rows)));
+    show_history(app);
 }
 
 /// Sets the databases of these folders aside and renames those Media Composer does not update itself.
@@ -2789,6 +2868,7 @@ fn main() -> Result<(), slint::PlatformError> {
             app.set_work_value(0.0);
             app.set_work_text("".into());
             app.set_work_eta(-1);
+            let Some(work) = begin_work(&app) else { return };
             app.set_work_what(1);
             app.set_page(Page::Working);
             log::write(&format!("duplicates: looking through {}", roots.iter().map(|r| r.display().to_string()).collect::<Vec<_>>().join(", ")));
@@ -2796,6 +2876,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let (progress, gate) = (app.as_weak(), work_gate(&app));
             let cancelled = gate.clone();
             std::thread::spawn(move || {
+                // one run at a time; released when this thread ends
+                let _work = work;
                 check_access(&progress, &roots, &gate);
                 let mut eta = Eta::default();
                 let found = duplicates::find(&roots, &mut |i, n, place| {
@@ -2893,10 +2975,13 @@ fn main() -> Result<(), slint::PlatformError> {
             };
             app.set_work_value(0.0);
             app.set_work_text("".into());
+            let Some(work) = begin_work(&app) else { return };
             app.set_work_what(4);
             app.set_page(Page::Working);
             let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<(duplicates::Run, duplicates::Moved)>>();
             std::thread::spawn(move || {
+                // one run at a time; released when this thread ends
+                let _work = work;
                 let _ = tx.send(duplicates::set_aside(&copies, &dup_journal_path()));
             });
             let (timer, weak, dups) = (Rc::new(slint::Timer::default()), weak.clone(), dups.clone());
@@ -2938,6 +3023,57 @@ fn main() -> Result<(), slint::PlatformError> {
     });
 
     // "Start" (-1 = the run just done) or "Rewrite databases" of one History entry
+    app.on_forget_run({
+        let weak = app.as_weak();
+        move |kind, index| {
+            let app = weak.unwrap();
+            if let Err(e) = forget_runs(kind, index) {
+                app.set_notice(ModelRc::new(VecModel::from(vec![notice(3, "History", &e, 0)])));
+                app.set_page(Page::Notice);
+            }
+            let lang = app.get_language().to_string();
+            show_rebalanced(&app, &lang);
+            show_dup_runs(&app, &lang);
+        }
+    });
+
+    // Maintain › Rewrite databases: every run whose databases are not rewritten yet, in one go
+    app.on_rewrite_all({
+        let (weak, renames) = (app.as_weak(), renames.clone());
+        move || {
+            let app = weak.unwrap();
+            if media_composer_running() {
+                app.set_mc_running(true);
+                return;
+            }
+            if renames_open(&renames.borrow()) {
+                log::write("refused: folders still renamed for Media Composer");
+                return;
+            }
+            let mut st = renames.borrow_mut();
+            let mut rows = rewrite_runs(&mut st, |_| true);
+            let path = dup_journal_path();
+            match duplicates::load::<duplicates::Journal>(&path) {
+                Err(e) => rows.push(notice(3, "duplicates.json", &e.to_string(), 0)),
+                Ok(mut journal) => {
+                    for run in journal.entries.iter_mut().filter(|r| !r.db_done) {
+                        rows.extend(rewrite_folders(&mut st, &run.changed));
+                        run.db_done = true;
+                    }
+                    if let Err(e) = duplicates::save(&journal, &path) {
+                        rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
+                    }
+                }
+            }
+            show_renamed(&app, &mut st);
+            let lang = app.get_language().to_string();
+            show_rebalanced(&app, &lang);
+            show_dup_runs(&app, &lang);
+            app.set_notice(ModelRc::new(VecModel::from(rows)));
+            app.set_page(Page::Notice);
+        }
+    });
+
     app.on_dup_db({
         let (weak, dups, renames) = (app.as_weak(), dups.clone(), renames.clone());
         move |i| {
@@ -3042,6 +3178,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let (away, computer) = { let st = renames.borrow(); (renamed_away(&st), st.computer.clone()) };
             app.set_work_value(0.0);
             app.set_work_text("".into());
+            let Some(work) = begin_work(&app) else { return };
             app.set_work_what(2);
             app.set_page(Page::Working);
             log::write(&format!("rebalance: looking for groups that do not match {limit} files"));
@@ -3049,8 +3186,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let (gate, access) = (work_gate(&app), app.as_weak());
             let cancelled = gate.clone();
             std::thread::spawn(move || {
+                // one run at a time; released when this thread ends
+                let _work = work;
                 check_access(&access, &roots, &gate);
-                let _ = tx.send(rebalance::full_folders(&roots, limit, &away, &|mxf, name| is_mc_folder(mxf, name, &computer), &gate));
+                let mut progress = work_progress(access.clone());
+                let _ = tx.send(rebalance::full_folders(&roots, limit, &away, &|mxf, name| is_mc_folder(mxf, name, &computer), &gate, &mut progress));
             });
             let (timer, weak, rebal) = (Rc::new(slint::Timer::default()), weak.clone(), rebal.clone());
             let t = timer.clone();
@@ -3185,45 +3325,74 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             let path = rebalance_journal_path();
-            let mut journal = match rebalance::Journal::load(&path) {
-                Ok(j) => j,
+            let entry = match rebalance::Journal::load(&path) {
+                Ok(j) => j.entries.get(i as usize).cloned(),
                 Err(e) => {
                     app.set_notice(ModelRc::new(VecModel::from(vec![notice(3, "rebalanced.json", &e.to_string(), 0)])));
                     app.set_page(Page::Notice);
                     return;
                 }
             };
-            let Some(entry) = journal.entries.get(i as usize).cloned() else { return };
-            let main = entry.mxf.join(&entry.original);
-            let mut rows = vec![];
-            match rebalance::undo(&entry) {
-                Ok(u) => {
-                    log::write(&format!("undo rebalance of {}: {} back, {} skipped, kept {:?}, renamed back {:?}", main.display(), u.moved_back, u.skipped.len(), u.kept, u.renamed_back));
-                    rows.push(notice(5, &entry.original, "", u.moved_back));
-                    if !u.skipped.is_empty() {
-                        rows.push(notice(7, &short_list(&u.skipped), "", u.skipped.len()));
+            let Some(entry) = entry else { return };
+            // moving thousands of files back takes a while: in a thread, never on the window's (user test 2026-11-16)
+            let Some(work) = begin_work(&app) else { return };
+            app.set_work_value(0.0);
+            app.set_work_text(drive_and_folder(&entry.mxf.join(&entry.original)).into());
+            app.set_work_eta(-1);
+            app.set_work_can_pause(false);
+            app.set_work_what(5);
+            app.set_page(Page::Working);
+            let (tx, rx) = std::sync::mpsc::channel();
+            let run = entry.clone();
+            std::thread::spawn(move || {
+                let _work = work;
+                let _ = tx.send(rebalance::undo(&run));
+            });
+            let (timer, weak, renames) = (Rc::new(slint::Timer::default()), weak.clone(), renames.clone());
+            let t = timer.clone();
+            timer.start(slint::TimerMode::Repeated, Duration::from_millis(200), move || {
+                let Ok(result) = rx.try_recv() else { return };
+                t.stop();
+                let Some(app) = weak.upgrade() else { return };
+                let main = entry.mxf.join(&entry.original);
+                let mut rows = vec![];
+                match result {
+                    Ok(u) => {
+                        log::write(&format!("undo rebalance of {}: {} back, {} skipped, kept {:?}, renamed back {:?}", main.display(), u.moved_back, u.skipped.len(), u.kept, u.renamed_back));
+                        rows.push(notice(5, &entry.original, "", u.moved_back));
+                        if !u.skipped.is_empty() {
+                            rows.push(notice(7, &short_list(&u.skipped), "", u.skipped.len()));
+                        }
+                        rows.extend(u.kept.iter().map(|k| notice(6, k, "", 0)));
+                        if let Some(old) = &u.renamed_back {
+                            rows.push(notice(0, &entry.original, old, 0));
+                        }
+                        // the journal is read again: the entry is found by its folder, not by its place in the list
+                        match rebalance::Journal::load(&path) {
+                            Ok(mut journal) => {
+                                if let Some(i) = journal.find(&entry.mxf, &entry.original) {
+                                    journal.entries.remove(i);
+                                }
+                                if let Err(e) = journal.save(&path) {
+                                    rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
+                                }
+                            }
+                            Err(e) => rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0)),
+                        }
+                        // the main folder's database was set aside: a folder Media Composer does not update gets renamed
+                        let main = entry.mxf.join(u.renamed_back.as_deref().unwrap_or(&entry.original));
+                        let mut st = renames.borrow_mut();
+                        if rename::needs_rename(&main, &st.computer) {
+                            rows.extend(rename_for_mc(&mut st, std::slice::from_ref(&main)));
+                        }
+                        show_renamed(&app, &mut st);
                     }
-                    rows.extend(u.kept.iter().map(|k| notice(6, k, "", 0)));
-                    if let Some(old) = &u.renamed_back {
-                        rows.push(notice(0, &entry.original, old, 0));
-                    }
-                    journal.entries.remove(i as usize);
-                    if let Err(e) = journal.save(&path) {
-                        rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
-                    }
-                    // the main folder's database was set aside: a folder Media Composer does not update gets renamed
-                    let main = entry.mxf.join(u.renamed_back.as_deref().unwrap_or(&entry.original));
-                    let mut st = renames.borrow_mut();
-                    if rename::needs_rename(&main, &st.computer) {
-                        rows.extend(rename_for_mc(&mut st, std::slice::from_ref(&main)));
-                    }
-                    show_renamed(&app, &mut st);
+                    Err(e) => rows.push(notice(3, &drive_and_folder(&main), &e.to_string(), 0)),
                 }
-                Err(e) => rows.push(notice(3, &drive_and_folder(&main), &e.to_string(), 0)),
-            }
-            show_rebalanced(&app, &app.get_language());
-            app.set_notice(ModelRc::new(VecModel::from(rows)));
-            app.set_page(Page::Notice);
+                show_rebalanced(&app, &app.get_language());
+                app.set_notice(ModelRc::new(VecModel::from(rows)));
+                app.set_page(Page::Notice);
+            });
         }
     });
 
@@ -3387,7 +3556,7 @@ fn main() -> Result<(), slint::PlatformError> {
             #[cfg(target_os = "macos")]
             mac_menu::ensure();
             match app.get_page() {
-                Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Exchange | Page::Projects | Page::Media => {
+                Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Rewrite | Page::Exchange | Page::Projects | Page::Media => {
                     sync_drives(&app, &drives);
                     inventory_ui::show_runs(&app);
                     show_renamed(&app, &mut renames.borrow_mut());

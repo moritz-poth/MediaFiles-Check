@@ -128,7 +128,9 @@ The green dot marks the copy that stays (the one its folder's database knows, ot
 
 ## History
 
-Maintain MXFs › **History** lists every rebalancing and duplicates run: **Rewrite databases** does the database step later, **Undo** moves everything back (never over an existing file) – rename renamed folders back first.
+Maintain MXFs › **Rewrite DBs** lists every run whose databases are not rewritten yet. **Start** puts the databases of all their changed folders aside, so Media Composer writes new ones, and renames the folders it does not update itself (rename them back under Check DBs › New databases).
+
+Maintain MXFs › **History** lists every rebalancing and duplicates run, newest first; a run whose databases are not rewritten yet says so. **Undo** moves everything back (never over an existing file) – rename renamed folders back first. **×** removes one entry, **Delete all…** all of them (asks first); nothing on the drives changes, but the run can then no longer be undone. While a run or an undo is going, its progress shows the folder and file it is working on.
 
 ## Project links
 

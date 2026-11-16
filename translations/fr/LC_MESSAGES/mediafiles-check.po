@@ -8,6 +8,33 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
+msgid "No databases are waiting. After rebalancing or setting duplicates aside, the changed folders show here."
+msgstr "Aucune base n’attend. Après un rééquilibrage ou une mise de côté de doublons, les dossiers modifiés s’affichent ici."
+
+msgid "UNDOING THE REBALANCING"
+msgstr "ANNULATION DU RÉÉQUILIBRAGE"
+
+msgid "{n} run is waiting for new databases."
+msgid_plural "{n} runs are waiting for new databases."
+msgstr[0] "{n} rééquilibrage attend de nouvelles bases."
+msgstr[1] "{n} rééquilibrages attendent de nouvelles bases."
+
+msgid "Rewrite DBs"
+msgstr "Réécrire les BD"
+
+msgid "Rebalancing and setting duplicates aside changed these folders, so their databases no longer fit. Start puts their msmFMID.pmr and msmMMOB.mdb into “MediaFiles Check Database Backups” on the same drive, so Media Composer writes new ones the next time it starts. Folders Media Composer does not update itself are renamed for it – rename them back afterwards under Check DBs › New databases."
+msgstr "Le rééquilibrage et la mise de côté de doublons ont modifié ces dossiers, leurs bases ne correspondent plus. Lancer met leurs msmFMID.pmr et msmMMOB.mdb dans « MediaFiles Check Database Backups » sur le même disque, pour que Media Composer en écrive de nouvelles au prochain démarrage. Les dossiers que Media Composer ne met pas à jour lui-même sont renommés pour lui – renommez-les ensuite à l’origine sous Vérifier BD › Nouvelles bases."
+
+msgid "{n} run waiting"
+msgid_plural "{n} runs waiting"
+msgstr[0] "{n} en attente"
+msgstr[1] "{n} en attente"
+
+msgid "Remove all {n} entry from the History? Nothing on the drives changes; they can no longer be undone."
+msgid_plural "Remove all {n} entries from the History? Nothing on the drives changes; they can no longer be undone."
+msgstr[0] "Retirer l’entrée de l’historique ? Rien ne change sur les disques ; elle ne pourra plus être annulée."
+msgstr[1] "Retirer les {n} entrées de l’historique ? Rien ne change sur les disques ; elles ne pourront plus être annulées."
+
 msgid "REWRITE DATABASES WITH MEDIA COMPOSER"
 msgstr "RÉÉCRIRE LES BASES AVEC MEDIA COMPOSER"
 
@@ -895,11 +922,6 @@ msgstr "Réécrire les bases"
 
 msgid "Cancel leaves the databases as they are – you can start it later under Maintain MXFs › History."
 msgstr "« Annuler » laisse les bases de données telles quelles – vous pouvez le lancer plus tard sous Entretien MXF › Historique."
-
-msgid "{n} run is waiting for new databases (History)."
-msgid_plural "{n} runs are waiting for new databases (History)."
-msgstr[0] "{n} rééquilibrage attend de nouvelles bases de données (Historique)."
-msgstr[1] "{n} rééquilibrages attendent de nouvelles bases de données (Historique)."
 
 msgid "New folders get the name of the full folder with “-rebalanced-1”, “-2” … (“Mac Studio.1” becomes “Mac Studio-rebalanced-1”). After a change of the limit, the next “Find full folders…” lays them out anew."
 msgstr "Les nouveaux dossiers prennent le nom du dossier plein suivi de « -rebalanced-1 », « -2 »… (« Mac Studio.1 » devient « Mac Studio-rebalanced-1 »). Après un changement de limite, la prochaine recherche « Chercher les dossiers pleins… » les répartit à nouveau."

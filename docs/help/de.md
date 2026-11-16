@@ -128,7 +128,9 @@ Der grüne Punkt zeigt die Kopie, die bleibt (die, die die Datenbank ihres Ordne
 
 ## Verlauf
 
-MXFs pflegen › **Verlauf** listet jeden Lauf von Rebalancing und Duplikaten: **Datenbanken neu schreiben** holt den Datenbank-Schritt nach, **Rückgängig** schiebt alles zurück (nie über eine vorhandene Datei) – umbenannte Ordner vorher zurückbenennen.
+MXFs pflegen › **DBs neu schreiben** listet jeden Lauf, dessen Datenbanken noch nicht neu geschrieben sind. **Starten** legt die Datenbanken aller geänderten Ordner beiseite, damit Media Composer neue schreibt, und benennt die Ordner um, die Media Composer nicht selbst aktualisiert (zurückbenennen unter DBs prüfen › Neue Datenbanken).
+
+MXFs pflegen › **Verlauf** listet jeden Lauf von Rebalancing und Duplikaten, neueste zuerst; steht bei einem Lauf „Datenbanken noch nicht neu geschrieben“, wartet er unter DBs neu schreiben. **Rückgängig** schiebt alles zurück (nie über eine vorhandene Datei) – umbenannte Ordner vorher zurückbenennen. **×** entfernt einen Eintrag, **Alle löschen…** alle (mit Rückfrage); auf den Laufwerken ändert sich nichts, der Lauf lässt sich danach aber nicht mehr rückgängig machen. Während ein Lauf oder ein Rückgängig läuft, zeigt der Fortschritt den Ordner und die Datei, an der er gerade ist.
 
 ## Projekt-Verlinkungen
 

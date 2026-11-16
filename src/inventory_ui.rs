@@ -103,7 +103,7 @@ pub fn show_runs(app: &AppWindow) {
                 Action::Swap => ["{n} files moved between the import and the render drive ({size})", "{n} Dateien zwischen Import- und Render-Laufwerk verschoben ({size})", "{n} fichiers déplacés entre le disque d’import et le disque de rendu ({size})", "{n} archivos movidos entre la unidad de importación y la de render ({size})"],
             };
             let text = pick(&lang, what).replace("{n}", &r.moved.len().to_string()).replace("{size}", &size_text(r.bytes())).replace("{label}", &r.label);
-            RunRow { text: text.into(), detail: r.date.clone().into(), db_done: r.db_done }
+            RunRow { text: text.into(), detail: r.date.clone().into(), db_done: r.db_done, kind: 2, index: 0, date: r.date.clone().into() }
         })
         .collect();
     app.global::<Inventory>().set_runs(ModelRc::new(VecModel::from(rows)));

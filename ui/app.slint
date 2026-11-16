@@ -328,8 +328,37 @@ component RunItem inherits CardRow {
     in property <bool> mc-running;
     // umbenannte Ordner offen: „Datenbanken neu schreiben“ gesperrt
     in property <bool> blocked;
+    // Verlauf von MXFs pflegen: neu schreiben im eigenen Schritt, dafür × zum Entfernen (user 2026-11-16)
+    in property <bool> can-rewrite: true;
+    in property <bool> removable;
     callback db();
     callback undo();
+    callback remove();
+    if root.removable: VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 11px;
+            background: rx-touch.has-hover ? Theme.selection : transparent;
+            accessible-role: button;
+            accessible-label: @tr("Remove");
+            accessible-action-default => { root.remove(); }
+            Path {
+                width: 8px;
+                height: 8px;
+                viewbox-width: 8;
+                viewbox-height: 8;
+                commands: "M 0 0 L 8 8 M 8 0 L 0 8";
+                stroke: rx-touch.has-hover ? Theme.text : Theme.muted;
+                stroke-width: 1.5px;
+            }
+            rx-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.remove(); }
+            }
+        }
+    }
     VerticalLayout {
         horizontal-stretch: 1;
         padding-top: 8px;
@@ -348,7 +377,7 @@ component RunItem inherits CardRow {
         alignment: center;
         HorizontalLayout {
             spacing: 8px;
-            if !root.db-done: CheckButton {
+            if !root.db-done && root.can-rewrite: CheckButton {
                 text: @tr("Rewrite databases");
                 small: true;
                 enabled: !root.mc-running && !root.blocked;
@@ -1625,6 +1654,10 @@ export struct BackRow {
 export struct RunRow {
     text: string,
     detail: string,
+    // 0 Rebalancing, 1 Duplikate, 2 Medien; Platz im jeweiligen Journal; Datum zum Sortieren
+    kind: int,
+    index: int,
+    date: string,
     db-done: bool,
 }
 
@@ -2554,7 +2587,7 @@ ScrollBox {
 
 
 export enum Page { home, working, result, rename, question, notice, rebalance, rebalanced, runs, askname, dups, dupsdone,
-    maintain, rebalstart, dupsstart, exchange, projects, media, scan }
+    maintain, rebalstart, dupsstart, exchange, projects, media, scan, rewrite }
 
 // Schritt in der Seitenleiste: Name und darunter klein sein Stand (Variante C: keine Ziffern, kein Häkchen)
 export struct SideStep {
@@ -2674,7 +2707,8 @@ export component AppWindow inherits CheckWindow {
         // DBs prüfen: 0 Datenbanken (Ergebnis, Umbenennen), 1 Neue Datenbanken; MXFs pflegen: 0 Rebalancing, 1 Duplikate, 2 Verlauf
         if p == Page.maintain || p == Page.question { return 1; }
         if p == Page.dupsstart || p == Page.dups || p == Page.dupsdone { return 1; }
-        if p == Page.runs { return 2; }
+        if p == Page.rewrite { return 2; }
+        if p == Page.runs { return 3; }
         if p == Page.working || p == Page.notice { return -1; }
         return 0;
     }
@@ -2685,7 +2719,7 @@ export component AppWindow inherits CheckWindow {
         if t == 2 { return Page.projects; }
         if t == 5 { return Page.media; }
         if t == 6 { return Page.scan; }
-        return s == 1 ? Page.dupsstart : s == 2 ? Page.runs : Page.rebalstart;
+        return s == 1 ? Page.dupsstart : s == 2 ? Page.rewrite : s == 3 ? Page.runs : Page.rebalstart;
     }
     // Rust: „zurück zum Anfang“ = Anfang des Schritts, in dem man gerade ist
     public function home() {
@@ -2694,6 +2728,8 @@ export component AppWindow inherits CheckWindow {
     public function select-tab(t: int) {
         root.tab = t;
         root.page = t == 0 ? root.page0 : t == 1 ? root.page1 : t == 2 ? root.page2 : t == 3 ? root.page3 : t == 5 ? root.page5 : root.page6;
+        // während eines Laufs zeigen DBs prüfen und MXFs pflegen seinen Fortschritt statt der Startseiten
+        if root.work-busy && (t == 1 || t == 3) { root.page = Page.working; }
         if root.step-of(root.page) >= 0 { root.step = root.step-of(root.page); }
     }
     changed page => {
@@ -2724,7 +2760,8 @@ export component AppWindow inherits CheckWindow {
         ] : root.tab == 3 ? [
             { name: @tr("Rebalancing"), status: root.rebalance-pending > 0 ? @tr("databases pending") : "", enabled: true },
             { name: @tr("Duplicates"), status: root.dup-pending > 0 ? @tr("databases pending") : "", enabled: true },
-            { name: @tr("History"), status: root.rebalanced.length + root.dup-runs.length == 0 ? "" : @tr("{n} run" | "{n} runs" % (root.rebalanced.length + root.dup-runs.length)), enabled: true },
+            { name: @tr("Rewrite DBs"), status: root.runs-open == 0 ? "" : @tr("{n} run waiting" | "{n} runs waiting" % root.runs-open), enabled: true },
+            { name: @tr("History"), status: root.history.length == 0 ? "" : @tr("{n} run" | "{n} runs" % root.history.length), enabled: true },
         ] : root.tab == 6 ? [
             { name: @tr("Scan"), status: Inventory.step == 1 ? @tr("scanning…") : Inventory.step == 2 ? @tr("{n} file" | "{n} files" % Inventory.files) : @tr("{} of {} volumes on", Inventory.drive-count, Inventory.drives.length), enabled: true },
             { name: @tr("History"), status: Inventory.scans.length == 0 ? "" : @tr("{n} scan" | "{n} scans" % Inventory.scans.length), enabled: true },
@@ -2765,6 +2802,8 @@ export component AppWindow inherits CheckWindow {
     in-out property <int> back-choice;
     in property <string> back-first;
     in property <[NoticeRow]> notice;
+    // ein Lauf der Fortschrittsseite ist gerade unterwegs (Rust: begin_work) – kein zweiter
+    in property <bool> work-busy;
     // Fortschrittsseite: 0 DBs prüfen, 1 Duplikate suchen, 2 volle Ordner suchen, 3 Rebalancing, 4 Duplikate beiseitelegen
     in property <int> work-what;
     // Rebalancing: volle Ordner zur Auswahl, frühere Rebalancings (rückgängig machen), Zusammenfassung danach
@@ -2832,6 +2871,12 @@ export component AppWindow inherits CheckWindow {
     callback save-dups();
     callback set-aside-dups();
     callback dup-db(int);
+    // Verlauf von MXFs pflegen: beide Journale zusammen, neueste zuerst; entfernen (kind, index; -1 alle)
+    in property <[RunRow]> history;
+    in-out property <bool> history-ask;
+    callback forget-run(int, int);
+    // DBs neu schreiben: alle offenen Läufe auf einmal
+    callback rewrite-all();
     callback undo-dup(int);
     // Media-Composer-Ordner vor dem Rebalancing umbenennen: Name bestätigen oder ohne Umbenennen weiter
     callback rename-main(string);
@@ -3000,6 +3045,7 @@ export component AppWindow inherits CheckWindow {
                 title: Inventory.current == "" ? @tr("No scan yet") : @tr("Check the MXF databases");
                 CheckButton {
                     text: @tr("Check folder…");
+                    enabled: !root.work-busy;
                     clicked => { root.check-folder(); }
                 }
                 if Inventory.current == "": CheckButton {
@@ -3010,7 +3056,7 @@ export component AppWindow inherits CheckWindow {
                 if Inventory.current != "": CheckButton {
                     text: @tr("Check");
                     primary: true;
-                    enabled: root.check-volumes != "";
+                    enabled: root.check-volumes != "" && !root.work-busy;
                     clicked => { root.check-drives(); }
                 }
             }
@@ -3092,7 +3138,7 @@ ScrollBox {
                 CheckButton {
                     text: @tr("Find full folders…");
                     primary: true;
-                    enabled: root.selected-count > 0;
+                    enabled: root.selected-count > 0 && !root.work-busy;
                     clicked => { root.find-full(); }
                 }
             }
@@ -3107,13 +3153,13 @@ ScrollBox {
                 spacing: 10px;
                 Para {
                     width: Metrics.content-width - 140px;
-                    text: @tr("{n} run is waiting for new databases (History)." | "{n} runs are waiting for new databases (History)." % root.rebalance-pending);
+                    text: @tr("{n} run is waiting for new databases." | "{n} runs are waiting for new databases." % root.rebalance-pending);
                     color: Theme.warning;
                 }
                 CheckButton {
-                    text: @tr("History");
+                    text: @tr("Rewrite DBs");
                     small: true;
-                    clicked => { root.page = Page.runs; }
+                    clicked => { root.page = Page.rewrite; }
                 }
             }
         }
@@ -3126,7 +3172,7 @@ ScrollBox {
                 CheckButton {
                     text: @tr("Find duplicates…");
                     primary: true;
-                    enabled: root.selected-count > 0;
+                    enabled: root.selected-count > 0 && !root.work-busy;
                     clicked => { root.find-dups(); }
                 }
             }
@@ -3145,9 +3191,9 @@ ScrollBox {
                     color: Theme.warning;
                 }
                 CheckButton {
-                    text: @tr("History");
+                    text: @tr("Rewrite DBs");
                     small: true;
-                    clicked => { root.page = Page.runs; }
+                    clicked => { root.page = Page.rewrite; }
                 }
             }
         }
@@ -3165,6 +3211,7 @@ ScrollBox {
             // was läuft – Bitte warten (user 2026-11-16: Variante C, die Punkte laufen in der Überschrift)
             title: (root.work-what == 1 ? @tr("LOOKING FOR DUPLICATES") : root.work-what == 2 ? @tr("LOOKING FOR FULL FOLDERS")
                 : root.work-what == 3 ? @tr("REBALANCING FOLDERS") : root.work-what == 4 ? @tr("SETTING DUPLICATES ASIDE")
+                : root.work-what == 5 ? @tr("UNDOING THE REBALANCING")
                 : @tr("CHECKING THE MXF DATABASES")) + " – " + @tr("Please wait{}", root.dots);
             ProgressBar { value: root.work-value; }
             WorkLine { text: root.work-text; eta: root.work-eta; paused: root.work-paused; }
@@ -3184,12 +3231,13 @@ ScrollBox {
                             : @tr("{n} folder differs from its database" | "{n} folders differ from their database" % root.bad-folders);
                 CheckButton {
                     text: @tr("Check folder…");
+                    enabled: !root.work-busy;
                     clicked => { root.check-folder(); }
                 }
                 CheckButton {
                     text: @tr("Check again");
                     primary: true;
-                    enabled: root.check-volumes != "";
+                    enabled: root.check-volumes != "" && !root.work-busy;
                     clicked => { root.check-drives(); }
                 }
             }
@@ -3373,7 +3421,7 @@ ScrollBox {
                 if root.rebalance-rows.length > 0: CheckButton {
                     text: @tr("Rebalance");
                     primary: true;
-                    enabled: !root.mc-running && root.rebalance-selected > 0;
+                    enabled: !root.mc-running && root.rebalance-selected > 0 && !root.work-busy;
                     clicked => { root.rebalance(); }
                 }
             }
@@ -3526,7 +3574,7 @@ ScrollBox {
                 if root.dup-groups.length > 0: CheckButton {
                     text: @tr("Set aside");
                     primary: true;
-                    enabled: !root.mc-running && root.dup-selected > 0;
+                    enabled: !root.mc-running && root.dup-selected > 0 && !root.work-busy;
                     clicked => { root.set-aside-dups(); }
                 }
             }
@@ -3643,35 +3691,102 @@ ScrollBox {
         if root.page == Page.runs: VerticalLayout {
             spacing: 14px;
             height: Metrics.page-height;
-            PageHead { title: @tr("History"); }
-            HistoryNote { empty: root.rebalanced.length + root.dup-runs.length == 0; mc-running: root.mc-running; blocked: root.renamed.length > 0; }
-            if root.rebalanced.length + root.dup-runs.length > 0: Card {
+            PageHead {
+                title: @tr("History");
+                CheckButton {
+                    text: @tr("Delete all…");
+                    enabled: root.history.length > 0;
+                    clicked => { root.history-ask = true; }
+                }
+            }
+            // Rückfrage an derselben Stelle wie der Hinweis, feste Höhe (wie im Verlauf von Scannen)
+            if !root.history-ask: HistoryNote { empty: root.history.length == 0; mc-running: root.mc-running; }
+            if root.history-ask: Rectangle {
+                height: 40px;
+                border-radius: 6px;
+                background: Theme.selection;
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 6px;
+                    spacing: 8px;
+                    Text {
+                        horizontal-stretch: 1;
+                        text: @tr("Remove all {n} entry from the History? Nothing on the drives changes; they can no longer be undone." | "Remove all {n} entries from the History? Nothing on the drives changes; they can no longer be undone." % root.history.length);
+                        vertical-alignment: center;
+                        overflow: elide;
+                        font-size: 12px;
+                        color: Theme.text;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        CheckButton { text: @tr("Cancel"); small: true; clicked => { root.history-ask = false; } }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        CheckButton { text: @tr("Delete"); small: true; primary: true; clicked => { root.history-ask = false; root.forget-run(0, -1); } }
+                    }
+                }
+            }
+            if root.history.length > 0: Card {
                 vertical-stretch: 1;
                 min-height: 0px;
                 FillScroll {
-                    for r[i] in root.rebalanced: RunItem {
+                    for r[i] in root.history: RunItem {
                         first: i == 0;
                         text: r.text;
                         detail: r.detail;
                         db-done: r.db-done;
                         mc-running: root.mc-running;
-                        blocked: root.renamed.length > 0;
-                        db => { root.rebalance-db(i); }
-                        undo => { root.undo-rebalance(i); }
-                    }
-                    for r[i] in root.dup-runs: RunItem {
-                        first: i == 0 && root.rebalanced.length == 0;
-                        text: r.text;
-                        detail: r.detail;
-                        db-done: r.db-done;
-                        mc-running: root.mc-running;
-                        blocked: root.renamed.length > 0;
-                        db => { root.dup-db(i); }
-                        undo => { root.undo-dup(i); }
+                        can-rewrite: false;
+                        removable: true;
+                        remove => { root.forget-run(r.kind, r.index); }
+                        undo => { if r.kind == 0 { root.undo-rebalance(r.index); } else { root.undo-dup(r.index); } }
                     }
                 }
             }
-            if root.rebalanced.length + root.dup-runs.length == 0: Rectangle { vertical-stretch: 1; }
+            if root.history.length == 0: Rectangle { vertical-stretch: 1; }
+        }
+
+        // ── MXFs pflegen › DBs neu schreiben ──
+        if root.page == Page.rewrite: VerticalLayout {
+            spacing: 14px;
+            height: Metrics.page-height;
+            PageHead {
+                title: @tr("Rewrite databases");
+                CheckButton {
+                    text: @tr("Start");
+                    primary: true;
+                    enabled: root.runs-open > 0 && !root.mc-running && root.renamed.length == 0 && !root.work-busy;
+                    clicked => { root.rewrite-all(); }
+                }
+            }
+            if root.mc-running: Para { text: @tr("Quit Media Composer first."); color: Theme.warning; }
+            if root.renamed.length > 0: RenameBlocked { }
+            Para {
+                text: root.runs-open == 0 ? @tr("No databases are waiting. After rebalancing or setting duplicates aside, the changed folders show here.")
+                    : @tr("Rebalancing and setting duplicates aside changed these folders, so their databases no longer fit. Start puts their msmFMID.pmr and msmMMOB.mdb into “MediaFiles Check Database Backups” on the same drive, so Media Composer writes new ones the next time it starts. Folders Media Composer does not update itself are renamed for it – rename them back afterwards under Check DBs › New databases.");
+            }
+            if root.runs-open > 0: Card {
+                vertical-stretch: 1;
+                min-height: 0px;
+                FillScroll {
+                    for r[i] in root.history: VerticalLayout {
+                        if !r.db-done: CardRow {
+                            first: i == 0;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                padding-top: 8px;
+                                padding-bottom: 8px;
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: r.text; overflow: elide; font-size: 12px; color: Theme.text; }
+                                Text { text: r.detail; overflow: elide; font-size: 11px; color: Theme.muted; }
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { vertical-stretch: 1; }
         }
 
         if root.page == Page.notice: VerticalLayout {
