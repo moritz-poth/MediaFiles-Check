@@ -1,6 +1,6 @@
 //! Self-test reports and problem reports (same JSON as Mountpoint's Reporter.swift). They go to the report
 //! receiver (Cloudflare Worker in the Mountpoint repo, `worker/`), which files them as issues in the private repo
-//! moritz-poth/mediafiles-check-reports. No key in the app: the worker validates and rate-limits by itself.
+//! moritz-poth/MediaFiles-Check-Reports. No key in the app: the worker validates and rate-limits by itself.
 //! If sending fails, the report is saved in Downloads – nothing is lost. Everything is anonymized first.
 use serde::Serialize;
 use sha2::{Digest, Sha256};

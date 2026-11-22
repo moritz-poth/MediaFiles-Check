@@ -23,7 +23,7 @@ pub mod update;
 
 /// This app on GitHub and in its Info.plist (the key is written by scripts/build-mac-app.sh).
 pub const UPDATE_APP: update::App = update::App {
-    repo: "moritz-poth/mediafiles-check",
+    repo: "moritz-poth/MediaFiles-Check",
     name: "MediaFiles Check",
     bundle_id: "io.github.moritz-poth.mediafiles-check",
     release_key: "MediaFilesCheckRelease",

@@ -2773,7 +2773,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             }
                         });
                         w.on_open_source(|| {
-                            let _ = std::process::Command::new("open").arg("https://github.com/moritz-poth/mediafiles-check").spawn();
+                            let _ = std::process::Command::new("open").arg("https://github.com/moritz-poth/MediaFiles-Check").spawn();
                         });
                         w.on_open_license(|| {
                             // bundled license text, otherwise the FSF page

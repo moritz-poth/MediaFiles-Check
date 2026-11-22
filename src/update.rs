@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 
 /// What this app is on GitHub and in its Info.plist.
 pub struct App {
-    /// "moritz-poth/mediafiles-check"
+    /// "moritz-poth/MediaFiles-Check"
     pub repo: &'static str,
     /// app bundle name without ".app", also the zip prefix with "-" for spaces: "MediaFiles Check" → "MediaFiles-Check-<version>.zip"
     pub name: &'static str,
