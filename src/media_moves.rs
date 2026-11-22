@@ -136,7 +136,11 @@ pub fn plan_renderfiles(items: &[&Item], per: usize) -> Vec<Step> {
 }
 
 fn mxf_count(dir: &Path) -> usize {
-    fs::read_dir(dir).map(|rd| rd.flatten().filter(|e| e.file_name().to_string_lossy().to_lowercase().ends_with(".mxf")).count()).unwrap_or(0)
+    // hidden "._name.mxf" (macOS on exFAT and network drives) are no media files
+    fs::read_dir(dir).map(|rd| rd.flatten().filter(|e| {
+        let n = e.file_name().to_string_lossy().to_lowercase();
+        !n.starts_with('.') && n.ends_with(".mxf")
+    }).count()).unwrap_or(0)
 }
 
 /// These files to `target`, each into the folder of the same name; files already on `target` stay.
@@ -213,15 +217,15 @@ pub fn execute(action: Action, steps: &[Step], delete_originals: bool, label: &s
         }
     }
     // recorded first (what may move), filled in as it moves; a crash leaves a run that undo can still follow
-    let mut journal: Journal = crate::duplicates::load(journal_path)?;
+    let mut journal: Journal = crate::load_json(journal_path)?;
     journal.entries.push(run.clone());
-    crate::duplicates::save(&journal, journal_path)?;
+    crate::save_json(&journal, journal_path)?;
     let save = |run: &Run| -> io::Result<()> {
-        let mut j: Journal = crate::duplicates::load(journal_path)?;
+        let mut j: Journal = crate::load_json(journal_path)?;
         if let Some(last) = j.entries.iter_mut().rev().find(|r| r.date == run.date && r.action == run.action && r.changed == run.changed) {
             *last = run.clone();
         }
-        crate::duplicates::save(&j, journal_path)
+        crate::save_json(&j, journal_path)
     };
     for (n, s) in todo.iter().enumerate() {
         progress(n, todo.len(), &file_name(&s.from));
@@ -229,7 +233,7 @@ pub fn execute(action: Action, steps: &[Step], delete_originals: bool, label: &s
             fs::create_dir_all(dir)?;
         }
         if action == Action::Copy {
-            if let Err(e) = crate::ferry::collect::copy_verified(&s.from, &s.to, None) {
+            if let Err(e) = crate::exchange::collect::copy_verified(&s.from, &s.to, None) {
                 out.skipped.push((file_name(&s.from), e.to_string()));
                 continue;
             }
@@ -254,7 +258,7 @@ pub fn execute(action: Action, steps: &[Step], delete_originals: bool, label: &s
             run.moved.push((s.from.clone(), s.to.clone(), s.size));
             run.originals.push(None);
         } else {
-            if let Err(e) = crate::ferry::collect::copy_verified(&s.from, &s.to, None) {
+            if let Err(e) = crate::exchange::collect::copy_verified(&s.from, &s.to, None) {
                 out.skipped.push((file_name(&s.from), e.to_string()));
                 continue;
             }
@@ -276,12 +280,14 @@ pub fn execute(action: Action, steps: &[Step], delete_originals: bool, label: &s
     progress(todo.len(), todo.len(), "");
     // a folder left with only its database goes aside as a whole (like duplicates)
     for f in run.changed.clone() {
-        if f.is_dir() && run.moved.iter().any(|m| m.0.parent() == Some(f.as_path())) && crate::rebalance::is_leftover(&f) {
-            if let Some(into) = drive_of(&f.join("x")).map(|d| d.join(ASIDE_DIR).join(&at).join(file_name(&f))) {
-                run.leftovers.push((f.clone(), into.clone()));
-                save(&run)?;
-                crate::rebalance::move_leftover(&f, &into)?;
-            }
+        if f.is_dir()
+            && run.moved.iter().any(|m| m.0.parent() == Some(f.as_path()))
+            && crate::rebalance::is_leftover(&f)
+            && let Some(into) = drive_of(&f.join("x")).map(|d| d.join(ASIDE_DIR).join(&at).join(file_name(&f)))
+        {
+            run.leftovers.push((f.clone(), into.clone()));
+            save(&run)?;
+            crate::rebalance::move_leftover(&f, &into)?;
         }
     }
     run.changed.retain(|f| f.is_dir());
@@ -338,7 +344,7 @@ pub fn undo(run: &Run) -> io::Result<Moved> {
                     skip(&mut out, "the copy is gone or changed");
                     continue;
                 }
-                crate::ferry::collect::copy_verified(to, from, None)?;
+                crate::exchange::collect::copy_verified(to, from, None)?;
                 fs::remove_file(to)?;
             }
             // within a drive: renamed back
@@ -426,7 +432,7 @@ mod tests {
         assert_eq!(moved.moved, 3);
         assert!(m.exists() && !r1.exists() && mxf.join("Mac Studio-renderfiles-2/r3.mxf").exists());
         assert!(run.changed.contains(&f) && run.changed.contains(&mxf.join("Mac Studio-renderfiles-1")));
-        assert_eq!(crate::duplicates::load::<Journal>(&jp).unwrap().entries, vec![run.clone()]);
+        assert_eq!(crate::load_json::<Journal>(&jp).unwrap().entries, vec![run.clone()]);
         let u = undo(&run).unwrap();
         assert_eq!(u.moved, 3);
         assert!(r1.exists() && r3.exists() && !mxf.join("Mac Studio-renderfiles-1").exists());

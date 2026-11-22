@@ -1,5 +1,5 @@
 //! Vergleich zweier Manifeste: was muss von hier zur Gegenseite, und was muss der User von Hand erledigen.
-use crate::ferry::*;
+use crate::exchange::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -239,7 +239,7 @@ mod tests {
     fn two_local_volumes_into_one_remote_volume() {
         let a = ma("A", vec![("V1", vec![fo("1", &["a"])]), ("V2", vec![fo("1", &["b"])])]);
         let b = ma("B", vec![("W", vec![])]);
-        let opts = Options { volume_map: [("V1".into(), "W".into()), ("V2".into(), "W".into())].into(), ..Default::default() };
+        let opts = Options { volume_map: [("V1".into(), "W".into()), ("V2".into(), "W".into())].into() };
         let (copies, p) = run(&a, &b, &opts);
         assert_eq!(copies, ["W/1/a", "W/1/b"]);
         assert_eq!(p.tasks, [rebuild("W", "1")]);

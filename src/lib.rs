@@ -10,7 +10,7 @@
 pub mod avb;
 pub mod duplicates;
 pub mod inventory;
-pub mod ferry;
+pub mod exchange;
 pub mod log;
 pub mod media_moves;
 pub mod mxf;
@@ -73,6 +73,25 @@ impl Gate {
 
 pub const PMR: &str = "msmFMID.pmr";
 pub const MDB: &str = "msmMMOB.mdb";
+
+/// A missing file is the default; an unreadable one is an error – it must never be overwritten blindly.
+pub fn load_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> std::io::Result<T> {
+    match fs::read(path) {
+        Ok(b) => serde_json::from_slice(&b).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{}: {e}", path.display()))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(T::default()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Writes next to the file first, then renames: a crash never leaves half a file.
+pub fn save_json<T: serde::Serialize>(value: &T, path: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
+    let tmp = path.with_extension("tmp");
+    let mut f = fs::File::create(&tmp)?;
+    std::io::Write::write_all(&mut f, &serde_json::to_vec_pretty(value)?)?;
+    f.sync_all()?;
+    fs::rename(&tmp, path)
+}
 
 /// Moves `from` to `to` but never replaces anything at `to` – not even when it appears between a check and the move
 /// (another workstation on a network drive). macOS refuses itself (renamex_np with RENAME_EXCL); where the file system

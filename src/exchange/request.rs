@@ -1,11 +1,11 @@
 //! Requests from MediaFiles Check: media files identified only by their Avid mob ID (the clips that use them are
-//! offline on the requesting system). Ferry looks the IDs up in the Avid databases (msmFMID.pmr) of its drives and
+//! offline on the requesting system). Exchange looks the IDs up in the Avid databases (msmFMID.pmr) of its drives and
 //! collects the files like any other delivery.
-use crate::ferry::plan::{Copy, Plan, Task};
-use crate::ferry::*;
+use crate::exchange::plan::{Copy, Plan, Task};
+use crate::exchange::*;
 use std::collections::{BTreeSet, HashMap};
 
-pub const REQUEST_FORMAT: &str = "mediafiles-ferry-request";
+pub const REQUEST_FORMAT: &str = "mediafiles-exchange-request";
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Request {
@@ -38,7 +38,7 @@ impl Request {
     }
 }
 
-/// Whether a .ferry file is a request (and not a manifest).
+/// Whether an .mfexchange file is a request (and not a manifest).
 pub fn is_request(path: &Path) -> bool {
     #[derive(Deserialize)]
     struct Head {
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn requested_ids_are_found_through_the_databases() {
-        let root = std::env::temp_dir().join(format!("ferry-request-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("exchange-request-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let folder = mxf_dir(&root).join("1");
         fs::create_dir_all(&folder).unwrap();
@@ -157,7 +157,7 @@ mod tests {
             Task::RebuildDb { system: "Me".into(), volume: "V".into(), folder: "1".into() },
             Task::NotFound { system: "Sender".into(), files: 2, clips: vec!["Clip B".into(), "Clip C".into()] },
         ]);
-        let path = root.join("r.ferry");
+        let path = root.join("r.mfexchange");
         fs::write(&path, serde_json::to_vec(&req).unwrap()).unwrap();
         assert!(is_request(&path) && Request::load(&path).is_ok());
         fs::remove_dir_all(&root).unwrap();

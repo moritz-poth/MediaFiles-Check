@@ -1,4 +1,4 @@
-//! Exchange (formerly MediaFiles Ferry): keeps the Avid MXF media of two unconnected systems in step through manifest files.
+//! Exchange: keeps the Avid MXF media of two unconnected systems in step through manifest files.
 pub mod collect;
 pub mod flow;
 pub mod plan;
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use unicode_normalization::UnicodeNormalization;
 
-pub const FORMAT: &str = "mediafiles-ferry-manifest";
+pub const FORMAT: &str = "mediafiles-exchange-manifest";
 pub const DB_FILES: [&str; 2] = ["msmFMID.pmr", "msmMMOB.mdb"];
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -51,7 +51,7 @@ impl Manifest {
     pub fn load(path: &Path) -> io::Result<Self> {
         let m: Manifest = serde_json::from_slice(&fs::read(path)?)?;
         if m.format != FORMAT {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{} is not a Ferry manifest", path.display())));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{} is not an Exchange manifest", path.display())));
         }
         Ok(m)
     }
@@ -89,7 +89,7 @@ pub fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-pub const MANIFEST_EXT: &str = "ferry";
+pub const MANIFEST_EXT: &str = "mfexchange";
 
 /// Zeitpunkt in Ortszeit, z. B. Format "%y%m%d" -> "261031".
 pub fn local_time(secs: u64, fmt: &str) -> String {
@@ -106,7 +106,7 @@ pub fn safe_name(s: &str) -> String {
     s.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_")
 }
 
-/// Dateiname eines Manifests, z. B. "261101-1312_Mac Studio_Manifest.ferry" (Inhalt ist JSON).
+/// Dateiname eines Manifests, z. B. "261101-1312_Mac Studio_Manifest.mfexchange" (Inhalt ist JSON).
 pub fn manifest_file_name(m: &Manifest) -> String {
     format!("{}_{}_Manifest.{MANIFEST_EXT}", local_time(m.created, "%y%m%d-%H%M"), safe_name(&m.system))
 }

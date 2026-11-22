@@ -1,19 +1,17 @@
 //! Fehlende Dateien in einen Lieferordner sammeln, Lieferungen prüfen und einspielen.
-use crate::ferry::plan::{Plan, Task};
-use crate::ferry::*;
+use crate::exchange::plan::{Plan, Task};
+use crate::exchange::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{Read, Write};
 
-pub const DELIVERY_FORMAT: &str = "mediafiles-ferry-delivery";
-pub const DELIVERY_FILE: &str = "ferry-delivery.json";
-/// Name in Lieferungen bis 0.1 – wird beim Lesen weiter erkannt
-const LEGACY_DELIVERY_FILE: &str = "ferry-lieferung.json";
+pub const DELIVERY_FORMAT: &str = "mediafiles-exchange-delivery";
+pub const DELIVERY_FILE: &str = "exchange-delivery.json";
 
 /// Aufgabendatei der Lieferung, in der Sprache des Absenders
 pub fn tasks_file(lang: &str) -> &'static str {
     if lang == "de" { "Aufgaben.txt" } else { "Tasks.txt" }
 }
-pub const BACKUP_DIR: &str = "Ferry-Backup";
+pub const BACKUP_DIR: &str = "Exchange-Backup";
 
 #[derive(Serialize, Deserialize)]
 pub struct Delivery {
@@ -145,8 +143,8 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
 }
 
 fn load(dest: &Path) -> io::Result<Delivery> {
-    let file = [DELIVERY_FILE, LEGACY_DELIVERY_FILE].iter().map(|f| dest.join(f)).find(|p| p.exists());
-    let not_delivery = || io::Error::new(io::ErrorKind::InvalidData, format!("{} is not a Ferry delivery", dest.display()));
+    let file = Some(dest.join(DELIVERY_FILE)).filter(|p| p.exists());
+    let not_delivery = || io::Error::new(io::ErrorKind::InvalidData, format!("{} is not an Exchange delivery", dest.display()));
     let d: Delivery = serde_json::from_slice(&fs::read(file.ok_or_else(not_delivery)?)?).map_err(|_| not_delivery())?;
     if d.format != DELIVERY_FORMAT {
         return Err(not_delivery());
@@ -208,7 +206,7 @@ pub fn own_folder_name(from: &str, folder: &str) -> String {
 }
 
 /// Spielt eine Lieferung in die MXF-Ordner ein. Fügt nur hinzu und überschreibt keine Mediendatei;
-/// ersetzte Datenbanken wandern nach "Avid MediaFiles/Ferry-Backup/". Ein Ordner, der Dateien bekommt, aber
+/// ersetzte Datenbanken wandern nach "Avid MediaFiles/Exchange-Backup/". Ein Ordner, der Dateien bekommt, aber
 /// keine passende Datenbank, bekommt die Aufgabe "Datenbank neu schreiben" (in `lang`).
 pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<Imported> {
     let d = load(dest)?;
@@ -326,7 +324,7 @@ pub(crate) fn copy_verified(src: &Path, dst: &Path, expected: Option<&str>) -> i
         return Ok((fs::metadata(dst)?.len(), have));
     }
     fs::create_dir_all(dst.parent().unwrap())?;
-    let part = dst.with_file_name(format!("{}.ferry-part", dst.file_name().unwrap().to_string_lossy()));
+    let part = dst.with_file_name(format!("{}.exchange-part", dst.file_name().unwrap().to_string_lossy()));
     let mut hasher = blake3::Hasher::new();
     let mut input = File::open(src)?;
     let mut out = File::create(&part)?;
@@ -373,10 +371,10 @@ pub(crate) fn copy_verified(src: &Path, dst: &Path, expected: Option<&str>) -> i
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ferry::plan::{self, Options};
+    use crate::exchange::plan::{self, Options};
 
     fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("ferry-test-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("exchange-test-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
@@ -490,14 +488,6 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    #[test]
-    fn legacy_delivery_file_name_is_still_read() {
-        let dir = tmp("legacy");
-        let d = Delivery { format: DELIVERY_FORMAT.into(), from: "A".into(), to: "B".into(), created: 0, files: vec![], db_folders: Default::default(), tasks: vec![] };
-        fs::write(dir.join("ferry-lieferung.json"), serde_json::to_vec(&d).unwrap()).unwrap();
-        assert_eq!(load_delivery(&dir).unwrap().from, "A");
-        assert!(load_delivery(&tmp("empty")).is_err());
-    }
 
     #[test]
     fn delivery_paths_must_stay_inside() {

@@ -578,8 +578,8 @@ msgstr "Commencer"
 msgid "MediaFiles Check never deletes or overwrites a media file. Still, keep a backup of your media – you use it at your own risk."
 msgstr "MediaFiles Check ne supprime ni n’écrase jamais un fichier média. Gardez quand même une sauvegarde de vos médias – l’utilisation est à vos risques."
 
-msgid "keeps the media of two edit systems in step – formerly MediaFiles Ferry."
-msgstr "synchronise les médias de deux postes – anciennement MediaFiles Ferry."
+msgid "keeps the media of two edit systems in step."
+msgstr "synchronise les médias de deux postes."
 
 msgid "When macOS asks whether MediaFiles Check may access files on removable or network volumes, allow it – until then reading such a drive waits."
 msgstr "Quand macOS demande si MediaFiles Check peut accéder aux fichiers des volumes amovibles ou réseau, autorisez-le – jusque-là, la lecture de ces disques attend."
@@ -725,8 +725,8 @@ msgstr "Comparer avec {}"
 msgid "Every file is compared with its checksum after copying. Interrupted? Collect again continues where it stopped."
 msgstr "Chaque fichier est comparé à sa somme de contrôle après la copie. Interrompu ? Rassembler à nouveau reprend là où il s’est arrêté."
 
-msgid "Adds files only and never overwrites a media file. Replaced databases go to Ferry-Backup."
-msgstr "Ajoute seulement et n’écrase jamais un fichier média. Les bases de données remplacées vont dans Ferry-Backup."
+msgid "Adds files only and never overwrites a media file. Replaced databases go to Exchange-Backup."
+msgstr "Ajoute seulement et n’écrase jamais un fichier média. Les bases de données remplacées vont dans Exchange-Backup."
 
 msgid "Collect a delivery"
 msgstr "Rassembler une livraison"

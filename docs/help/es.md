@@ -4,7 +4,7 @@
 
 MediaFiles Check cuida de los archivos de medios de Avid (MXF) de tus puestos de edición:
 
-- **Intercambio** mantiene al día los medios de dos puestos, aunque no estén conectados (antes MediaFiles Ferry).
+- **Intercambio** mantiene al día los medios de dos puestos, aunque no estén conectados.
 - **Comprobar BD** compara cada carpeta de `Avid MediaFiles/MXF` con su base de datos de Avid y muestra dónde no coinciden.
 - **Mantenimiento MXF** reúne las herramientas que cambian algo: renombrar carpetas para Media Composer, reequilibrado, duplicados y su historial.
 - **Vínculos de proyecto** encuentra los archivos de medios que necesitan los bins de tus proyectos de Avid y que no están en ninguna unidad, y los solicita.
@@ -41,7 +41,7 @@ El análisis también escribe el *manifiesto* de Intercambio: cada archivo MXF d
 
 ## Intercambio: comparar y reunir
 
-Intercambio › **Comparar** → **Guardar manifiesto…** guarda el manifiesto del último análisis p. ej. como `261101-1312_Mac Studio_Manifest.ferry`. Envíalo al otro puesto, p. ej. por correo o memoria USB. Sin análisis, la página dice **Aún no hay análisis**: **Ir a Analizar**.
+Intercambio › **Comparar** → **Guardar manifiesto…** guarda el manifiesto del último análisis p. ej. como `261101-1312_Mac Studio_Manifest.mfexchange`. Envíalo al otro puesto, p. ej. por correo o memoria USB. Sin análisis, la página dice **Aún no hay análisis**: **Ir a Analizar**.
 
 1. Analiza primero este puesto en Analizar para que tu manifiesto esté al día.
 2. Intercambio › **Comparar** → **Abrir manifiesto…** y elige el manifiesto del otro puesto, o una solicitud guardada en Vínculos de proyecto › Solicitar.
@@ -58,7 +58,7 @@ Cada archivo se copia con control de suma en una carpeta nueva como `261102-1830
 2. Intercambio › **Importar** → **Elegir entrega…**.
 3. Cada unidad de la entrega necesita una unidad en este puesto; las del mismo nombre se asignan solas. Con **Separar**, los archivos de medios van a una unidad y los de render a otra (se reconocen por su cabecera MXF).
 4. **Carpetas:** la página muestra cuántas carpetas se combinan; **Elegir carpetas…** abre una ventana con todas las carpetas de la entrega: para cada carpeta **Combinar** (en la carpeta con el mismo nombre) o **Carpeta propia** (`<remitente>_<carpeta>`, p. ej. `Mac Studio_1`; si ya existe, los archivos van ahí). **Combinar todas** / **Todas en carpetas propias** lo elige para todas.
-5. **Verificar e importar** verifica primero cada archivo. Solo se importa una entrega completa y sin daños: los archivos solo se añaden, nunca se sobrescribe un archivo de medios. Las bases de datos reemplazadas se guardan en `Avid MediaFiles/Ferry-Backup/`.
+5. **Verificar e importar** verifica primero cada archivo. Solo se importa una entrega completa y sin daños: los archivos solo se añaden, nunca se sobrescribe un archivo de medios. Las bases de datos reemplazadas se guardan en `Avid MediaFiles/Exchange-Backup/`.
 6. Después vuelve a analizar en Analizar para que el manifiesto esté al día.
 
 ## Intercambio: tareas
@@ -137,7 +137,7 @@ Mantenimiento MXF › **Historial** muestra cada operación de reequilibrado y d
 1. Proyectos trabaja con el análisis actual de la pestaña **Analizar**: los proyectos activados allí (cada carpeta con un archivo `.avp` en la carpeta de proyectos elegida; `Attic` se deja fuera). Los medios que faltan se calculan en cada análisis y se guardan con él en el historial. Sin un análisis con proyectos, Proyectos ofrece **Ir a Analizar**.
 2. **Medios que faltan** muestra por bin cada archivo de medios que falta en tres columnas: el clip tal como se llama en el bin, el nombre del archivo MXF y el archivo original (clip de cámara, cinta o archivo importado). El nombre MXF solo se conoce mientras una base de datos de Avid en las unidades aún lista el archivo; si no, aparece «–». Un clic en la flecha muestra dónde se usa un archivo; un clic en un nombre lo copia al portapapeles. Los bordes de las columnas en la cabecera y la separación entre el árbol y la lista se pueden arrastrar. La ventana se puede redimensionar; arriba eliges **Todos**, **Para volver a vincular**, **Faltan** o **Solo archivos** (cada archivo que falta una vez, sin bins). Para pasarla a otro, guarda una solicitud (ver abajo). A la izquierda está el árbol de carpetas de los proyectos analizados (cerrado al principio; la flecha abre una carpeta): desmarca una carpeta (o un proyecto entero) y sus bins desaparecen de cada vista y de cada número; un archivo usado solo allí ya no aparece. **Todos**, **Ninguna** e **Invertir** arriba a la derecha del árbol cambian todas las casillas a la vez. La solicitud solo contiene los archivos de las carpetas marcadas.
 3. **Clips AMA** muestra dónde se usan los archivos vinculados por AMA. No se solicitan.
-4. **Solicitar** → **Guardar solicitud…** escribe un archivo `…_Request.ferry`. Envíalo al puesto que tiene los medios; allí: Intercambio › Comparar, ábrelo y luego Reunir. Aquí: Intercambio › Importar la entrega.
+4. **Solicitar** → **Guardar solicitud…** escribe un archivo `…_Request.mfexchange`. Envíalo al puesto que tiene los medios; allí: Intercambio › Comparar, ábrelo y luego Reunir. Aquí: Intercambio › Importar la entrega.
 
 Conviene saber:
 

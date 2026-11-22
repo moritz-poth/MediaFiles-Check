@@ -17,8 +17,8 @@
 use crate::{MDB, PMR, key};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -361,9 +361,6 @@ pub struct Rebalanced {
     pub mxf: PathBuf,
     /// the main folder's name (after renaming)
     pub original: String,
-    /// first beta 7 builds: new folder → files moved there; only read from old entries
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub moved: Vec<(String, Vec<(String, u64)>)>,
     /// local time of the last run, for the history
     pub date: String,
     /// "Start" (databases set aside, folders renamed for Media Composer) was done; until then the history offers it.
@@ -389,26 +386,10 @@ fn yes() -> bool {
 }
 
 impl Rebalanced {
-    /// Folders whose databases "Start" rewrites (old entries: the main folder and the new folders).
-    pub fn to_rewrite(&self) -> Vec<String> {
-        if self.changed.is_empty() && !self.moved.is_empty() {
-            return std::iter::once(self.original.clone()).chain(self.moved.iter().map(|m| m.0.clone())).collect();
-        }
-        self.changed.clone()
-    }
-
-    pub fn rebalanced_folders(&self) -> Vec<String> {
-        if self.folders.is_empty() { self.moved.iter().map(|m| m.0.clone()).collect() } else { self.folders.clone() }
-    }
-
-    pub fn moved_files(&self) -> usize {
-        if self.files == 0 { self.moved.iter().map(|m| m.1.len()).sum() } else { self.files }
-    }
-
     /// After the drive came back under another path (e.g. "/Volumes/Media 1" after a crash): the MXF folder on another
     /// drive that holds the main folder and all its rebalanced folders. Updates `mxf`; true if it changed.
     pub fn relocate(&mut self) -> bool {
-        let folders = self.rebalanced_folders();
+        let folders = &self.folders;
         if folders.is_empty() || self.mxf.is_dir() {
             return false;
         }
@@ -424,25 +405,6 @@ pub struct Journal {
 }
 
 impl Journal {
-    /// A missing journal is empty; an unreadable one is an error – it must never be overwritten blindly.
-    pub fn load(path: &Path) -> io::Result<Journal> {
-        match fs::read(path) {
-            Ok(b) => serde_json::from_slice(&b).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display()))),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Journal::default()),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Writes next to the file first, then renames: a crash never leaves half a journal.
-    pub fn save(&self, path: &Path) -> io::Result<()> {
-        fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
-        let tmp = path.with_extension("tmp");
-        let mut f = File::create(&tmp)?;
-        f.write_all(&serde_json::to_vec_pretty(self)?)?;
-        f.sync_all()?;
-        fs::rename(&tmp, path)
-    }
-
     /// The entry of this group (by its main folder's name now).
     pub fn find(&self, mxf: &Path, main: &str) -> Option<usize> {
         self.entries.iter().position(|e| e.mxf == mxf && key(&e.original) == key(main))
@@ -516,7 +478,7 @@ pub fn execute(p: &Plan, journal: &mut Journal, journal_path: &Path) -> io::Resu
     let mut changed = p.changed();
     if let Some(o) = old.as_ref().filter(|o| !o.db_done) {
         // the databases of the run before were not rewritten yet: they still have to be
-        for c in o.to_rewrite() {
+        for c in o.changed.iter().cloned() {
             let c = if c == p.main { main.clone() } else { c };
             if !changed.contains(&c) && !p.emptied.contains(&c) {
                 changed.push(c);
@@ -526,7 +488,6 @@ pub fn execute(p: &Plan, journal: &mut Journal, journal_path: &Path) -> io::Resu
     let entry = Rebalanced {
         mxf: p.mxf.clone(),
         original: main.clone(),
-        moved: vec![],
         date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(),
         db_done: false,
         renamed_from: old.as_ref().and_then(|o| o.renamed_from.clone()).or_else(|| p.rename_to.as_ref().map(|_| p.main.clone())),
@@ -538,7 +499,7 @@ pub fn execute(p: &Plan, journal: &mut Journal, journal_path: &Path) -> io::Resu
         Some(i) => journal.entries[i] = entry.clone(),
         None => journal.entries.push(entry.clone()),
     }
-    journal.save(journal_path)?;
+    crate::save_json(journal, journal_path)?;
     let moved = apply(p)?;
     Ok((entry, moved))
 }
@@ -616,7 +577,7 @@ pub fn undo(r: &Rebalanced) -> io::Result<Undone> {
     if !main.is_dir() {
         return Err(io::Error::new(io::ErrorKind::NotFound, format!("{} not found – if it is renamed for Media Composer, rename it back first", main.display())));
     }
-    if let Some(name) = r.rebalanced_folders().iter().find(|n| !r.mxf.join(n).is_dir()) {
+    if let Some(name) = r.folders.iter().find(|n| !r.mxf.join(n).is_dir()) {
         return Err(io::Error::new(io::ErrorKind::NotFound, format!("{name} not found – if it is renamed for Media Composer, rename it back first")));
     }
     let p = plan(&r.mxf, &r.original, usize::MAX, None, false, &mut HashSet::new(), None)?;
@@ -800,11 +761,6 @@ mod tests {
         let (_, m) = execute(&p, &mut j, &mxf.join("../../j.json")).unwrap();
         assert!(m.skipped.contains(&"f00.mxf".to_string()));
         assert!(dir.join("f00.mxf").exists() && fs::read(mxf.join("Mac Studio-rebalanced-1/f00.mxf")).unwrap() == b"other");
-        // an old journal entry still reads
-        let old = r#"{"entries":[{"mxf":"/V","original":"1","moved":[["1-rebalanced-1",[["a.mxf",1]]]],"date":""}]}"#;
-        let e = &serde_json::from_str::<Journal>(old).unwrap().entries[0];
-        assert!(e.db_done);
-        assert_eq!((e.to_rewrite(), e.moved_files()), (vec!["1".to_string(), "1-rebalanced-1".into()], 1));
         fs::remove_dir_all(mxf.join("../..")).unwrap();
     }
 }

@@ -10,11 +10,11 @@
 //! (a rename, nothing is copied or deleted), recorded in a journal first so it can be undone. Afterwards the databases
 //! of the changed folders have to be rewritten (like rebalancing).
 use crate::{key, mxf};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -232,25 +232,6 @@ pub struct Journal {
     pub entries: Vec<Run>,
 }
 
-/// A missing file is the default; an unreadable one is an error – it must never be overwritten blindly.
-pub fn load<T: DeserializeOwned + Default>(path: &Path) -> io::Result<T> {
-    match fs::read(path) {
-        Ok(b) => serde_json::from_slice(&b).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display()))),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(T::default()),
-        Err(e) => Err(e),
-    }
-}
-
-/// Writes next to the file first, then renames: a crash never leaves half a file.
-pub fn save<T: Serialize>(value: &T, path: &Path) -> io::Result<()> {
-    fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
-    let tmp = path.with_extension("tmp");
-    let mut f = File::create(&tmp)?;
-    f.write_all(&serde_json::to_vec_pretty(value)?)?;
-    f.sync_all()?;
-    fs::rename(&tmp, path)
-}
-
 #[derive(Debug, Default, PartialEq)]
 pub struct Moved {
     pub moved: usize,
@@ -285,9 +266,9 @@ pub fn set_aside(groups: &[(Copy, Vec<Copy>)], journal_path: &Path) -> io::Resul
     if run.moved.is_empty() {
         return Ok((run, out));
     }
-    let mut journal: Journal = load(journal_path)?;
+    let mut journal: Journal = crate::load_json(journal_path)?;
     journal.entries.push(run.clone());
-    save(&journal, journal_path)?;
+    crate::save_json(&journal, journal_path)?;
     for (from, to, size) in &run.moved {
         if to.exists() || fs::metadata(from).map(|m| m.len()).ok() != Some(*size) {
             out.skipped.push(file_name(from));
@@ -306,11 +287,11 @@ pub fn set_aside(groups: &[(Copy, Vec<Copy>)], journal_path: &Path) -> io::Resul
     // a folder now without media files goes aside with its database, next to its copies (recorded first, for undo)
     run.leftovers = run.changed.iter().filter(|f| crate::rebalance::is_leftover(f)).filter_map(|f| run.moved.iter().find(|m| m.0.parent() == Some(f.as_path())).map(|m| (f.clone(), m.1.parent().unwrap_or(Path::new(".")).to_path_buf()))).collect();
     if !run.leftovers.is_empty() {
-        let mut journal: Journal = load(journal_path)?;
+        let mut journal: Journal = crate::load_json(journal_path)?;
         if let Some(last) = journal.entries.iter_mut().rev().find(|r| r.date == run.date && r.moved == run.moved) {
             last.leftovers = run.leftovers.clone();
         }
-        save(&journal, journal_path)?;
+        crate::save_json(&journal, journal_path)?;
         for (folder, into) in &run.leftovers {
             crate::rebalance::move_leftover(folder, into)?;
         }
@@ -435,7 +416,7 @@ mod tests {
         assert_eq!(m.moved, 2);
         assert!(!fb.join("renamed.mxf").exists() && run.moved.iter().all(|r| r.1.exists()));
         assert!(run.moved[0].1.starts_with(b.join("MediaFiles Check Duplicates")), "on the same drive");
-        assert_eq!(load::<Journal>(&jp).unwrap().entries, vec![run.clone()]);
+        assert_eq!(crate::load_json::<Journal>(&jp).unwrap().entries, vec![run.clone()]);
         assert_eq!(run.changed, vec![fb.clone()]);
         assert!(find(&[a.clone(), b.clone()], &mut |_, _, _| {}, &crate::Gate::default()).groups.is_empty());
 
@@ -472,8 +453,8 @@ mod tests {
         assert!(!folder.exists(), "folder went aside");
         let into = run.moved[0].1.parent().unwrap();
         assert!(into.join(crate::PMR).exists() && into.join("Creating").is_dir());
-        assert_eq!(load::<Journal>(&jp).unwrap().entries[0].leftovers, vec![(folder.clone(), into.to_path_buf())]);
-        let u = undo(&load::<Journal>(&jp).unwrap().entries[0]).unwrap();
+        assert_eq!(crate::load_json::<Journal>(&jp).unwrap().entries[0].leftovers, vec![(folder.clone(), into.to_path_buf())]);
+        let u = undo(&crate::load_json::<Journal>(&jp).unwrap().entries[0]).unwrap();
         assert_eq!(u.moved, 1);
         assert!(folder.join("clip.mxf").exists() && folder.join(crate::MDB).exists() && folder.join("Creating").is_dir());
         assert!(!root.join("B/MediaFiles Check Duplicates").exists(), "nothing left behind");

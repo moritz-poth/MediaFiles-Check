@@ -4,7 +4,7 @@
 
 MediaFiles Check looks after the Avid media files (MXF) of your edit systems:
 
-- **Exchange** keeps the media of two edit systems in step, even when they are not connected (formerly MediaFiles Ferry).
+- **Exchange** keeps the media of two edit systems in step, even when they are not connected.
 - **Check DBs** compares every folder in `Avid MediaFiles/MXF` with its Avid database and shows where the two don't match.
 - **Maintain MXFs** has the tools that change something: rename folders for Media Composer, rebalancing, duplicates, and their history.
 - **Project links** finds the media files the bins of your Avid projects need that are on none of the drives, and requests them.
@@ -41,7 +41,7 @@ The scan also writes Exchange's *manifest*: every MXF file of the switched-on dr
 
 ## Exchange: compare and collect
 
-Exchange › **Compare** → **Save manifest…** saves the manifest of the last scan as e.g. `261101-1312_Mac Studio_Manifest.ferry`. Send it to the other system, e.g. by e-mail or USB stick. Without a scan the page says **No scan yet** – **Go to Scan**.
+Exchange › **Compare** → **Save manifest…** saves the manifest of the last scan as e.g. `261101-1312_Mac Studio_Manifest.mfexchange`. Send it to the other system, e.g. by e-mail or USB stick. Without a scan the page says **No scan yet** – **Go to Scan**.
 
 1. Scan this system first under Scan, so that your own manifest is up to date.
 2. Exchange › **Compare** → **Open manifest…** and choose the manifest of the other system – or a request saved under Project links › Request.
@@ -58,7 +58,7 @@ Every file is copied with a checksum check into a new folder like `261102-1830_M
 2. Exchange › **Import** → **Choose delivery…**.
 3. Every drive of the delivery needs a drive on this system; drives with the same name are assigned automatically. With **Separate**, media files go to one drive and render files to another (recognised by their MXF header).
 4. **Folders:** the page shows how many folders merge; **Choose folders…** opens a window with every folder of the delivery:  **Merge** (into the folder of the same name) or **Own folder** (`<sender>_<folder>`, e.g. `Mac Studio_1`; if it exists already, the files go into it). **All merge** / **All in own folders** sets every folder.
-5. **Verify & import** first verifies every file. Only a complete, undamaged delivery is imported – files are only added, a media file is never overwritten. Replaced databases are kept in `Avid MediaFiles/Ferry-Backup/`.
+5. **Verify & import** first verifies every file. Only a complete, undamaged delivery is imported – files are only added, a media file is never overwritten. Replaced databases are kept in `Avid MediaFiles/Exchange-Backup/`.
 6. Scan again under Scan afterwards, so that the manifest is up to date.
 
 ## Exchange: tasks
@@ -137,7 +137,7 @@ Maintain MXFs › **History** lists every rebalancing and duplicates run, newest
 1. Projects works with the current scan from the **Scan** tab: the projects switched on there (every folder with an `.avp` file in the chosen projects folder; `Attic` is left out). The missing media are worked out with every scan and kept in its History. Without a scan with projects, Projects offers **Go to Scan**.
 2. **Missing media** lists per bin every missing media file in three columns: the clip as it is named in the bin, the MXF file name and the original file (camera clip, tape or imported file). The MXF name is only known while an Avid database on the drives still lists the file, otherwise it shows “–”. Click the arrow to see where a file is used; click any name to copy it to the clipboard. Drag the column edges in the header to make a column wider, and the divider between the tree and the list to give the tree more room. The window can be resized; at the top choose **All**, **To relink**, **Missing** or **Files only** (every missing file once, without bins). To pass it on, save a request (see below). On the left is the folder tree of the scanned projects (closed at first – click the arrow to open a folder): untick a folder (or a whole project) and its bins drop out of every view and every count – a file used only there is no longer listed. **All**, **None** and **Invert** at the top right of the tree change every tick at once. The request takes only the files of the ticked folders.
 3. **AMA clips** shows where AMA-linked files are used. They are not requested.
-4. **Request** → **Save request…** writes a `…_Request.ferry` file. Send it to the system that has the media; there: Exchange › Compare, open it, then Collect. Here: Exchange › Import the delivery.
+4. **Request** → **Save request…** writes a `…_Request.mfexchange` file. Send it to the system that has the media; there: Exchange › Compare, open it, then Collect. Here: Exchange › Import the delivery.
 
 Good to know:
 

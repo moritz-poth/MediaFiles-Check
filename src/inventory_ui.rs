@@ -89,7 +89,7 @@ fn lang_of(app: &AppWindow) -> String {
 /// The History of the Media tab (also read by Tasks for databases still to rewrite).
 pub fn show_runs(app: &AppWindow) {
     let lang = lang_of(app);
-    let runs: media_moves::Journal = mediafiles_check::duplicates::load(&journal_path()).unwrap_or_default();
+    let runs: media_moves::Journal = load_json(&journal_path()).unwrap_or_default();
     let rows: Vec<RunRow> = runs
         .entries
         .iter()
@@ -335,6 +335,9 @@ fn confirm(app: &AppWindow, inv: &Inv) {
 
 /// "Start" after a run (-1) or "Rewrite databases" of a History entry.
 fn rewrite(app: &AppWindow, inv: &Inv, renames: &Rc<RefCell<Renames>>, i: i32) {
+    if run_going(app) {
+        return;
+    }
     if renames_open(&renames.borrow()) {
         log::write("refused: folders still renamed for Media Composer");
         return;
@@ -345,7 +348,7 @@ fn rewrite(app: &AppWindow, inv: &Inv, renames: &Rc<RefCell<Renames>>, i: i32) {
     }
     let path = journal_path();
     let mut rows = vec![];
-    match mediafiles_check::duplicates::load::<media_moves::Journal>(&path) {
+    match load_json::<media_moves::Journal>(&path) {
         Err(e) => rows.push(notice(3, "media-runs.json", &e.to_string(), 0)),
         Ok(mut journal) => {
             let done = inv.borrow_mut().done.take();
@@ -353,7 +356,7 @@ fn rewrite(app: &AppWindow, inv: &Inv, renames: &Rc<RefCell<Renames>>, i: i32) {
             if let Some(run) = index.and_then(|i| journal.entries.get_mut(i)) {
                 rows = rewrite_folders(&mut renames.borrow_mut(), &run.changed);
                 run.db_done = true;
-                if let Err(e) = mediafiles_check::duplicates::save(&journal, &path) {
+                if let Err(e) = save_json(&journal, &path) {
                     rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
                 }
             }
@@ -367,6 +370,9 @@ fn rewrite(app: &AppWindow, inv: &Inv, renames: &Rc<RefCell<Renames>>, i: i32) {
 }
 
 fn undo(app: &AppWindow, renames: &Rc<RefCell<Renames>>, i: i32) {
+    if run_going(app) {
+        return;
+    }
     if media_composer_running() {
         app.global::<Inventory>().set_mc_running(true);
         return;
@@ -374,7 +380,7 @@ fn undo(app: &AppWindow, renames: &Rc<RefCell<Renames>>, i: i32) {
     let lang = lang_of(app);
     let path = journal_path();
     let mut rows = vec![];
-    match mediafiles_check::duplicates::load::<media_moves::Journal>(&path) {
+    match load_json::<media_moves::Journal>(&path) {
         Err(e) => rows.push(notice(3, "media-runs.json", &e.to_string(), 0)),
         Ok(mut journal) => {
             let Some(run) = journal.entries.get(i as usize).cloned() else { return };
@@ -387,7 +393,7 @@ fn undo(app: &AppWindow, renames: &Rc<RefCell<Renames>>, i: i32) {
                         rows.push(notice(7, &short_list(&u.skipped.iter().map(|s| s.0.clone()).collect::<Vec<_>>()), "", u.skipped.len()));
                     }
                     journal.entries.remove(i as usize);
-                    if let Err(e) = mediafiles_check::duplicates::save(&journal, &path) {
+                    if let Err(e) = save_json(&journal, &path) {
                         rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
                     }
                     // databases rewritten after the run no longer fit: rewritten again; otherwise the old ones fit again
@@ -700,7 +706,7 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
         let manifest = (!gate.is_cancelled()).then(|| {
             let (hash_to, label) = (weak.clone(), checksums_label.clone());
             let mut eta = Eta::default();
-            let r = fscan::scan(&chosen, false, Some(&ferry_dir().join("cache")), &mut |done, total, place| {
+            let r = fscan::scan(&chosen, false, Some(&exchange_dir().join("cache")), &mut |done, total, place| {
                 let Some(left) = eta.tick(done, total) else { return };
                 let (w, text) = (hash_to.clone(), format!("{label} · {}", shorten(place, LINE_CHARS - 30)));
                 let _ = slint::invoke_from_event_loop(move || {
@@ -728,7 +734,7 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
         let bins_to = weak.clone();
         let mut bin_progress = move |done: usize, total: usize, bin: &str| {
             // every 50th bin is enough (unchanged ones come from the cache in microseconds)
-            if done % 50 != 0 {
+            if !done.is_multiple_of(50) {
                 return;
             }
             let (w, bin) = (bins_to.clone(), bin.to_string());
@@ -784,7 +790,7 @@ fn start_scan(app: &AppWindow, st: &mut InvState, drives: &[(PathBuf, bool)], pr
                 files: items.len(),
             };
             if let Some(m) = &manifest {
-                let _ = fs::create_dir_all(ferry_dir());
+                let _ = fs::create_dir_all(exchange_dir());
                 if let Err(e) = m.save(&manifest_path()) {
                     log::write(&format!("  manifest not saved: {e}"));
                 }

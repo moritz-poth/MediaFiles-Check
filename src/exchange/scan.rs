@@ -1,5 +1,5 @@
 //! Laufwerke finden und MXF-Ordner mit Prüfsummen erfassen.
-use crate::ferry::*;
+use crate::exchange::*;
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
@@ -22,14 +22,14 @@ pub fn find_volumes() -> Vec<PathBuf> {
     crate::find_volumes()
 }
 
-/// Ablage für Prüfsummen-Cache, Einstellungen und letztes Manifest.
+/// Ablage für Prüfsummen-Cache, Laufwerks-Zuordnungen und letztes Manifest (Unterordner "Exchange" der App-Daten).
 pub fn app_dir() -> Option<PathBuf> {
     let (var, sub) = if cfg!(windows) {
-        ("APPDATA", "MediaFiles Ferry")
+        ("APPDATA", "MediaFiles Check")
     } else {
-        ("HOME", "Library/Application Support/MediaFiles Ferry")
+        ("HOME", "Library/Application Support/MediaFiles Check")
     };
-    std::env::var_os(var).map(|base| PathBuf::from(base).join(sub))
+    std::env::var_os(var).map(|base| PathBuf::from(base).join(sub).join("Exchange"))
 }
 
 /// Der Name, den auch Avid für Ordner wie "Mac Studio von Alex.1" nimmt; der Hostname enthält oft das Netzwerk (".fritz.box").
@@ -203,11 +203,11 @@ pub fn scan(volumes: &[PathBuf], full: bool, cache_dir: Option<&Path>, progress:
             folder.has_db = db[0] && db[1];
             folders.push(folder);
             // Zwischenstand sichern: nach einem Absturz muss nur der Rest neu gehasht werden.
-            if let Some(p) = &cache_path {
-                if last_save.elapsed().as_secs() >= 30 {
-                    save_cache(p, &cache)?;
-                    last_save = std::time::Instant::now();
-                }
+            if let Some(p) = &cache_path
+                && last_save.elapsed().as_secs() >= 30
+            {
+                save_cache(p, &cache)?;
+                last_save = std::time::Instant::now();
             }
         }
 

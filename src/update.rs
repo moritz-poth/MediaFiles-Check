@@ -1,4 +1,4 @@
-//! Updates from GitHub releases (port of Mountpoint's Updater.swift; the same file is in MediaFiles Ferry).
+//! Updates from GitHub releases (port of Mountpoint's Updater.swift).
 //! Newest non-draft release with the zip asset → download → unzip with ditto → check bundle id, release key ==
 //! tag and the code signature → old app to the Trash, new app in its place → restart once this process has quit.
 //! Network through /usr/bin/curl (part of macOS), so the app needs no TLS library.

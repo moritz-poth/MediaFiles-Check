@@ -4,7 +4,7 @@
 
 MediaFiles Check kümmert sich um die Avid-Mediendateien (MXF) deiner Schnittplätze:
 
-- **Austausch** gleicht die Medien zweier Schnittplätze ab, auch wenn sie nicht verbunden sind (früher MediaFiles Ferry).
+- **Austausch** gleicht die Medien zweier Schnittplätze ab, auch wenn sie nicht verbunden sind.
 - **DBs prüfen** vergleicht jeden Ordner in `Avid MediaFiles/MXF` mit seiner Avid-Datenbank und zeigt, wo beide nicht zusammenpassen.
 - **MXFs pflegen** enthält die Werkzeuge, die etwas verändern: Ordner für Media Composer umbenennen, Rebalancing, Duplikate und ihr Verlauf.
 - **Projekt-Verlinkungen** findet die Mediendateien, die die Bins deiner Avid-Projekte brauchen, die aber auf keinem Laufwerk liegen, und fordert sie an.
@@ -41,7 +41,7 @@ Der Scan schreibt auch das *Manifest* für Austausch: jede MXF-Datei der eingesc
 
 ## Austausch: Vergleichen und Sammeln
 
-Austausch › **Vergleichen** → **Manifest sichern…** speichert das Manifest des letzten Scans z. B. als `261101-1312_Mac Studio_Manifest.ferry`. Schick es an den anderen Schnittplatz, z. B. per Mail oder USB-Stick. Ohne Scan steht dort **Noch kein Scan** – **Zu Scannen**.
+Austausch › **Vergleichen** → **Manifest sichern…** speichert das Manifest des letzten Scans z. B. als `261101-1312_Mac Studio_Manifest.mfexchange`. Schick es an den anderen Schnittplatz, z. B. per Mail oder USB-Stick. Ohne Scan steht dort **Noch kein Scan** – **Zu Scannen**.
 
 1. Zuerst diesen Schnittplatz unter Scannen scannen, damit das eigene Manifest aktuell ist.
 2. Austausch › **Vergleichen** → **Manifest öffnen…** und das Manifest des anderen Schnittplatzes wählen – oder eine Anforderung aus Projekt-Verlinkungen › Anfordern.
@@ -58,7 +58,7 @@ Jede Datei wird mit Prüfsumme in einen neuen Ordner wie `261102-1830_Mac Studio
 2. Austausch › **Importieren** → **Lieferung wählen…**.
 3. Jedes Laufwerk der Lieferung braucht ein Laufwerk auf diesem Schnittplatz; gleichnamige werden automatisch zugeordnet. Mit **Trennen** gehen die Mediendateien auf ein Laufwerk und die Render-Dateien auf ein anderes (erkannt am MXF-Header).
 4. **Ordner:** Die Seite zeigt, wie viele Ordner zusammengeführt werden; **Ordner festlegen…** öffnet ein Fenster mit allen Ordnern der Lieferung: für jeden Ordner **Zusammenführen** (in den Ordner mit demselben Namen) oder **Eigener Ordner** (`<Absender>_<Ordner>`, z. B. `Mac Studio_1`; gibt es ihn schon, kommen die Dateien hinein). **Alle zusammenführen** / **Alle in eigene Ordner** wählt für alle.
-5. **Prüfen & importieren** prüft zuerst jede Datei. Nur eine vollständige, unbeschädigte Lieferung wird importiert – Dateien kommen nur dazu, eine Mediendatei wird nie überschrieben. Ersetzte Datenbanken bleiben in `Avid MediaFiles/Ferry-Backup/`.
+5. **Prüfen & importieren** prüft zuerst jede Datei. Nur eine vollständige, unbeschädigte Lieferung wird importiert – Dateien kommen nur dazu, eine Mediendatei wird nie überschrieben. Ersetzte Datenbanken bleiben in `Avid MediaFiles/Exchange-Backup/`.
 6. Danach unter Scannen noch einmal scannen, damit das Manifest aktuell ist.
 
 ## Austausch: Aufgaben
@@ -137,7 +137,7 @@ MXFs pflegen › **Verlauf** listet jeden Lauf von Rebalancing und Duplikaten, n
 1. Projekte arbeitet mit dem aktuellen Scan aus dem Reiter **Scannen**: mit den Projekten, die dort eingeschaltet sind (jeder Ordner mit einer `.avp`-Datei im gewählten Projekte-Ordner; `Attic` bleibt außen vor). Die fehlenden Medien werden bei jedem Scan ermittelt und mit ihm im Verlauf gespeichert. Ohne Scan mit Projekten bietet Projekte **Zu Scannen** an.
 2. **Fehlende Medien** listet pro Bin jede fehlende Mediendatei in drei Spalten: der Clip, wie er im Bin heißt, der MXF-Dateiname und die Originaldatei (Kamera-Clip, Band oder importierte Datei). Den MXF-Namen kennt die App nur, solange eine Avid-Datenbank auf den Laufwerken die Datei noch führt, sonst steht dort „–“. Ein Klick auf den Pfeil zeigt, wo eine Datei verwendet wird; ein Klick auf einen Namen kopiert ihn in die Zwischenablage. Die Spaltenränder im Kopf und den Steg zwischen Baum und Liste kannst du ziehen. Das Fenster lässt sich frei vergrößern; oben wählst du **Alle**, **Neu verlinken**, **Fehlend** oder **Nur Dateien** (jede fehlende Datei einmal, ohne Bins). Zum Weitergeben gibt es die Anforderung (siehe unten). Links steht der Ordnerbaum der geprüften Projekte (anfangs zugeklappt – der Pfeil klappt einen Ordner auf): Nimmst du bei einem Ordner (oder einem ganzen Projekt) den Haken weg, fallen seine Bins aus jeder Ansicht und jeder Zahl – eine Datei, die nur dort benutzt wird, steht nicht mehr in der Liste. **Alle**, **Keine** und **Umkehren** oben rechts im Baum ändern alle Haken auf einmal. Die Anforderung enthält nur die Dateien der angehakten Ordner.
 3. **AMA-Clips** zeigt, wo AMA-verknüpfte Dateien verwendet werden. Sie werden nicht angefordert.
-4. **Anfordern** → **Anforderung sichern…** schreibt eine `…_Request.ferry`-Datei. Schick sie an den Schnittplatz, der die Medien hat; dort: Austausch › Vergleichen, Datei öffnen, dann Sammeln. Hier: Austausch › Importieren der Lieferung.
+4. **Anfordern** → **Anforderung sichern…** schreibt eine `…_Request.mfexchange`-Datei. Schick sie an den Schnittplatz, der die Medien hat; dort: Austausch › Vergleichen, Datei öffnen, dann Sammeln. Hier: Austausch › Importieren der Lieferung.
 
 Gut zu wissen:
 

@@ -4,7 +4,7 @@
 
 MediaFiles Check prend soin des fichiers média Avid (MXF) de vos postes de montage :
 
-- **Échange** synchronise les médias de deux postes, même s’ils ne sont pas connectés (anciennement MediaFiles Ferry).
+- **Échange** synchronise les médias de deux postes, même s’ils ne sont pas connectés.
 - **Vérifier BD** compare chaque dossier de `Avid MediaFiles/MXF` à sa base de données Avid et montre où les deux ne concordent pas.
 - **Entretien MXF** regroupe les outils qui modifient quelque chose : renommer des dossiers pour Media Composer, rééquilibrage, doublons et leur historique.
 - **Liens de projet** trouve les fichiers média dont les chutiers de vos projets Avid ont besoin et qui ne sont sur aucun disque, et les demande.
@@ -41,7 +41,7 @@ L’analyse écrit aussi le *manifeste* d’Échange : chaque fichier MXF des di
 
 ## Échange : comparer et rassembler
 
-Échange › **Comparer** → **Enregistrer le manifeste…** enregistre le manifeste de la dernière analyse p. ex. sous `261101-1312_Mac Studio_Manifest.ferry`. Envoyez-le à l’autre poste, p. ex. par e-mail ou clé USB. Sans analyse, la page indique **Pas encore d’analyse** – **Aller à Analyser**.
+Échange › **Comparer** → **Enregistrer le manifeste…** enregistre le manifeste de la dernière analyse p. ex. sous `261101-1312_Mac Studio_Manifest.mfexchange`. Envoyez-le à l’autre poste, p. ex. par e-mail ou clé USB. Sans analyse, la page indique **Pas encore d’analyse** – **Aller à Analyser**.
 
 1. Analysez d’abord ce poste sous Analyser, pour que votre manifeste soit à jour.
 2. Échange › **Comparer** → **Ouvrir un manifeste…** et choisissez le manifeste de l’autre poste – ou une demande enregistrée sous Liens de projet › Demander.
@@ -58,7 +58,7 @@ Chaque fichier est copié avec contrôle de somme dans un nouveau dossier comme 
 2. Échange › **Importer** → **Choisir la livraison…**.
 3. Chaque disque de la livraison a besoin d’un disque sur ce poste ; les disques du même nom sont associés automatiquement. Avec **Séparer**, les fichiers média vont sur un disque et les fichiers de rendu sur un autre (reconnus par leur en-tête MXF).
 4. **Dossiers :** la page indique combien de dossiers sont fusionnés ; **Choisir les dossiers…** ouvre une fenêtre avec tous les dossiers de la livraison : pour chaque dossier **Fusionner** (dans le dossier du même nom) ou **Dossier propre** (`<expéditeur>_<dossier>`, p. ex. `Mac Studio_1` ; s’il existe déjà, les fichiers y vont). **Tout fusionner** / **Tous dans des dossiers propres** règle tous les dossiers.
-5. **Vérifier et importer** vérifie d’abord chaque fichier. Seule une livraison complète et intacte est importée – les fichiers sont seulement ajoutés, un fichier média n’est jamais écrasé. Les bases de données remplacées sont gardées dans `Avid MediaFiles/Ferry-Backup/`.
+5. **Vérifier et importer** vérifie d’abord chaque fichier. Seule une livraison complète et intacte est importée – les fichiers sont seulement ajoutés, un fichier média n’est jamais écrasé. Les bases de données remplacées sont gardées dans `Avid MediaFiles/Exchange-Backup/`.
 6. Analysez à nouveau ensuite sous Analyser, pour que le manifeste soit à jour.
 
 ## Échange : tâches
@@ -137,7 +137,7 @@ Entretien MXF › **Historique** liste chaque opération de rééquilibrage et d
 1. Projets travaille avec l’analyse actuelle de l’onglet **Analyser** : les projets activés là-bas (chaque dossier avec un fichier `.avp` dans le dossier des projets choisi ; `Attic` est laissé de côté). Les médias manquants sont calculés à chaque analyse et gardés avec elle dans l’historique. Sans analyse avec des projets, Projets propose **Aller à Analyser**.
 2. **Médias manquants** liste par chutier chaque fichier média manquant en trois colonnes : le clip tel qu’il s’appelle dans le chutier, le nom du fichier MXF et le fichier original (clip caméra, bande ou fichier importé). Le nom MXF n’est connu que tant qu’une base de données Avid sur les disques liste encore le fichier, sinon « – » s’affiche. Un clic sur la flèche montre où un fichier est utilisé ; un clic sur un nom le copie dans le presse-papiers. Les bords des colonnes dans l’en-tête et la séparation entre l’arborescence et la liste se déplacent à la souris. La fenêtre se redimensionne librement ; en haut, choisissez **Tous**, **À relier**, **Manquants** ou **Fichiers seuls** (chaque fichier manquant une fois, sans chutiers). Pour la transmettre, enregistrez une demande (voir plus bas). À gauche se trouve l’arborescence des dossiers des projets analysés (fermée au début – la flèche ouvre un dossier) : décochez un dossier (ou un projet entier) et ses chutiers disparaissent de chaque vue et de chaque nombre – un fichier utilisé seulement là n’est plus listé. **Tous**, **Aucun** et **Inverser** en haut à droite de l’arborescence changent toutes les coches d’un coup. La demande ne contient que les fichiers des dossiers cochés.
 3. **Clips AMA** montre où sont utilisés les fichiers liés en AMA. Ils ne sont pas demandés.
-4. **Demander** → **Enregistrer la demande…** écrit un fichier `…_Request.ferry`. Envoyez-le au poste qui a les médias ; là-bas : Échange › Comparer, ouvrez-le, puis Rassembler. Ici : Échange › Importer la livraison.
+4. **Demander** → **Enregistrer la demande…** écrit un fichier `…_Request.mfexchange`. Envoyez-le au poste qui a les médias ; là-bas : Échange › Comparer, ouvrez-le, puis Rassembler. Ici : Échange › Importer la livraison.
 
 Bon à savoir :
 

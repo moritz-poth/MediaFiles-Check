@@ -1,8 +1,8 @@
 //! Abläufe der Oberfläche: Vergleichen → Sammeln, Lieferung → Prüfen & Einspielen.
 //! Der Zustand liegt in `Session`; jede Änderung baut die Modelle der Oberfläche neu auf.
-use crate::ferry::collect::{self, Delivery};
-use crate::ferry::plan::{self, Options, Plan};
-use crate::ferry::{DB_FILES, Manifest, key, local_time, now_secs, safe_name, scan, write_atomic};
+use crate::exchange::collect::{self, Delivery};
+use crate::exchange::plan::{self, Options, Plan};
+use crate::exchange::{DB_FILES, Manifest, key, local_time, now_secs, safe_name, scan, write_atomic};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -68,8 +68,8 @@ impl Compare {
     }
 
     /// Anforderung: die Gegenseite ist der Anfordernde, der Plan steht fest.
-    pub fn from_request(local: Manifest, req: &crate::ferry::request::Request) -> Self {
-        let plan = crate::ferry::request::plan(&local, req);
+    pub fn from_request(local: Manifest, req: &crate::exchange::request::Request) -> Self {
+        let plan = crate::exchange::request::plan(&local, req);
         let remote = Manifest { system: req.system.clone(), created: req.created, ..Default::default() };
         Compare { local, remote, drives: vec![], request: Some(plan) }
     }
@@ -208,7 +208,7 @@ pub fn format_size(bytes: u64, lang: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ferry::{FileEntry, Folder, Volume};
+    use crate::exchange::{FileEntry, Folder, Volume};
 
     fn vol(name: &str, folders: &[(&str, &[&str])]) -> Volume {
         Volume {

@@ -1,4 +1,4 @@
-// Oberfläche von MediaFiles Check (gleicher Look wie MediaFiles Ferry). Texte auf Englisch in @tr(); Deutsch in translations/.
+// Oberfläche von MediaFiles Check. Texte auf Englisch in @tr(); Deutsch in translations/.
 import { Palette, Spinner, ListView } from "std-widgets.slint";
 import "fonts/JetBrainsMono-Regular.ttf";
 import "fonts/JetBrainsMono-Medium.ttf";
@@ -204,7 +204,7 @@ component CheckButton {
     in property <string> text;
     in property <bool> primary;
     in property <bool> enabled: true;
-    // 26 px wie Mountpoints FerryButtonStyle in den Einstellungen (Schrift 12, 12 px Rand), sonst 32 px wie Ferry
+    // 26 px wie Mountpoints kleine Knöpfe in den Einstellungen (Schrift 12, 12 px Rand), sonst 32 px
     in property <bool> small;
     callback clicked;
     min-width: label.preferred-width + (root.small ? 24px : 28px);
@@ -428,7 +428,7 @@ component SectionLabel inherits Text {
     color: Theme.muted;
 }
 
-// Auswahl wie Mountpoints Dropdown: Knopf im Ferry-Stil (26 px) mit Titel und Pfeil, darunter das native Menü;
+// Auswahl wie Mountpoints Dropdown: kleiner Knopf (26 px) mit Titel und Pfeil, darunter das native Menü;
 // der aktuelle Eintrag ist ausgegraut.
 component Dropdown {
     in property <[string]> items;
@@ -1067,7 +1067,7 @@ component ProjectsPane inherits VerticalLayout {
     }
 }
 
-// Austausch (früher MediaFiles Ferry): Rust füllt diesen Zustand, die Seite zeigt ihn je Schritt (view)
+// Austausch: Rust füllt diesen Zustand, die Seite zeigt ihn je Schritt (view)
 // Zuordnung eines Laufwerks: options[0] = „Wählen…“ (noch offen)
 export struct MapRow {
     name: string,
@@ -1441,7 +1441,7 @@ component ExchangePane inherits VerticalLayout {
             color: Theme.muted;
         }
         Para {
-            text: Exchange.work-kind == 0 ? @tr("Every file is compared with its checksum after copying. Interrupted? Collect again continues where it stopped.") : @tr("Adds files only and never overwrites a media file. Replaced databases go to Ferry-Backup.");
+            text: Exchange.work-kind == 0 ? @tr("Every file is compared with its checksum after copying. Interrupted? Collect again continues where it stopped.") : @tr("Adds files only and never overwrites a media file. Replaced databases go to Exchange-Backup.");
         }
     }
 
@@ -2675,6 +2675,9 @@ export component AppWindow inherits CheckWindow {
     property <Page> page3: Page.rebalstart;
     property <Page> page5: Page.media;
     property <Page> page6: Page.scan;
+    // Schritt je Reiter mit Seitenleiste: eine Ergebnisseite (notice) hat keinen eigenen Schritt
+    property <int> step1;
+    property <int> step3;
     in-out property <bool> has-result;
     // erster Start: Überblick über die Reiter (Rust merkt sich das Schließen in welcome-seen)
     in-out property <bool> show-welcome;
@@ -2717,6 +2720,7 @@ export component AppWindow inherits CheckWindow {
     public function select-tab(t: int) {
         root.tab = t;
         root.page = t == 0 ? root.page0 : t == 1 ? root.page1 : t == 2 ? root.page2 : t == 3 ? root.page3 : t == 5 ? root.page5 : root.page6;
+        root.step = t == 1 ? root.step1 : t == 3 ? root.step3 : root.step;
         if root.work-busy && t == root.work-tab { root.page = Page.working; root.step = root.work-step; }
         // ein beendeter Lauf hinterlässt keine stehengebliebene Fortschrittsseite
         if !root.work-busy && root.page == Page.working { root.page = root.start-of(t, root.step); }
@@ -2727,13 +2731,18 @@ export component AppWindow inherits CheckWindow {
         // die Erklärung nach „Alte Datenbanken beiseitelegen“ gilt nur für diese eine Ergebnisseite
         if root.page != Page.notice { root.notice-db = false; }
         if root.page == Page.working { root.work-tab = root.tab; root.work-step = root.step; }
-        if root.tab-of(root.page) >= 0 && root.tab-of(root.page) != root.tab { root.tab = root.tab-of(root.page); }
+        if root.tab-of(root.page) >= 0 && root.tab-of(root.page) != root.tab {
+            // eine Ergebnisseite, von der man in einen anderen Reiter springt, ist erledigt und bleibt dort nicht stehen
+            if root.tab == 1 && root.page1 == Page.notice { root.page1 = root.start-of(1, root.step1); }
+            if root.tab == 3 && root.page3 == Page.notice { root.page3 = root.start-of(3, root.step3); }
+            root.tab = root.tab-of(root.page);
+        }
         if root.step-of(root.page) >= 0 { root.step = root.step-of(root.page); }
         if root.page == Page.result { root.has-result = true; }
         if root.tab == 0 { root.page0 = root.page; }
-        if root.tab == 1 { root.page1 = root.page; }
+        if root.tab == 1 { root.page1 = root.page; root.step1 = root.step; }
         if root.tab == 2 { root.page2 = root.page; }
-        if root.tab == 3 { root.page3 = root.page; }
+        if root.tab == 3 { root.page3 = root.page; root.step3 = root.step; }
         if root.tab == 5 { root.page5 = root.page; }
         if root.tab == 6 { root.page6 = root.page; }
     }
@@ -3702,7 +3711,6 @@ ScrollBox {
             }
         }
 
-        // ── Rebalancing: frühere Läufe (Datenbanken neu schreiben, rückgängig machen) ──
         // ── Verlauf: alle Läufe von Rebalancing und Duplikaten (Datenbanken neu schreiben, rückgängig machen) ──
         if root.page == Page.runs: VerticalLayout {
             spacing: 14px;
@@ -3810,7 +3818,7 @@ ScrollBox {
                 }
                 for t[i] in [
                     { a: @tr("Scan"), b: @tr("reads the drives and projects once – every other tab works with that scan.") },
-                    { a: @tr("Exchange"), b: @tr("keeps the media of two edit systems in step – formerly MediaFiles Ferry.") },
+                    { a: @tr("Exchange"), b: @tr("keeps the media of two edit systems in step.") },
                     { a: @tr("Check"), b: @tr("compares every MXF folder with its Avid database.") },
                     { a: @tr("Maintain"), b: @tr("renames folders for Media Composer, rebalances full folders, sets duplicates aside.") },
                     { a: @tr("Projects"), b: @tr("finds the media your bins need that are on none of the drives.") },
@@ -4505,7 +4513,7 @@ export component SettingsWindow inherits CheckWindow {
         }
     }
 
-    // Warnung vor dem Ändern der Grenze: Karte über dem Fenster (Ferry-Stil, wie Mountpoints networkCard)
+    // Warnung vor dem Ändern der Grenze: Karte über dem Fenster (wie Mountpoints networkCard)
     if root.limit-ask: Rectangle {
         background: #00000066;
         TouchArea { }
@@ -4577,7 +4585,7 @@ export component SettingsWindow inherits CheckWindow {
     }
 }
 
-// Avid-Projekte: Überordner wählen, Projekte einschalten, Bins lesen, fehlende Medien auflisten und für Ferry anfordern.
+// Avid-Projekte: Überordner wählen, Projekte einschalten, Bins lesen, fehlende Medien auflisten und für den Austausch anfordern.
 // step: 0 Auswahl, 1 läuft, 2 Ergebnis
 
 // Fehlende Medien bzw. AMA-Clips pro Bin (Projekt-Verlinkungen › Medien anzeigen…): eigenes, größeres Fenster, das Hauptfenster bleibt gleich groß

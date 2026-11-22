@@ -6,8 +6,8 @@
 use crate::{MDB, PMR, key};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::fs::{self, File};
-use std::io::{self, Write};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -35,27 +35,6 @@ impl Renamed {
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct Journal {
     pub entries: Vec<Renamed>,
-}
-
-impl Journal {
-    /// A missing journal is empty; an unreadable one is an error – it must never be overwritten blindly.
-    pub fn load(path: &Path) -> io::Result<Journal> {
-        match fs::read(path) {
-            Ok(b) => serde_json::from_slice(&b).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display()))),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Journal::default()),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Writes next to the file first, then renames: a crash never leaves half a journal.
-    pub fn save(&self, path: &Path) -> io::Result<()> {
-        fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
-        let tmp = path.with_extension("tmp");
-        let mut f = File::create(&tmp)?;
-        f.write_all(&serde_json::to_vec_pretty(self)?)?;
-        f.sync_all()?;
-        fs::rename(&tmp, path)
-    }
 }
 
 fn stamp(p: &Path) -> Stamp {
@@ -168,10 +147,10 @@ pub fn rename_for_avid(folder: &Path, new_name: &str, journal: &mut Journal, jou
     }
     let original = folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
     journal.entries.push(Renamed { mxf, original, current: new_name.into(), files: mxf_files(folder)?, db: db_stamps(folder) });
-    journal.save(journal_path)?;
+    crate::save_json(journal, journal_path)?;
     if let Err(e) = crate::move_new(folder, &target) {
         journal.entries.pop();
-        journal.save(journal_path)?;
+        crate::save_json(journal, journal_path)?;
         return Err(e);
     }
     Ok(())
@@ -333,7 +312,7 @@ mod tests {
         assert_eq!(planned, ["2", "3"]); // "1" exists, two folders never share a number
         rename_for_avid(&folder, "2", &mut j, &jp).unwrap();
         assert!(!folder.exists() && mxf.join("2/a.mxf").exists());
-        assert_eq!(Journal::load(&jp).unwrap().entries, j.entries);
+        assert_eq!(crate::load_json::<Journal>(&jp).unwrap().entries, j.entries);
         let r = j.entries[0].clone();
         assert_eq!(r.files, [("a.mxf".into(), 2), ("b.mxf".into(), 3)]);
         assert_eq!(status(&r), Status::Waiting);

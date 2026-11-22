@@ -20,12 +20,12 @@ fn main() -> ExitCode {
     if reports.iter().any(|r| !r.findings.is_empty()) { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }
 
-/// mfcheck --projects FOLDER [REQUEST.ferry]: media missing for the Avid projects below FOLDER, checked against the
-/// connected drives (or the folders in MFC_DRIVES, colon-separated); optionally writes the request for Ferry.
+/// mfcheck --projects FOLDER [REQUEST.mfexchange]: media missing for the Avid projects below FOLDER, checked against the
+/// connected drives (or the folders in MFC_DRIVES, colon-separated); optionally writes the request for Exchange.
 fn projects(args: &[String]) -> ExitCode {
     use mediafiles_check::projects;
     let Some(root) = args.first() else {
-        eprintln!("mfcheck --projects FOLDER [REQUEST.ferry]");
+        eprintln!("mfcheck --projects FOLDER [REQUEST.mfexchange]");
         return ExitCode::FAILURE;
     };
     let drives: Vec<PathBuf> = match std::env::var("MFC_DRIVES") {

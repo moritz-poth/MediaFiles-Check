@@ -1,5 +1,5 @@
 //! Avid projects: find them below a folder, read their bins and list the media files their clips need that are
-//! not on the connected drives; write those as a request for MediaFiles Ferry.
+//! not on the connected drives; write those as a request for Exchange.
 use crate::avb::{Bin, MobId, MobKind, id_hex};
 use crate::{PMR, folders, key, read_pmr_entries};
 use serde::{Deserialize, Serialize};
@@ -769,7 +769,7 @@ pub fn scan_of(projects: &ProjectBins, available: &HashSet<MobId>) -> ScanResult
     r
 }
 
-/// Request for MediaFiles Ferry (format "mediafiles-ferry-request", see Ferry's src/request.rs).
+/// Request for Exchange (format "mediafiles-exchange-request", read by src/exchange/request.rs).
 #[derive(Serialize)]
 struct Request<'a> {
     format: &'a str,
@@ -792,7 +792,7 @@ pub fn request_json(system: &str, created: u64, missing: &[Missing]) -> Vec<u8> 
         .iter()
         .map(|m| Wanted { id: id_hex(&m.id), clip: &m.first.clip, bin: &m.first.bin, project: &m.first.project })
         .collect();
-    serde_json::to_vec(&Request { format: "mediafiles-ferry-request", version: 1, system, created, files }).unwrap_or_default()
+    serde_json::to_vec(&Request { format: "mediafiles-exchange-request", version: 1, system, created, files }).unwrap_or_default()
 }
 
 /// The missing media as text: per project and bin the clips and their missing files (ids).
