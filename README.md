@@ -2,6 +2,9 @@
 
 <p align="center"><code>Mac app</code>&nbsp;&nbsp;<code>macOS 11+</code>&nbsp;&nbsp;<code>free · GPL-3.0</code></p>
 
+> [!WARNING]
+> **Still in development.** There is no working release yet – the current builds are for testing only. Please do not use them on real projects or media drives.
+
 <p align="center">☕ If you use MediaFiles Check and like it, I would be glad if you <a href="https://buymeacoffee.com/moritzpoth">bought me a coffee</a>.</p>
 
 Looks after the Avid media files (MXF) of your edit systems: keeps two systems in step, checks every folder in **Avid MediaFiles/MXF** against its Avid database, finds what your Avid projects are missing, and tidies up full folders and duplicates.
