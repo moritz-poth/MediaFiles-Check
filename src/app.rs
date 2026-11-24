@@ -1555,6 +1555,10 @@ fn show_rows(w: &AppWindow, r: &ScanResult, st: &ProjectsState) {
             }
             (false, f) => media_rows(w, r, by_bin, &st.open, f, &shown),
         };
+        // longest entry per column for the double-click on a column edge (uses are indented by 16 px ≈ 3 chars)
+        let fit = |f: fn(&MediaFileRow) -> usize| rows.iter().filter(|r| r.level != 0).map(f).max().unwrap_or(0) as i32;
+        let fit = vec![fit(|r| r.clip.chars().count() + if r.level == 2 { 3 } else { 0 }), fit(|r| r.mxf.chars().count()), fit(|r| r.original.chars().count())];
+        m.set_fit_chars(ModelRc::new(VecModel::from(fit)));
         m.set_rows(ModelRc::new(VecModel::from(rows)));
     }
 }
@@ -3732,6 +3736,115 @@ fn main() -> Result<(), slint::PlatformError> {
 
 #[cfg(test)]
 mod tests {
+    /// Column edges of the media table with real pointer events: dragging changes only that column,
+    /// the list does not pan along, a double-click fits the column and dragging still works after it,
+    /// the wheel scrolls rows vertically under a fixed header and moves header and rows together sideways.
+    #[test]
+    fn media_table_columns_resize_and_scroll() {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        use slint::{ComponentHandle, LogicalPosition};
+        use i_slint_backend_testing::{ElementHandle, mock_elapsed_time};
+        i_slint_backend_testing::init_no_event_loop();
+        let w = super::MediaTableWindow::new().unwrap();
+        slint::select_bundled_translation("en").unwrap();
+        w.window().set_size(slint::LogicalSize::new(1000.0, 600.0));
+        let rows: Vec<super::MediaRow> = (0..300)
+            .map(|i| super::MediaRow { clip: format!("clip-{i}").into(), file: format!("{}-file.mxf", "x".repeat(40)).into(), ..Default::default() })
+            .collect();
+        w.set_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+        w.set_fit_chars(slint::ModelRc::new(slint::VecModel::from(vec![30; 13])));
+        w.show().unwrap();
+        let one = |label: &str| ElementHandle::find_by_accessible_label(&w, label).next()
+            .or_else(|| { w.window().dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(300.0, 300.0) }); ElementHandle::find_by_accessible_label(&w, label).next() }).unwrap_or_else(|| panic!("{label}"));
+        let head = |label: &str| { let e = one(label); (e.absolute_position(), e.size()) };
+        let ev = |e: WindowEvent| w.window().dispatch_event(e);
+        let at = |x: f32, y: f32| LogicalPosition::new(x, y);
+        let drag = |from: LogicalPosition, dx: f32| {
+            ev(WindowEvent::PointerMoved { position: from });
+            ev(WindowEvent::PointerPressed { position: from, button: PointerEventButton::Left });
+            for k in 1..=10 {
+                mock_elapsed_time(std::time::Duration::from_millis(16));
+                ev(WindowEvent::PointerMoved { position: at(from.x + dx * k as f32 / 10.0, from.y) });
+            }
+            ev(WindowEvent::PointerReleased { position: at(from.x + dx, from.y), button: PointerEventButton::Left });
+            mock_elapsed_time(std::time::Duration::from_millis(1000));
+        };
+        let edge = |label: &str| { let (p, s) = head(label); at(p.x + s.width - 3.0, p.y + s.height / 2.0) };
+
+        let (clip0, clip_size) = head("Clip");
+        let kind0 = head("Kind").0;
+        let row0 = one("clip-0").absolute_position();
+        drag(edge("Clip"), 60.0);
+        assert!((head("Clip").1.width - (clip_size.width + 60.0)).abs() < 0.5, "width {}", head("Clip").1.width);
+        assert!((head("Kind").0.x - (kind0.x + 60.0)).abs() < 0.5, "next column follows");
+        assert_eq!(head("Clip").0, clip0, "column itself stays");
+        assert_eq!(one("clip-0").absolute_position(), row0, "list did not pan");
+
+        // past the minimum and back: the edge waits for the mouse like in Finder
+        drag(edge("Clip"), -400.0);
+        assert!((head("Clip").1.width - 36.0).abs() < 0.5);
+
+        // double-click fits the column (30 chars), dragging afterwards still works
+        let p = edge("Clip");
+        for _ in 0..2 {
+            ev(WindowEvent::PointerPressed { position: p, button: PointerEventButton::Left });
+            mock_elapsed_time(std::time::Duration::from_millis(30));
+            ev(WindowEvent::PointerReleased { position: p, button: PointerEventButton::Left });
+            mock_elapsed_time(std::time::Duration::from_millis(30));
+        }
+        let fitted = head("Clip").1.width;
+        assert!((fitted - (30.0 * 7.2 + 18.0)).abs() < 0.5, "fitted {fitted}");
+        mock_elapsed_time(std::time::Duration::from_millis(1000));
+        drag(edge("Clip"), 40.0);
+        assert!((head("Clip").1.width - (fitted + 40.0)).abs() < 0.5, "drag after double-click {}", head("Clip").1.width);
+
+        // vertical wheel: rows move up, header stays
+        let header_y = head("Clip").0.y;
+        let row_y = one("clip-12").absolute_position().y;
+        ev(WindowEvent::PointerScrolled { position: at(300.0, 300.0), delta_x: 0.0, delta_y: -240.0 });
+        assert!((one("clip-12").absolute_position().y - (row_y - 240.0)).abs() < 0.5, "rows scrolled");
+        assert_eq!(head("Clip").0.y, header_y, "header stays");
+        // sideways: header and rows move together
+        let hx = head("Kind").0.x;
+        let rx = one("clip-12").absolute_position().x;
+        ev(WindowEvent::PointerScrolled { position: at(300.0, 300.0), delta_x: -200.0, delta_y: 0.0 });
+        let moved = hx - head("Kind").0.x;
+        assert!(moved > 100.0, "scrolled sideways {moved}");
+        assert!((rx - one("clip-12").absolute_position().x - moved).abs() < 0.5, "rows follow the header");
+
+        // missing media window: same column heads
+        let m = super::MediaWindow::new().unwrap();
+        m.window().set_size(slint::LogicalSize::new(1240.0, 720.0));
+        let rows: Vec<super::MediaFileRow> = (0..200)
+            .map(|i| super::MediaFileRow { level: 1, clip: format!("m-{i}").into(), mxf: "a.mxf".into(), first: true, index: i, ..Default::default() })
+            .collect();
+        m.set_rows(slint::ModelRc::new(slint::VecModel::from(rows)));
+        m.set_fit_chars(slint::ModelRc::new(slint::VecModel::from(vec![20, 5, 0])));
+        m.show().unwrap();
+        let ev = |e: WindowEvent| m.window().dispatch_event(e);
+        ev(WindowEvent::PointerMoved { position: at(700.0, 400.0) });
+        let one = |label: &str| ElementHandle::find_by_accessible_label(&m, label).next().unwrap_or_else(|| panic!("{label}"));
+        let head = |label: &str| { let e = one(label); (e.absolute_position(), e.size()) };
+        let (_, s0) = head("Clip in the bin");
+        let mxf0 = head("MXF file").0;
+        let row0 = one("m-0").absolute_position();
+        let (p, s) = head("Clip in the bin");
+        let from = at(p.x + s.width - 3.0, p.y + s.height / 2.0);
+        ev(WindowEvent::PointerPressed { position: from, button: PointerEventButton::Left });
+        for k in 1..=10 {
+            mock_elapsed_time(std::time::Duration::from_millis(16));
+            ev(WindowEvent::PointerMoved { position: at(from.x + 5.0 * k as f32, from.y) });
+        }
+        ev(WindowEvent::PointerReleased { position: at(from.x + 50.0, from.y), button: PointerEventButton::Left });
+        mock_elapsed_time(std::time::Duration::from_millis(1000));
+        assert!((head("Clip in the bin").1.width - (s0.width + 50.0)).abs() < 0.5);
+        assert!((head("MXF file").0.x - (mxf0.x + 50.0)).abs() < 0.5);
+        assert_eq!(one("m-0").absolute_position(), row0, "missing media list did not pan");
+        let row_y = one("m-12").absolute_position().y;
+        ev(WindowEvent::PointerScrolled { position: at(700.0, 400.0), delta_x: 0.0, delta_y: -120.0 });
+        assert!((one("m-12").absolute_position().y - (row_y - 120.0)).abs() < 0.5, "missing media rows scroll");
+    }
+
     #[test]
     fn bins_of_switched_off_folders_are_hidden() {
         use super::{FolderKey, HashSet, bin_folder, bin_visible};

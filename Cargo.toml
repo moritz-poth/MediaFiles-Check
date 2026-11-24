@@ -33,3 +33,6 @@ path = "src/main.rs"
 [[bin]]
 name = "mediafiles-check"
 path = "src/app.rs"
+
+[dev-dependencies]
+i-slint-backend-testing = "=1.18.1"

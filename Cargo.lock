@@ -2770,6 +2770,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "gethostname",
+ "i-slint-backend-testing",
  "libc",
  "objc2 0.6.5",
  "raw-window-handle",

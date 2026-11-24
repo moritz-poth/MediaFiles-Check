@@ -4844,6 +4844,7 @@ component FolderTree inherits VerticalLayout {
 
 // Medientabelle: eigenes, frei skalierbares Fenster; Filtern, Suchen und Sortieren macht Rust (Spalte, aufsteigend).
 // Spaltenkopf: Klick sortiert (Pfeil gleich hinter dem Namen), der rechte Rand lässt sich ziehen (Breite).
+// 8 px Luft links und rechts wie in den Zellen (`Col`), damit kein Name an der Trennlinie klebt.
 component ColumnHead inherits Rectangle {
     in property <string> text;
     in property <int> column;
@@ -4856,6 +4857,9 @@ component ColumnHead inherits Rectangle {
     // false: nur Überschrift mit ziehbarem Rand, kein Sortieren
     in property <bool> sortable: true;
     callback clicked(int);
+    // Breite und Mausposition (im Fenster) beim Drücken: die Breite folgt der Maus, auch wenn sie unter das Minimum ging
+    property <length> start-w;
+    property <length> start-x;
     width: root.w;
     accessible-role: button;
     accessible-label: root.text;
@@ -4866,6 +4870,7 @@ component ColumnHead inherits Rectangle {
         clicked => { root.clicked(root.column); }
     }
     HorizontalLayout {
+        padding-left: 8px;
         padding-right: 8px;
         spacing: 4px;
         if root.right: Rectangle { horizontal-stretch: 1; }
@@ -4885,22 +4890,30 @@ component ColumnHead inherits Rectangle {
         }
         if !root.right: Rectangle { horizontal-stretch: 1; }
     }
-    // Ziehgriff am rechten Rand: die Breite folgt der Maus
     Rectangle {
-        x: parent.width - 5px;
-        width: 9px;
-        Rectangle {
-            x: 4px;
-            width: 1px;
-            height: 60%;
-            background: Theme.line;
+        x: parent.width - 1px;
+        width: 1px;
+        height: 60%;
+        background: grip.has-hover || grip.pressed ? Theme.primary : Theme.line;
+    }
+    // Ziehgriff: die letzten 7 px der Spalte
+    grip := TouchArea {
+        x: parent.width - self.width;
+        width: 7px;
+        mouse-cursor: col-resize;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                root.start-w = root.w;
+                root.start-x = self.absolute-position.x + self.mouse-x;
+            }
         }
-        TouchArea {
-            mouse-cursor: col-resize;
-            moved => { root.w = max(36px, root.w + self.mouse-x - self.pressed-x); }
-            // JetBrains Mono: 0.6 em je Zeichen; Kopf 11 px + Pfeil, Zellen 12 px, je 8 px Luft rechts
-            double-clicked => { root.w = max(root.text.character-count * 6.6px + 22px, root.fit-chars * 7.2px + 12px); }
+        moved => {
+            if self.pressed {
+                root.w = max(36px, root.start-w + self.absolute-position.x + self.mouse-x - root.start-x);
+            }
         }
+        // JetBrains Mono: 0.6 em je Zeichen; Kopf 11 px + Pfeil, Zellen 12 px, je 8 px Luft links und rechts
+        double-clicked => { root.w = max(root.text.character-count * 6.6px + 30px, root.fit-chars * 7.2px + 18px); }
     }
 }
 
@@ -4910,7 +4923,7 @@ component Cell inherits Text {
     font-size: 12px;
 }
 
-// Tabellenzelle so breit wie ihre Spalte, 8 px Luft rechts wie im Spaltenkopf
+// Tabellenzelle so breit wie ihre Spalte, 8 px Luft links und rechts wie im Spaltenkopf
 component Col inherits Rectangle {
     in property <length> w;
     in property <string> text;
@@ -4919,8 +4932,8 @@ component Col inherits Rectangle {
     in property <bool> bold;
     width: root.w;
     Text {
-        x: 0;
-        width: parent.width - 8px;
+        x: 8px;
+        width: parent.width - 16px;
         text: root.text;
         horizontal-alignment: root.right ? TextHorizontalAlignment.right : TextHorizontalAlignment.left;
         vertical-alignment: center;
@@ -4953,16 +4966,16 @@ component CopyCell inherits Rectangle {
     callback copy(string);
     width: root.w;
     Rectangle {
-        x: root.indent;
+        x: root.indent + 4px;
         y: 2px;
-        width: parent.width - root.indent - 4px;
+        width: parent.width - root.indent - 8px;
         height: parent.height - 4px;
         border-radius: 4px;
         background: touch.has-hover && root.text != "" ? Theme.selection.with-alpha(0.6) : transparent;
     }
     Text {
-        x: root.indent + 4px;
-        width: parent.width - root.indent - 12px;
+        x: root.indent + 8px;
+        width: parent.width - root.indent - 16px;
         text: root.text == "" ? "–" : root.text;
         vertical-alignment: center;
         overflow: elide;
@@ -5008,6 +5021,8 @@ export component MediaWindow inherits CheckWindow {
     property <length> w-lead: 22px;
     property <length> w-note: 110px;
     property <length> table-width: root.w-lead + root.w-clip + root.w-mxf + root.w-orig + root.w-note + 16px;
+    // längster Eintrag je Spalte in Zeichen (für den Doppelklick auf den Spaltenrand)
+    in property <[int]> fit-chars: [0, 0, 0];
     Timer {
         interval: 2s;
         running: root.copied != "";
@@ -5100,94 +5115,95 @@ export component MediaWindow inherits CheckWindow {
                     border-color: Theme.card-line;
                     border-radius: 9px;
                     clip: true;
-                    Flickable {
-                        x: 1px;
-                        y: 1px;
-                        width: table-area.width - 2px;
-                        height: table-area.height - 2px;
-                        content-width: max(root.table-width, self.width);
-                        content-height: self.height;
-                        VerticalLayout {
-                            width: max(root.table-width, table-area.width - 2px);
-                            height: table-area.height - 2px;
-                            Rectangle {
-                                height: 30px;
-                                HorizontalLayout {
+                    // Kopfzeile außerhalb der Liste: läuft waagrecht mit ihr mit, bleibt beim senkrechten Scrollen stehen
+                    // (die Liste selbst scrollt in beide Richtungen; ihr Inhalt sitzt 2 px eingerückt)
+                    VerticalLayout {
+                        padding: 1px;
+                        Rectangle {
+                            height: 30px;
+                            clip: true;
+                            HorizontalLayout {
+                                x: media-list.content-x + 2px;
+                                width: max(root.table-width, media-list.visible-width);
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                Rectangle { width: root.w-lead; }
+                                ColumnHead { w <=> root.w-clip; text: @tr("Clip in the bin"); column: 0; fit-chars: root.fit-chars[0]; sortable: false; sorted: -1; }
+                                ColumnHead { w <=> root.w-mxf; text: @tr("MXF file"); column: 1; fit-chars: root.fit-chars[1]; sortable: false; sorted: -1; }
+                                ColumnHead { w <=> root.w-orig; text: @tr("Original file"); column: 2; fit-chars: root.fit-chars[2]; sortable: false; sorted: -1; }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+                        }
+                        Rectangle {
+                            height: 1px;
+                            background: Theme.line;
+                        }
+                        media-list := ListView {
+                            vertical-stretch: 1;
+                            content-width: max(root.table-width, self.visible-width);
+                            for r in root.rows: Rectangle {
+                                width: max(root.table-width, media-list.visible-width);
+                                height: r.level == 0 ? 32px : 24px;
+                                if r.level == 0: HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 16px;
+                                    padding-top: 8px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: r.clip;
+                                        horizontal-stretch: 1;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        font-size: 12px;
+                                        font-weight: 600;
+                                        color: Theme.text;
+                                    }
+                                    Text {
+                                        text: r.note;
+                                        vertical-alignment: center;
+                                        font-size: 12px;
+                                        color: Theme.faint;
+                                    }
+                                }
+                                if r.level != 0: HorizontalLayout {
                                     padding-left: 8px;
                                     padding-right: 8px;
-                                    Rectangle { width: root.w-lead; }
-                                    ColumnHead { w <=> root.w-clip; text: @tr("Clip in the bin"); column: 0; sortable: false; sorted: -1; }
-                                    ColumnHead { w <=> root.w-mxf; text: @tr("MXF file"); column: 1; sortable: false; sorted: -1; }
-                                    ColumnHead { w <=> root.w-orig; text: @tr("Original file"); column: 2; sortable: false; sorted: -1; }
+                                    Rectangle {
+                                        width: root.w-lead;
+                                        if r.level == 1 && r.first && r.index >= 0: Path {
+                                            x: 6px;
+                                            width: 8px;
+                                            height: 8px;
+                                            viewbox-width: 8;
+                                            viewbox-height: 8;
+                                            commands: r.open ? "M 0 1 L 8 1 L 4 7 Z" : "M 1 0 L 7 4 L 1 8 Z";
+                                            fill: Theme.muted;
+                                        }
+                                        if r.level == 1 && r.first && r.index >= 0: TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.toggle-group(r.index); }
+                                        }
+                                    }
+                                    CopyCell {
+                                        w: root.w-clip;
+                                        text: r.clip;
+                                        indent: r.level == 2 ? 16px : 0;
+                                        // Folgedateien derselben Gruppe: Name blasser, bleibt aber kopierbar
+                                        ink: r.level == 2 || !r.first ? Theme.muted : Theme.text;
+                                        copy(t) => { root.copy(t); }
+                                    }
+                                    if r.level == 1: CopyCell { w: root.w-mxf; text: r.mxf; copy(t) => { root.copy(t); } }
+                                    if r.level == 1: CopyCell { w: root.w-orig; text: r.original; copy(t) => { root.copy(t); } }
+                                    if r.level == 2: Rectangle { width: root.w-mxf + root.w-orig; }
+                                    Text {
+                                        width: root.w-note;
+                                        text: r.note;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        font-size: 12px;
+                                        color: Theme.faint;
+                                    }
                                     Rectangle { horizontal-stretch: 1; }
-                                }
-                            }
-                            Rectangle { height: 1px; background: Theme.line; }
-                            ListView {
-                                vertical-stretch: 1;
-                                for r in root.rows: Rectangle {
-                                    height: r.level == 0 ? 32px : 24px;
-                                    if r.level == 0: HorizontalLayout {
-                                        padding-left: 10px;
-                                        padding-right: 16px;
-                                        padding-top: 8px;
-                                        spacing: 8px;
-                                        Text {
-                                            text: r.clip;
-                                            horizontal-stretch: 1;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                            font-size: 12px;
-                                            font-weight: 600;
-                                            color: Theme.text;
-                                        }
-                                        Text {
-                                            text: r.note;
-                                            vertical-alignment: center;
-                                            font-size: 12px;
-                                            color: Theme.faint;
-                                        }
-                                    }
-                                    if r.level != 0: HorizontalLayout {
-                                        padding-left: 8px;
-                                        padding-right: 8px;
-                                        Rectangle {
-                                            width: root.w-lead;
-                                            if r.level == 1 && r.first && r.index >= 0: Path {
-                                                x: 6px;
-                                                width: 8px;
-                                                height: 8px;
-                                                viewbox-width: 8;
-                                                viewbox-height: 8;
-                                                commands: r.open ? "M 0 1 L 8 1 L 4 7 Z" : "M 1 0 L 7 4 L 1 8 Z";
-                                                fill: Theme.muted;
-                                            }
-                                            if r.level == 1 && r.first && r.index >= 0: TouchArea {
-                                                mouse-cursor: pointer;
-                                                clicked => { root.toggle-group(r.index); }
-                                            }
-                                        }
-                                        CopyCell {
-                                            w: root.w-clip;
-                                            text: r.clip;
-                                            indent: r.level == 2 ? 16px : 0;
-                                            // Folgedateien derselben Gruppe: Name blasser, bleibt aber kopierbar
-                                            ink: r.level == 2 || !r.first ? Theme.muted : Theme.text;
-                                            copy(t) => { root.copy(t); }
-                                        }
-                                        if r.level == 1: CopyCell { w: root.w-mxf; text: r.mxf; copy(t) => { root.copy(t); } }
-                                        if r.level == 1: CopyCell { w: root.w-orig; text: r.original; copy(t) => { root.copy(t); } }
-                                        if r.level == 2: Rectangle { width: root.w-mxf + root.w-orig; }
-                                        Text {
-                                            width: root.w-note;
-                                            text: r.note;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                            font-size: 12px;
-                                            color: Theme.faint;
-                                        }
-                                        Rectangle { horizontal-stretch: 1; }
-                                    }
                                 }
                             }
                         }
@@ -5258,7 +5274,7 @@ export component MediaTableWindow inherits CheckWindow {
     property <length> w-project: 120px;
     property <length> w-place: 200px;
     property <length> w-file: 280px;
-    property <length> table-width: max(root.width - 2 * 20px - 2px, w-mark + w-clip + w-kind + w-from + w-used + w-codec + w-pic + w-fps + w-dur + w-sound + w-size + w-project + w-place + w-file + 16px);
+    property <length> table-width: max(media-list.visible-width, w-mark + w-clip + w-kind + w-from + w-used + w-codec + w-pic + w-fps + w-dur + w-sound + w-size + w-project + w-place + w-file + 16px);
 
     VerticalLayout {
         padding: 20px;
@@ -5335,71 +5351,72 @@ export component MediaTableWindow inherits CheckWindow {
             border-color: Theme.line;
             border-radius: 6px;
             clip: true;
-            Flickable {
-                x: 1px;
-                y: 1px;
-                width: table-area.width - 2px;
-                height: table-area.height - 2px;
-                content-width: root.table-width;
-                content-height: self.height;
-                VerticalLayout {
-                    width: root.table-width;
-                    height: table-area.height;
-                    Rectangle {
-                        height: 30px;
-                        background: Theme.sidebar;
+            // Kopfzeile außerhalb der Liste: läuft waagrecht mit ihr mit, bleibt beim senkrechten Scrollen stehen
+            // (die Liste selbst scrollt in beide Richtungen; ihr Inhalt sitzt 2 px eingerückt)
+            VerticalLayout {
+                padding: 1px;
+                Rectangle {
+                    height: 30px;
+                    clip: true;
+                    background: Theme.sidebar;
+                    HorizontalLayout {
+                        x: media-list.content-x + 2px;
+                        width: root.table-width;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        Rectangle { width: root.w-mark; }
+                        ColumnHead { w <=> root.w-clip; text: @tr("Clip"); column: 0; fit-chars: root.fit-chars[0]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-kind; text: @tr("Kind"); column: 1; fit-chars: max(max(@tr("Media").character-count, @tr("Render").character-count), @tr("Unknown").character-count); sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-from; text: @tr("Known by"); column: 2; fit-chars: max(@tr("header").character-count, @tr("project").character-count); sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-used; text: @tr("Used"); column: 3; fit-chars: max(@tr("yes").character-count, @tr("no").character-count); sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-codec; text: @tr("Codec"); column: 4; fit-chars: root.fit-chars[4]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-pic; text: @tr("Picture"); column: 5; fit-chars: root.fit-chars[5]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-fps; text: "fps"; column: 6; fit-chars: root.fit-chars[6]; sorted: root.sort-column; up: root.sort-up; right: true; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-dur; text: @tr("Duration"); column: 7; fit-chars: root.fit-chars[7]; sorted: root.sort-column; up: root.sort-up; right: true; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-sound; text: @tr("Sound"); column: 8; fit-chars: root.fit-chars[8]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-size; text: @tr("Size"); column: 9; fit-chars: root.fit-chars[9]; sorted: root.sort-column; up: root.sort-up; right: true; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-project; text: @tr("Project"); column: 10; fit-chars: root.fit-chars[10]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-place; text: @tr("Drive / folder"); column: 11; fit-chars: root.fit-chars[11]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        ColumnHead { w <=> root.w-file; text: @tr("File"); column: 12; fit-chars: root.fit-chars[12]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+                Rectangle {
+                    height: 1px;
+                    background: Theme.line;
+                }
+                media-list := ListView {
+                    vertical-stretch: 1;
+                    content-width: root.table-width;
+                    for r[i] in root.rows: Rectangle {
+                        width: root.table-width;
+                        height: 24px;
+                        background: r.selected ? Theme.selection : row-touch.has-hover ? Theme.selection.with-alpha(0.4) : transparent;
+                        accessible-role: list-item;
+                        accessible-label: r.clip != "" ? r.clip : r.file;
+                        accessible-checked: r.selected;
+                        accessible-action-default => { root.toggle(i); }
+                        row-touch := TouchArea {
+                            clicked => { root.toggle(i); }
+                        }
                         HorizontalLayout {
                             padding-left: 8px;
                             padding-right: 8px;
-                            Rectangle { width: root.w-mark; }
-                            ColumnHead { w <=> root.w-clip; text: @tr("Clip"); column: 0; fit-chars: root.fit-chars[0]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-kind; text: @tr("Kind"); column: 1; fit-chars: max(max(@tr("Media").character-count, @tr("Render").character-count), @tr("Unknown").character-count); sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-from; text: @tr("Known by"); column: 2; fit-chars: max(@tr("header").character-count, @tr("project").character-count); sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-used; text: @tr("Used"); column: 3; fit-chars: max(@tr("yes").character-count, @tr("no").character-count); sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-codec; text: @tr("Codec"); column: 4; fit-chars: root.fit-chars[4]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-pic; text: @tr("Picture"); column: 5; fit-chars: root.fit-chars[5]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-fps; text: "fps"; column: 6; fit-chars: root.fit-chars[6]; sorted: root.sort-column; up: root.sort-up; right: true; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-dur; text: @tr("Duration"); column: 7; fit-chars: root.fit-chars[7]; sorted: root.sort-column; up: root.sort-up; right: true; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-sound; text: @tr("Sound"); column: 8; fit-chars: root.fit-chars[8]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-size; text: @tr("Size"); column: 9; fit-chars: root.fit-chars[9]; sorted: root.sort-column; up: root.sort-up; right: true; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-project; text: @tr("Project"); column: 10; fit-chars: root.fit-chars[10]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-place; text: @tr("Drive / folder"); column: 11; fit-chars: root.fit-chars[11]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
-                            ColumnHead { w <=> root.w-file; text: @tr("File"); column: 12; fit-chars: root.fit-chars[12]; sorted: root.sort-column; up: root.sort-up; clicked(c) => { root.sort(c); } }
+                            Cell { width: root.w-mark; text: r.selected ? "✓" : ""; horizontal-alignment: center; color: Theme.text; }
+                            Col { w: root.w-clip; text: r.clip; ink: r.clip == "" ? Theme.faint : Theme.text; }
+                            Col { w: root.w-kind; text: r.kind == 0 ? @tr("Media") : r.kind == 1 ? @tr("Render") : @tr("Unknown"); bold: r.kind == 1; ink: r.kind == 2 ? Theme.warning : Theme.text; }
+                            Col { w: root.w-from; text: r.from == 0 ? @tr("header") : r.from == 1 ? @tr("project") : "–"; }
+                            Col { w: root.w-used; text: r.used == 1 ? @tr("yes") : r.used == 0 ? @tr("no") : "–"; bold: r.used == 0; ink: r.used == 0 ? Theme.warning : Theme.muted; }
+                            Col { w: root.w-codec; text: r.codec; }
+                            Col { w: root.w-pic; text: r.picture; }
+                            Col { w: root.w-fps; text: r.fps; right: true; }
+                            Col { w: root.w-dur; text: r.duration; right: true; }
+                            Col { w: root.w-sound; text: r.sound; }
+                            Col { w: root.w-size; text: r.size; right: true; }
+                            Col { w: root.w-project; text: r.project; }
+                            Col { w: root.w-place; text: r.place; }
+                            Col { w: root.w-file; text: r.file; }
                             Rectangle { horizontal-stretch: 1; }
-                        }
-                    }
-                    Rectangle { height: 1px; background: Theme.line; }
-                    ListView {
-                        vertical-stretch: 1;
-                        for r[i] in root.rows: Rectangle {
-                            height: 24px;
-                            background: r.selected ? Theme.selection : row-touch.has-hover ? Theme.selection.with-alpha(0.4) : transparent;
-                            accessible-role: list-item;
-                            accessible-label: r.clip != "" ? r.clip : r.file;
-                            accessible-checked: r.selected;
-                            accessible-action-default => { root.toggle(i); }
-                            row-touch := TouchArea {
-                                clicked => { root.toggle(i); }
-                            }
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 8px;
-                                Cell { width: root.w-mark; text: r.selected ? "✓" : ""; horizontal-alignment: center; color: Theme.text; }
-                                Col { w: root.w-clip; text: r.clip; ink: r.clip == "" ? Theme.faint : Theme.text; }
-                                Col { w: root.w-kind; text: r.kind == 0 ? @tr("Media") : r.kind == 1 ? @tr("Render") : @tr("Unknown"); bold: r.kind == 1; ink: r.kind == 2 ? Theme.warning : Theme.text; }
-                                Col { w: root.w-from; text: r.from == 0 ? @tr("header") : r.from == 1 ? @tr("project") : "–"; }
-                                Col { w: root.w-used; text: r.used == 1 ? @tr("yes") : r.used == 0 ? @tr("no") : "–"; bold: r.used == 0; ink: r.used == 0 ? Theme.warning : Theme.muted; }
-                                Col { w: root.w-codec; text: r.codec; }
-                                Col { w: root.w-pic; text: r.picture; }
-                                Col { w: root.w-fps; text: r.fps; right: true; }
-                                Col { w: root.w-dur; text: r.duration; right: true; }
-                                Col { w: root.w-sound; text: r.sound; }
-                                Col { w: root.w-size; text: r.size; right: true; }
-                                Col { w: root.w-project; text: r.project; }
-                                Col { w: root.w-place; text: r.place; }
-                                Col { w: root.w-file; text: r.file; }
-                                Rectangle { horizontal-stretch: 1; }
-                            }
                         }
                     }
                 }
