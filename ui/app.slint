@@ -5062,9 +5062,9 @@ export component MediaWindow inherits CheckWindow {
                     select(m) => { root.select-folders(m); }
                 }
                 Text {
-                    height: 32px;
-                    text: root.folders-off ? @tr("Some folders are switched off: numbers and lists count only the bins in the others.") : "";
-                    wrap: word-wrap;
+                    height: 18px;
+                    text: root.folders-off ? @tr("Only ticked folders are counted") : "";
+                    vertical-alignment: center;
                     overflow: elide;
                     font-size: 12px;
                     color: Theme.warning;
@@ -5212,12 +5212,13 @@ export component MediaWindow inherits CheckWindow {
                         }
                     }
                 }
+                // eine Zeile wie links, damit Baum- und Listenkarte gleich hoch bleiben
                 Text {
-                    height: 32px;
+                    height: 18px;
                     text: root.copied != "" ? @tr("Copied: {}", root.copied)
                         : root.kind == 0 && root.filter == 3 ? @tr("Every missing media file once, by name – without the ones to relink.")
-                        : root.kind == 0 ? @tr("Click the arrow to see where a file is used, click a name to copy it.") : @tr("AMA files are not requested. Click the arrow to see where a clip is used, click a name to copy it.");
-                    wrap: word-wrap;
+                        : root.kind == 0 ? @tr("Click the arrow to see where a file is used, click a name to copy it.") : @tr("AMA files are not requested. Arrow: where a clip is used; click a name to copy it.");
+                    vertical-alignment: center;
                     overflow: elide;
                     font-size: 12px;
                     color: root.copied != "" ? Theme.text : Theme.muted;

@@ -479,8 +479,8 @@ msgstr "Keine"
 msgid "Invert"
 msgstr "Umkehren"
 
-msgid "Some folders are switched off: numbers and lists count only the bins in the others."
-msgstr "Einige Ordner sind ausgeschaltet: Zahlen und Listen zählen nur die Bins in den übrigen."
+msgid "Only ticked folders are counted"
+msgstr "Nur Ordner mit Haken zählen"
 
 msgid "Pause"
 msgstr "Pause"
@@ -554,8 +554,8 @@ msgstr "Clips anzeigen…"
 msgid "Click the arrow to see where a file is used, click a name to copy it."
 msgstr "Klick auf den Pfeil zeigt, wo eine Datei verwendet wird; Klick auf einen Namen kopiert ihn."
 
-msgid "AMA files are not requested. Click the arrow to see where a clip is used, click a name to copy it."
-msgstr "AMA-Dateien werden nicht angefordert. Klick auf den Pfeil zeigt, wo ein Clip verwendet wird; Klick auf einen Namen kopiert ihn."
+msgid "AMA files are not requested. Arrow: where a clip is used; click a name to copy it."
+msgstr "AMA-Dateien werden nicht angefordert. Pfeil: wo ein Clip verwendet wird; Klick auf Namen kopiert ihn."
 
 msgid "Copied: {}"
 msgstr "Kopiert: {}"

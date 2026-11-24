@@ -1439,6 +1439,18 @@ fn bin_visible(hidden: &HashSet<FolderKey>, (project, bin): &(String, String)) -
     (0..=dir.len()).all(|n| !hidden.contains(&(project.clone(), dir[..n].to_vec())))
 }
 
+/// Tick or untick a folder; ticking it also ticks its project and every folder above it (user 2026-11-24),
+/// so its bins really show up.
+fn toggle_folder(hidden: &mut HashSet<FolderKey>, (project, dir): FolderKey) {
+    if hidden.remove(&(project.clone(), dir.clone())) {
+        for n in 0..dir.len() {
+            hidden.remove(&(project.clone(), dir[..n].to_vec()));
+        }
+    } else {
+        hidden.insert((project, dir));
+    }
+}
+
 /// Folder tree of the bins with missing files (projects first, then their folders in path order), each with the
 /// number of different files below it; the rows of closed folders are left out, `index` counts over all keys,
 /// which come in the same order.
@@ -1734,9 +1746,7 @@ fn wire_projects(app: &AppWindow, st: &Rc<RefCell<ProjectsState>>, settings: &Rc
                         let Some(r) = r.as_ref() else { return };
                         let by_bin = if s.media_kind == 1 { &r.ama_by_bin } else { &r.by_bin };
                         let Some(key) = folder_rows(&w, by_bin, &s.hidden, &s.folders_open).1.into_iter().nth(i as usize) else { return };
-                        if !s.hidden.remove(&key) {
-                            s.hidden.insert(key);
-                        }
+                        toggle_folder(&mut s.hidden, key);
                         show_rows(&w, r, &s);
                     });
                     let (ww5, st5) = (ww.clone(), st.clone());
@@ -3843,6 +3853,17 @@ mod tests {
         let row_y = one("m-12").absolute_position().y;
         ev(WindowEvent::PointerScrolled { position: at(700.0, 400.0), delta_x: 0.0, delta_y: -120.0 });
         assert!((one("m-12").absolute_position().y - (row_y - 120.0)).abs() < 0.5, "missing media rows scroll");
+    }
+
+    #[test]
+    fn ticking_a_folder_ticks_its_parents() {
+        use super::{FolderKey, HashSet, toggle_folder};
+        let k = |d: &[&str]| ("P".to_string(), d.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let mut hidden: HashSet<FolderKey> = [k(&[]), k(&["A"]), k(&["A", "B"]), k(&["A", "C"]), k(&["D"])].into();
+        toggle_folder(&mut hidden, k(&["A", "B"]));
+        assert_eq!(hidden, [k(&["A", "C"]), k(&["D"])].into(), "project and A on, siblings stay off");
+        toggle_folder(&mut hidden, k(&["A", "B"]));
+        assert!(hidden.contains(&k(&["A", "B"])) && !hidden.contains(&k(&["A"])), "unticking touches only itself");
     }
 
     #[test]
