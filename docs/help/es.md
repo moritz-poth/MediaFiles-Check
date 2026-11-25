@@ -4,9 +4,10 @@
 
 MediaFiles Check cuida de los archivos de medios de Avid (MXF) de tus puestos de edición:
 
+- **Analizar** lee una vez las unidades y los proyectos de Avid; todas las demás pestañas trabajan con ese análisis.
 - **Intercambio** mantiene al día los medios de dos puestos, aunque no estén conectados.
-- **Comprobar BD** compara cada carpeta de `Avid MediaFiles/MXF` con su base de datos de Avid y muestra dónde no coinciden.
-- **Mantenimiento MXF** reúne las herramientas que cambian algo: renombrar carpetas para Media Composer, reequilibrado, duplicados y su historial.
+- **Comprobar BD** compara cada carpeta de `Avid MediaFiles/MXF` con su base de datos de Avid, muestra dónde no coinciden y hace que Media Composer escriba bases nuevas (Cambiar el nombre para Media Composer).
+- **Mantenimiento MXF** reúne las herramientas que mueven archivos: reequilibrado, duplicados y su historial.
 - **Vínculos de proyecto** encuentra los archivos de medios que necesitan los bins de tus proyectos de Avid y que no están en ninguna unidad, y los solicita.
 - **Medios** muestra cada archivo de medios con clip, códec y tamaño, separa los archivos de render y aparta los archivos sin usar.
 
@@ -14,9 +15,9 @@ MediaFiles Check **nunca borra** un archivo de medios y **nunca sobrescribe** ni
 
 ## La ventana
 
-Las pestañas de arriba son las áreas. Dentro de cada pestaña, la barra lateral de la izquierda muestra sus pasos en el orden en que se hacen; bajo cada paso, una línea corta indica cómo está. Un pequeño punto naranja en una pestaña indica que algo espera allí.
+Las pestañas de arriba son las áreas. Dentro de cada pestaña, la barra lateral de la izquierda muestra sus pasos en el orden en que se hacen; bajo cada paso, una línea corta indica cómo está. Un pequeño punto naranja en una pestaña indica que algo espera allí. Los errores aparecen como un mensaje abajo en la ventana; **×** lo cierra. Ahí aparece también una versión nueva como tarjeta.
 
-Cada análisis (Analizar, Comprobar, Reequilibrado, Duplicados, Proyectos, Medios) muestra bajo su barra el tiempo restante y dos botones: **Pausa** detiene la lectura hasta que pulses **Reanudar**; **Cancelar** termina el análisis enseguida y vuelve atrás; no se guarda nada de él (las sumas de comprobación y cabeceras ya leídas se recuerdan para el siguiente análisis).
+Cada análisis (Analizar, Comprobar BD, Reequilibrado, Duplicados) muestra bajo su barra el tiempo restante y dos botones: **Pausa** detiene la lectura hasta que pulses **Reanudar**; **Cancelar** termina el análisis enseguida y vuelve atrás; no se guarda nada de él (las sumas de comprobación y cabeceras ya leídas se recuerdan para el siguiente análisis).
 
 Si se le dijo a macOS que no deje a MediaFiles Check leer una unidad, el análisis se detiene con «macOS no deja que MediaFiles Check lea: …». **Volver a pedir acceso** hace que macOS pregunte otra vez: pulsa Permitir. Si sigue bloqueado, se abre Ajustes del Sistema en Privacidad y seguridad › Archivos y carpetas: activa allí las unidades.
 
@@ -83,10 +84,10 @@ Cada carpeta de `Avid MediaFiles/MXF` tiene dos archivos de base de datos de Avi
 
 **Comprobar** comprueba los volúmenes conectados del análisis actual (pestaña Analizar); sin análisis, la página ofrece **Ir a Analizar**. **Comprobar carpeta…** comprueba un lugar que elijas: una unidad, la carpeta `MXF`, una sola carpeta como `MXF/1` o una copia en una unidad de respaldo. El resultado aparece en la misma página: **Comprobar de nuevo** cuando Media Composer haya reconstruido una base. Muestra cada carpeta que difiere:
 
-- **Archivos que no están en la base de datos**: puede que Media Composer no los muestre.
-- **Entradas de la base de datos sin archivo**: aparecen como medios sin conexión.
-- **Sin base de datos** / **falta msmFMID.pmr o msmMMOB.mdb** / **base de datos vacía**.
-- **Base de datos ilegible**: un formato desconocido. MediaFiles Check nunca adivina.
+- **n archivos no están en la base de datos**: puede que Media Composer no los muestre.
+- **n entradas en la base de datos sin archivo**: aparecen como medios sin conexión.
+- **sin base de datos** / **falta msmFMID.pmr** (o msmMMOB.mdb) / **base de datos vacía**.
+- **base de datos ilegible**: un formato desconocido. MediaFiles Check nunca adivina.
 
 Un clic en un hallazgo muestra hasta 10 de sus nombres de archivo; al principio están plegados. Las carpetas que Media Composer no actualiza por sí mismo tienen ahí mismo **Cambiar el nombre para Media Composer…**.
 
@@ -185,7 +186,7 @@ Para las carpetas que Media Composer no actualiza por sí mismo, usa en su lugar
 
 ## Actualizaciones
 
-MediaFiles Check busca una versión nueva en GitHub poco después de abrirse y cada 6 horas; **Ajustes… → Actualizaciones → Buscar actualizaciones** busca enseguida. Una versión nueva aparece como una barra bajo las pestañas: **Novedades** abre las notas de la versión, **Instalar actualización** la descarga, comprueba que está completa y sin cambios, lleva la versión antigua a la Papelera y reinicia la app. **Recibir versiones de prueba** ofrece también versiones que aún se están probando.
+MediaFiles Check busca una versión nueva en GitHub poco después de abrirse y cada 6 horas; **Ajustes… → Actualizaciones → Buscar actualizaciones** busca enseguida. Una versión nueva aparece como una tarjeta abajo en la ventana principal (**×** la oculta hasta el próximo inicio): **Novedades** abre las notas de la versión, **Instalar actualización** la descarga, comprueba que está completa y sin cambios, lleva la versión antigua a la Papelera y reinicia la app. **Recibir versiones de prueba** ofrece también versiones que aún se están probando.
 
 ## Soporte
 

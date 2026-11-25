@@ -4,9 +4,10 @@
 
 MediaFiles Check kümmert sich um die Avid-Mediendateien (MXF) deiner Schnittplätze:
 
+- **Scannen** liest die Laufwerke und Avid-Projekte einmal; alle anderen Reiter arbeiten mit diesem Scan.
 - **Austausch** gleicht die Medien zweier Schnittplätze ab, auch wenn sie nicht verbunden sind.
-- **DBs prüfen** vergleicht jeden Ordner in `Avid MediaFiles/MXF` mit seiner Avid-Datenbank und zeigt, wo beide nicht zusammenpassen.
-- **MXFs pflegen** enthält die Werkzeuge, die etwas verändern: Ordner für Media Composer umbenennen, Rebalancing, Duplikate und ihr Verlauf.
+- **DBs prüfen** vergleicht jeden Ordner in `Avid MediaFiles/MXF` mit seiner Avid-Datenbank, zeigt, wo beide nicht zusammenpassen, und lässt Media Composer neue Datenbanken schreiben (Für Media Composer umbenennen).
+- **MXFs pflegen** enthält die Werkzeuge, die Dateien verschieben: Rebalancing, Duplikate und ihr Verlauf.
 - **Projekt-Verlinkungen** findet die Mediendateien, die die Bins deiner Avid-Projekte brauchen, die aber auf keinem Laufwerk liegen, und fordert sie an.
 - **Medien** listet jede Mediendatei mit Clip, Codec und Größe, trennt Render-Dateien ab und legt unbenutzte Dateien beiseite.
 
@@ -14,9 +15,9 @@ MediaFiles Check **löscht nie** eine Mediendatei und **überschreibt nie** eine
 
 ## Das Fenster
 
-Die Reiter oben sind die Bereiche. In jedem Reiter stehen links in der Seitenleiste seine Schritte in der Reihenfolge, in der man sie macht; unter jedem Schritt steht kurz sein Stand. Ein kleiner oranger Punkt auf einem Reiter heißt: Dort wartet etwas.
+Die Reiter oben sind die Bereiche. In jedem Reiter stehen links in der Seitenleiste seine Schritte in der Reihenfolge, in der man sie macht; unter jedem Schritt steht kurz sein Stand. Ein kleiner oranger Punkt auf einem Reiter heißt: Dort wartet etwas. Fehler erscheinen als Meldung unten im Fenster; **×** schließt sie. Dort erscheint auch eine neue Version als Karte.
 
-Jeder Scan (Scannen, Prüfen, Rebalancing, Duplikate, Projekte, Medien) zeigt unter seinem Balken die Restzeit und zwei Knöpfe: **Pause** hält das Lesen an, bis du **Fortsetzen** klickst; **Abbrechen** beendet den Scan sofort und geht zurück – von ihm bleibt nichts (schon gelesene Prüfsummen und Dateiköpfe werden für den nächsten Scan gemerkt).
+Jeder Scan (Scannen, DBs prüfen, Rebalancing, Duplikate) zeigt unter seinem Balken die Restzeit und zwei Knöpfe: **Pause** hält das Lesen an, bis du **Fortsetzen** klickst; **Abbrechen** beendet den Scan sofort und geht zurück – von ihm bleibt nichts (schon gelesene Prüfsummen und Dateiköpfe werden für den nächsten Scan gemerkt).
 
 Wurde macOS gesagt, dass MediaFiles Check ein Laufwerk nicht lesen darf, bricht ein Scan mit „macOS lässt MediaFiles Check nicht lesen: …“ ab. **Zugriff erneut anfragen** lässt macOS noch einmal fragen – dann Erlauben klicken. Bleibt es gesperrt, öffnen sich die Systemeinstellungen bei Datenschutz & Sicherheit › Dateien & Ordner: Dort die Laufwerke einschalten.
 
@@ -83,10 +84,10 @@ Jeder Ordner in `Avid MediaFiles/MXF` hat zwei Avid-Datenbankdateien, `msmFMID.p
 
 **Prüfen** prüft die angeschlossenen Volumes des aktuellen Scans (Reiter Scannen); ohne Scan bietet die Seite **Zu Scannen** an. **Ordner prüfen…** prüft einen Ort deiner Wahl: ein Laufwerk, den Ordner `MXF`, einen einzelnen Ordner wie `MXF/1` oder eine Kopie auf einem Backup-Laufwerk. Das Ergebnis steht auf derselben Seite – **Erneut prüfen**, nachdem Media Composer eine Datenbank neu geschrieben hat. Es listet jeden Ordner mit Abweichung:
 
-- **Dateien nicht in der Datenbank** – Media Composer zeigt sie womöglich nicht.
-- **Einträge in der Datenbank ohne Datei** – sie erscheinen als Offline-Medien.
-- **Keine Datenbank** / **msmFMID.pmr oder msmMMOB.mdb fehlt** / **Datenbank ist leer**.
-- **Datenbank unlesbar** – ein unbekanntes Format. MediaFiles Check rät nie.
+- **n Dateien nicht in der Datenbank** – Media Composer zeigt sie womöglich nicht.
+- **n Einträge in der Datenbank ohne Datei** – sie erscheinen als Offline-Medien.
+- **keine Datenbank** / **msmFMID.pmr fehlt** (oder msmMMOB.mdb) / **Datenbank ist leer**.
+- **Datenbank nicht lesbar** – ein unbekanntes Format. MediaFiles Check rät nie.
 
 Ein Klick auf einen Befund zeigt bis zu 10 seiner Dateinamen; anfangs sind sie zugeklappt. Für Ordner, die Media Composer nicht selbst aktualisiert, gibt es gleich dort **Für Media Composer umbenennen…**.
 
@@ -185,7 +186,7 @@ Für Ordner, die Media Composer nicht selbst aktualisiert, stattdessen DBs prüf
 
 ## Updates
 
-MediaFiles Check sucht kurz nach dem Start und alle 6 Stunden auf GitHub nach einer neuen Version; **Einstellungen… → Updates → Nach Updates suchen** sucht sofort. Eine neue Version erscheint als Leiste unter den Reitern: **Neuigkeiten** öffnet die Versionshinweise, **Update installieren** lädt sie, prüft, dass sie vollständig und unverändert ist, legt die alte Version in den Papierkorb und startet die App neu. **Testversionen erhalten** bietet auch Versionen an, die noch getestet werden.
+MediaFiles Check sucht kurz nach dem Start und alle 6 Stunden auf GitHub nach einer neuen Version; **Einstellungen… → Updates → Nach Updates suchen** sucht sofort. Eine neue Version erscheint als Karte unten im Hauptfenster (**×** blendet sie bis zum nächsten Start aus): **Neuigkeiten** öffnet die Versionshinweise, **Update installieren** lädt sie, prüft, dass sie vollständig und unverändert ist, legt die alte Version in den Papierkorb und startet die App neu. **Testversionen erhalten** bietet auch Versionen an, die noch getestet werden.
 
 ## Support
 

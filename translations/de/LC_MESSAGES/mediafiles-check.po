@@ -581,14 +581,17 @@ msgstr "gleicht die Medien zweier Schnittplätze ab."
 msgid "When macOS asks whether MediaFiles Check may access files on removable or network volumes, allow it – until then reading such a drive waits."
 msgstr "Fragt macOS, ob MediaFiles Check auf Dateien auf Wechsel- oder Netzwerk-Volumes zugreifen darf, erlaube es – bis dahin wartet das Lesen solcher Laufwerke."
 
-msgid "renames folders for Media Composer, rebalances full folders, sets duplicates aside."
-msgstr "benennt Ordner für Media Composer um, verteilt volle Ordner, legt Duplikate zur Seite."
+msgid "rebalances full folders and sets duplicates aside – with history and undo."
+msgstr "verteilt volle Ordner und legt Duplikate zur Seite – mit Verlauf und Rückgängig."
+
+msgid "lists every media file, sorts out render files and sets unused files aside."
+msgstr "listet jede Mediendatei, sortiert Render-Dateien aus und legt Unbenutztes zur Seite."
 
 msgid "finds the media your bins need that are on none of the drives."
 msgstr "findet die Medien, die deine Bins brauchen und die auf keinem Laufwerk liegen."
 
-msgid "compares every MXF folder with its Avid database."
-msgstr "vergleicht jeden MXF-Ordner mit seiner Avid-Datenbank."
+msgid "compares every MXF folder with its Avid database and has Media Composer rewrite the ones that differ."
+msgstr "vergleicht jeden MXF-Ordner mit seiner Avid-Datenbank und lässt abweichende von Media Composer neu schreiben."
 
 msgid "Rebalanced"
 msgstr "Rebalancing erledigt"
@@ -814,12 +817,6 @@ msgstr "Austausch"
 
 msgid "Check"
 msgstr "Prüfen"
-
-msgid "Projects"
-msgstr "Projekte"
-
-msgid "Maintain"
-msgstr "Pflegen"
 
 msgid "Tasks"
 msgstr "Aufgaben"

@@ -4,9 +4,10 @@
 
 MediaFiles Check looks after the Avid media files (MXF) of your edit systems:
 
+- **Scan** reads the drives and Avid projects once; every other tab works with that scan.
 - **Exchange** keeps the media of two edit systems in step, even when they are not connected.
-- **Check DBs** compares every folder in `Avid MediaFiles/MXF` with its Avid database and shows where the two don't match.
-- **Maintain MXFs** has the tools that change something: rename folders for Media Composer, rebalancing, duplicates, and their history.
+- **Check DBs** compares every folder in `Avid MediaFiles/MXF` with its Avid database, shows where the two don't match and has Media Composer write new databases (Rename for Media Composer).
+- **Maintain MXFs** has the tools that move files: rebalancing, duplicates, and their history.
 - **Project links** finds the media files the bins of your Avid projects need that are on none of the drives, and requests them.
 - **Media** lists every media file with clip, codec and size, separates render files and sets unused files aside.
 
@@ -14,9 +15,9 @@ MediaFiles Check **never deletes** a media file and **never overwrites** one. Ch
 
 ## The window
 
-The tabs at the top are the areas. Inside each tab, the sidebar on the left lists its steps in the order you do them; under each step a short line says where it stands. A small orange dot on a tab means something waits there.
+The tabs at the top are the areas. Inside each tab, the sidebar on the left lists its steps in the order you do them; under each step a short line says where it stands. A small orange dot on a tab means something waits there. Errors show as a note at the bottom of the window; **×** closes it. A new version shows as a card there too.
 
-Every scan (Scan, Check, Rebalancing, Duplicates, Projects, Media) shows the time left and two buttons under its bar: **Pause** stops reading until you click **Resume**; **Cancel** ends the scan at once and goes back – nothing of it is kept (checksums and headers already read are remembered for the next scan).
+Every scan (Scan, Check DBs, Rebalancing, Duplicates) shows the time left and two buttons under its bar: **Pause** stops reading until you click **Resume**; **Cancel** ends the scan at once and goes back – nothing of it is kept (checksums and headers already read are remembered for the next scan).
 
 If macOS was told not to let MediaFiles Check read a drive, a scan stops with “macOS does not let MediaFiles Check read: …”. **Ask for access again** makes macOS ask once more – click Allow. If it stays blocked, System Settings opens at Privacy & Security › Files & Folders: switch the drives on there.
 
@@ -83,10 +84,10 @@ Every folder in `Avid MediaFiles/MXF` has two Avid database files, `msmFMID.pmr`
 
 **Check** checks the volumes of the current scan (Scan tab) that are connected; without a scan the page offers **Go to Scan**. **Check folder…** checks a place you choose: a drive, the `MXF` folder, a single folder like `MXF/1`, or a copy on a backup drive. The result shows on the same page – **Check again** after Media Composer has rebuilt a database. It lists every folder that differs:
 
-- **Files not in the database** – Media Composer may not show them.
-- **Entries in the database without a file** – they show up as offline media.
-- **No database** / **msmFMID.pmr or msmMMOB.mdb is missing** / **Database is empty**.
-- **Database unreadable** – an unknown format. MediaFiles Check never guesses.
+- **n files not in the database** – Media Composer may not show them.
+- **n entries in the database without a file** – they show up as offline media.
+- **no database** / **msmFMID.pmr is missing** (or msmMMOB.mdb) / **database is empty**.
+- **database unreadable** – an unknown format. MediaFiles Check never guesses.
 
 Click a finding to show up to 10 of its file names; they are closed at first. Folders Media Composer does not update itself get **Rename for Media Composer…** right there.
 
@@ -185,7 +186,7 @@ For folders Media Composer does not update itself, use Check DBs › New databas
 
 ## Updates
 
-MediaFiles Check looks for a new version on GitHub shortly after starting and every 6 hours; **Settings… → Updates → Check for updates** looks right away. A new version shows as a bar under the tabs: **What's new** opens the release notes, **Install update** downloads it, checks that it is complete and unchanged, puts the old version in the Trash and restarts the app. **Get test versions** also offers versions that are still being tested.
+MediaFiles Check looks for a new version on GitHub shortly after starting and every 6 hours; **Settings… → Updates → Check for updates** looks right away. A new version shows as a card at the bottom of the main window (**×** hides it until the next start): **What's new** opens the release notes, **Install update** downloads it, checks that it is complete and unchanged, puts the old version in the Trash and restarts the app. **Get test versions** also offers versions that are still being tested.
 
 ## Support
 
