@@ -63,7 +63,7 @@ Cada archivo se copia con control de suma en una carpeta nueva como `261102-1830
 
 ## Intercambio: tareas
 
-Intercambio › **Tareas** muestra las tareas de las entregas reunidas o importadas aquí, p. ej. «Reconstruir la base de datos» o «Mismo nombre, contenido distinto». Solo aparecen las tareas para este puesto; las del otro puesto van con la entrega (`Tasks.txt`, también con las instrucciones para importar a mano). **Comprobar…** comprueba una carpeta de este puesto que necesita una base nueva; **Listo** pasa una tarea abajo a Hechas, **Reabrir** la recupera, **Quitar las hechas** limpia la lista. Las bases que aún hay que reescribir tras un reequilibrado o duplicados están en el Historial de Mantenimiento MXF; las carpetas que esperan recuperar su nombre, en Comprobar BD › Bases nuevas.
+Intercambio › **Tareas** muestra las tareas de las entregas reunidas o importadas aquí, p. ej. «Reconstruir la base de datos» o «Mismo nombre, contenido distinto». Solo aparecen las tareas para este puesto; las del otro puesto van con la entrega (`Tasks.txt`, también con las instrucciones para importar a mano). **Comprobar…** comprueba una carpeta de este puesto que necesita una base nueva; **Listo** pasa una tarea abajo a Hechas, **Reabrir** la recupera, **Quitar las hechas** limpia la lista. Las bases que aún hay que reescribir tras un reequilibrado o duplicados están en el Historial de Mantenimiento MXF; las carpetas que esperan recuperar su nombre, en Comprobar BD › Bases nuevas. Tras reunir o importar, **Mostrar tareas** en la página de resultado abre esta lista cuando hay tareas para este puesto.
 
 ## ¿Cuándo se copia algo?
 

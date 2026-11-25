@@ -63,7 +63,7 @@ Chaque fichier est copié avec contrôle de somme dans un nouveau dossier comme 
 
 ## Échange : tâches
 
-Échange › **Tâches** liste les tâches des livraisons rassemblées ou importées ici – p. ex. « Reconstruire la base de données » ou « Même nom, contenu différent ». Seules les tâches pour ce poste sont listées ; celles pour l’autre poste partent avec la livraison (`Tasks.txt`, avec aussi les instructions pour importer à la main). **Vérifier…** vérifie un dossier de ce poste qui a besoin d’une nouvelle base ; **Terminé** déplace une tâche vers Terminées, **Rouvrir** la ramène, **Retirer les terminées** fait le ménage. Les bases à réécrire après un rééquilibrage ou des doublons sont dans l’Historique d’Entretien MXF ; les dossiers qui attendent d’être renommés à l’origine sous Vérifier BD › Nouvelles bases.
+Échange › **Tâches** liste les tâches des livraisons rassemblées ou importées ici – p. ex. « Reconstruire la base de données » ou « Même nom, contenu différent ». Seules les tâches pour ce poste sont listées ; celles pour l’autre poste partent avec la livraison (`Tasks.txt`, avec aussi les instructions pour importer à la main). **Vérifier…** vérifie un dossier de ce poste qui a besoin d’une nouvelle base ; **Terminé** déplace une tâche vers Terminées, **Rouvrir** la ramène, **Retirer les terminées** fait le ménage. Les bases à réécrire après un rééquilibrage ou des doublons sont dans l’Historique d’Entretien MXF ; les dossiers qui attendent d’être renommés à l’origine sous Vérifier BD › Nouvelles bases. Après avoir rassemblé ou importé, **Afficher les tâches** sur la page de résultat ouvre cette liste quand il y a des tâches pour ce poste.
 
 ## Quand quelque chose est-il copié ?
 

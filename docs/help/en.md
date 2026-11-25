@@ -63,7 +63,7 @@ Every file is copied with a checksum check into a new folder like `261102-1830_M
 
 ## Exchange: tasks
 
-Exchange › **Tasks** lists the tasks of deliveries collected or imported here – e.g. “Rebuild database” or “Same name, different content”. Only tasks for this workstation are listed; tasks for the other workstation go with the delivery (`Tasks.txt`, also with instructions for importing by hand). **Check…** checks a folder of this system that needs a new database; **Done** moves a task down to Completed, **Reopen** brings it back, **Clear completed** removes the completed ones. Databases still to be rewritten after rebalancing or duplicates are in the History of Maintain MXFs; folders waiting to be renamed back under Check DBs › New databases.
+Exchange › **Tasks** lists the tasks of deliveries collected or imported here – e.g. “Rebuild database” or “Same name, different content”. Only tasks for this workstation are listed; tasks for the other workstation go with the delivery (`Tasks.txt`, also with instructions for importing by hand). **Check…** checks a folder of this system that needs a new database; **Done** moves a task down to Completed, **Reopen** brings it back, **Clear completed** removes the completed ones. Databases still to be rewritten after rebalancing or duplicates are in the History of Maintain MXFs; folders waiting to be renamed back under Check DBs › New databases. After collecting or importing, **Show tasks** on the result page opens this list when there are tasks for this workstation.
 
 ## When is something copied?
 

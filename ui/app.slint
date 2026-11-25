@@ -1071,7 +1071,7 @@ export global Exchange {
     in-out property <int> view: 1;
     in property <string> system-name;
     in property <[VolumeRow]> volumes;
-    in property <string> error;
+    in-out property <string> error;  // shown as a note at the bottom of the window, × clears it
     in property <bool> has-manifest;
     // Vergleichen
     in property <bool> has-compare;
@@ -1402,10 +1402,6 @@ component ExchangePane inherits VerticalLayout {
                 }
             }
         }
-        if Exchange.error != "": Para {
-            text: Exchange.error;
-            color: Theme.error;
-        }
     }
 
     // ── Sammeln / Importieren: Fortschritt ──
@@ -1430,6 +1426,11 @@ component ExchangePane inherits VerticalLayout {
             if Exchange.result-path != "": CheckButton {
                 text: @tr("Show in Finder");
                 clicked => { Exchange.show-result(); }
+            }
+            // tasks of this system are in the Tasks step (the other side's travel in the delivery's task file)
+            if Exchange.result-tasks.length > 0 && Tasks.open.length > 0: CheckButton {
+                text: @tr("Show tasks");
+                clicked => { Exchange.close-result(); Exchange.view = 4; }
             }
             CheckButton {
                 text: @tr("Done");
@@ -1457,10 +1458,6 @@ component ExchangePane inherits VerticalLayout {
                 lines: Exchange.result-problems;
                 text-color: Theme.error;
             }
-        }
-        if Exchange.result-tasks.length > 0: Section {
-            title: @tr("TASKS");
-            LineList { lines: Exchange.result-tasks; }
         }
     }
 
@@ -1608,10 +1605,6 @@ component ExchangePane inherits VerticalLayout {
         if Exchange.has-delivery: Para {
             text: @tr("Quit Media Composer before importing. Every file is verified first, and only a complete delivery is imported. A media file is never overwritten.");
             color: Theme.warning;
-        }
-        if Exchange.error != "": Para {
-            text: Exchange.error;
-            color: Theme.error;
         }
     }
 }
@@ -3770,6 +3763,48 @@ ScrollBox {
     }
     ScrollThumb { x: parent.width - self.width - 2px; view: page-flick.height; content: main.preferred-height; offset: page-flick.content-y; }
         }
+        }
+    }
+
+    // Fehlermeldung des Austauschs: unten mittig über dem Inhalt, × blendet sie aus (user 2026-11-25)
+    if Exchange.error != "" && root.tab == 0: Rectangle {
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - 24px;
+        width: min(note-measure.preferred-width + 54px, root.width - 80px);
+        height: note.preferred-height + 18px;
+        note-measure := Text { visible: false; text: Exchange.error; font-size: 11px; font-weight: 600; }
+        border-radius: 8px;
+        background: Theme.background;
+        border-width: 1px;
+        border-color: Theme.error;
+        drop-shadow-blur: 10px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: #00000040;
+        note := Text {
+            x: 14px;
+            width: parent.width - 48px;
+            text: Exchange.error;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            font-size: 11px;
+            font-weight: 600;
+            color: Theme.error;
+            accessible-role: text;
+        }
+        close-note := TouchArea {
+            x: parent.width - 30px;
+            width: 26px;
+            mouse-cursor: pointer;
+            accessible-role: button;
+            accessible-label: @tr("Close");
+            clicked => { Exchange.error = ""; }
+            Text {
+                text: "×";
+                font-size: 15px;
+                color: close-note.has-hover ? Theme.text : Theme.muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
         }
     }
 

@@ -648,8 +648,11 @@ msgid_plural "{n} files to collect ({})"
 msgstr[0] "{n} Datei zu sammeln ({})"
 msgstr[1] "{n} Dateien zu sammeln ({})"
 
-msgid "TASKS"
-msgstr "AUFGABEN"
+msgid "Show tasks"
+msgstr "Aufgaben zeigen"
+
+msgid "Close"
+msgstr "Schließen"
 
 msgid "Collect…"
 msgstr "Sammeln…"
