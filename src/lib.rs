@@ -90,7 +90,24 @@ pub fn save_json<T: serde::Serialize>(value: &T, path: &Path) -> std::io::Result
     let mut f = fs::File::create(&tmp)?;
     std::io::Write::write_all(&mut f, &serde_json::to_vec_pretty(value)?)?;
     f.sync_all()?;
-    fs::rename(&tmp, path)
+    fs::rename(&tmp, path)?;
+    sync_dir(path);
+    Ok(())
+}
+
+/// Makes a rename in the file's folder durable: the journal must be on disk before the drive changes after it.
+pub fn sync_dir(path: &Path) {
+    // a failure here only weakens crash safety, the file itself is written
+    if let Some(dir) = path.parent() {
+        let _ = fs::File::open(dir).and_then(|d| d.sync_all());
+    }
+}
+
+/// Media Composer's executable is "AvidMediaComposer"; matched exactly, because helpers like
+/// AvidBackgroundServicesManager live inside its app bundle and run all the time. If pgrep can't tell, it counts as
+/// running: better to stop than to change a database under it.
+pub fn media_composer_running() -> bool {
+    std::process::Command::new("pgrep").args(["-x", "AvidMediaComposer"]).output().map_or(true, |o| o.status.code() != Some(1))
 }
 
 /// Moves `from` to `to` but never replaces anything at `to` – not even when it appears between a check and the move
@@ -115,7 +132,7 @@ pub fn move_new(from: &Path, to: &Path) -> std::io::Result<()> {
         match e.raw_os_error() {
             Some(libc::EEXIST) => return Err(taken()),
             // not supported here (macFUSE answers ENOSYS, e.g. Mountpoint workspaces): the check above stays
-            Some(libc::ENOTSUP) | Some(libc::EINVAL) | Some(libc::ENOSYS) => {}
+            Some(libc::ENOTSUP) | Some(libc::EOPNOTSUPP) | Some(libc::EINVAL) | Some(libc::ENOSYS) => {}
             _ => return Err(e),
         }
     }
@@ -428,6 +445,22 @@ pub fn find_volumes() -> Vec<PathBuf> {
     found
 }
 
+/// Like `find_volumes`, for the window's 2 s timer: a hanging network or macFUSE mount must not freeze the window.
+/// Looks in a thread and gives up after 2 s (None); while that thread is still stuck, it does not start another.
+pub fn find_volumes_responsive() -> Option<Vec<PathBuf>> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static LOOKING: AtomicBool = AtomicBool::new(false);
+    if LOOKING.swap(true, Ordering::SeqCst) {
+        return None;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(find_volumes());
+        LOOKING.store(false, Ordering::SeqCst);
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(2)).ok()
+}
+
 /// The test lab's stand-in computer name (MFC_LAB_COMPUTER), so two "systems" can run on one Mac.
 pub fn lab_computer() -> Option<String> {
     std::env::var("MFC_LAB_COMPUTER").ok().filter(|n| !n.is_empty())
@@ -441,7 +474,7 @@ pub fn find_moved(mxf: &Path, folder: &str, files: &[(String, u64)]) -> Option<P
     if files.is_empty() || mxf.is_dir() {
         return None;
     }
-    find_volumes().into_iter().map(|v| mxf_dir(&v)).filter(|m| m != mxf).find(|m| {
+    find_volumes_responsive()?.into_iter().map(|v| mxf_dir(&v)).filter(|m| m != mxf).find(|m| {
         let have: std::collections::HashSet<String> = fs::read_dir(m.join(folder)).map(|rd| rd.flatten().map(|e| key(&e.file_name().to_string_lossy())).collect()).unwrap_or_default();
         files.iter().all(|(n, _)| have.contains(&key(n)))
     })

@@ -225,7 +225,8 @@ pub struct Targets {
 
 /// Folder for a delivery folder imported into a folder of its own; if it exists already, the files go into it.
 pub fn own_folder_name(from: &str, folder: &str) -> String {
-    format!("{}_{folder}", safe_name(from))
+    // never hidden: a sender name starting with "." would give a folder every scan and Media Composer skip
+    format!("{}_{folder}", safe_name(from).trim_start_matches('.'))
 }
 
 /// Spielt eine Lieferung in die MXF-Ordner ein. Fügt nur hinzu und überschreibt keine Mediendatei;
@@ -300,7 +301,12 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
 
     let backup = format!("{}_{}", yymmdd(now_secs()), now_secs());
     let mut db_done: HashSet<PathBuf> = HashSet::new();
-    for (id, expected) in &d.db_folders {
+    // copying can take hours: Media Composer must still be closed before a database is touched
+    let mc = !d.db_folders.is_empty() && crate::media_composer_running();
+    if mc {
+        problems.push("Media Composer was started during the import – no database replaced, please rebuild them".into());
+    }
+    for (id, expected) in d.db_folders.iter().filter(|_| !mc) {
         // the database fits one folder only: separated into media and render files it fits none
         let Some(dir) = landed.get(id).filter(|s| s.len() == 1).and_then(|s| s.first()) else { continue };
         // the names may match while a file of the same name with other content stayed (its copy was refused)
@@ -710,6 +716,12 @@ mod tests {
             assert_eq!(load(&dir).is_ok(), ok);
         }
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn own_folder_is_never_hidden() {
+        assert_eq!(own_folder_name(".hidden", "1"), "hidden_1");
+        assert_eq!(own_folder_name("Mac Studio", "1"), "Mac Studio_1");
     }
 
     #[test]

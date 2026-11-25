@@ -135,7 +135,9 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> io::Result<()> {
     let mut f = File::create(&tmp)?;
     io::Write::write_all(&mut f, data)?;
     f.sync_all()?;
-    fs::rename(&tmp, path)
+    fs::rename(&tmp, path)?;
+    crate::sync_dir(path);
+    Ok(())
 }
 
 pub fn hash_file(path: &Path) -> io::Result<String> {

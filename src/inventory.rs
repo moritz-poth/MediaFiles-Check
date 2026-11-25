@@ -108,8 +108,9 @@ pub fn save_scan(dir: &Path, head: &ScanHead, items: &[Item]) -> std::io::Result
     let base = chrono::Local::now().format("%Y%m%d-%H%M%S%3f").to_string();
     // two scans within the same millisecond (tests) must not share a file
     let stamp = (0..).map(|n| format!("{base}-{n:03}")).find(|s| !dir.join(format!("{s}.json")).exists()).unwrap();
-    fs::write(dir.join(format!("{stamp}.items.json")), serde_json::to_vec(items)?)?;
-    fs::write(dir.join(format!("{stamp}.json")), serde_json::to_vec_pretty(head)?)?;
+    // items first, the head last: a scan is only listed once both are complete
+    crate::exchange::write_atomic(&dir.join(format!("{stamp}.items.json")), &serde_json::to_vec(items)?)?;
+    crate::exchange::write_atomic(&dir.join(format!("{stamp}.json")), &serde_json::to_vec_pretty(head)?)?;
     for (old, _) in list_scans(dir).into_iter().skip(SCANS_KEPT) {
         delete_scan(&old);
     }

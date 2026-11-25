@@ -58,13 +58,14 @@ pub fn hex(id: &[u8; 32]) -> String {
 
 /// Which of the requested files this system has (by the last scan) and where; the rest becomes a task.
 pub fn plan(local: &Manifest, req: &Request) -> Plan {
-    // mob ID -> (volume, folder, file) from the databases of every scanned folder
-    let mut index: HashMap<String, (usize, usize, String)> = HashMap::new();
+    // mob ID -> every (volume, folder, file) whose database lists it: a stale database may still list a file that
+    // is gone there while another folder has it
+    let mut index: HashMap<String, Vec<(usize, usize, String)>> = HashMap::new();
     for (vi, v) in local.volumes.iter().enumerate() {
         for (fi, f) in v.folders.iter().enumerate() {
             let Ok(data) = fs::read(mxf_dir(Path::new(&v.path)).join(&f.name).join(DB_FILES[0])) else { continue };
             for (id, name) in read_pmr(&data).unwrap_or_default() {
-                index.entry(hex(&id)).or_insert((vi, fi, name));
+                index.entry(hex(&id)).or_default().push((vi, fi, name));
             }
         }
     }
@@ -73,7 +74,7 @@ pub fn plan(local: &Manifest, req: &Request) -> Plan {
     let mut missing = vec![];
     let mut taken = BTreeSet::new();
     for w in &req.files {
-        let found = index.get(&w.id.to_lowercase()).and_then(|(vi, fi, name)| {
+        let found = index.get(&w.id.to_lowercase()).into_iter().flatten().find_map(|(vi, fi, name)| {
             let (v, f) = (&local.volumes[*vi], &local.volumes[*vi].folders[*fi]);
             f.files.iter().find(|e| key(&e.name) == key(name)).map(|e| (v, f, e))
         });
@@ -128,6 +129,35 @@ mod tests {
             d.extend([0u8; 36]);
         }
         d
+    }
+
+    #[test]
+    fn an_id_in_a_stale_database_is_found_in_the_folder_that_has_the_file() {
+        let root = std::env::temp_dir().join(format!("exchange-request-stale-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let id = [7u8; 32];
+        for f in ["1", "2"] {
+            fs::create_dir_all(mxf_dir(&root).join(f)).unwrap();
+            fs::write(mxf_dir(&root).join(f).join(DB_FILES[0]), pmr(&[(id, "x.mxf")])).unwrap();
+        }
+        // folder 1's database still lists x.mxf, but only folder 2 has it
+        let local = Manifest {
+            system: "Sender".into(),
+            volumes: vec![Volume {
+                name: "V".into(),
+                path: root.display().to_string(),
+                folders: vec![
+                    Folder { name: "1".into(), has_db: true, files: vec![] },
+                    Folder { name: "2".into(), has_db: true, files: vec![FileEntry { name: "x.mxf".into(), size: 1, hash: "h".into() }] },
+                ],
+            }],
+            ..Default::default()
+        };
+        let req = Request { format: REQUEST_FORMAT.into(), system: "Me".into(), files: vec![Wanted { id: hex(&id), ..Default::default() }], ..Default::default() };
+        let p = plan(&local, &req);
+        assert_eq!(p.copies.iter().map(|c| c.from_folder.as_str()).collect::<Vec<_>>(), ["2"]);
+        assert!(!p.tasks.iter().any(|t| matches!(t, Task::NotFound { .. })));
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

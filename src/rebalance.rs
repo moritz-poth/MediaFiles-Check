@@ -403,7 +403,8 @@ impl Rebalanced {
         if self.folders.is_empty() || self.sample.is_empty() || self.mxf.is_dir() {
             return false;
         }
-        let found = crate::find_volumes().into_iter().map(|v| crate::mxf_dir(&v)).find(|m| self.names().iter().all(|n| m.join(n).is_dir()) && self.holds_sample(m));
+        let Some(volumes) = crate::find_volumes_responsive() else { return false };
+        let found = volumes.into_iter().map(|v| crate::mxf_dir(&v)).find(|m| self.names().iter().all(|n| m.join(n).is_dir()) && self.holds_sample(m));
         found.map(|m| self.mxf = m).is_some()
     }
 

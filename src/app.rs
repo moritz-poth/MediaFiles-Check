@@ -114,11 +114,7 @@ fn journal_path() -> PathBuf {
     app_dir().unwrap_or_else(|| PathBuf::from(".")).join("renamed.json")
 }
 
-/// Media Composer's executable is "AvidMediaComposer"; matched exactly, because helpers like
-/// AvidBackgroundServicesManager live inside its app bundle and run all the time.
-fn media_composer_running() -> bool {
-    std::process::Command::new("pgrep").args(["-x", "AvidMediaComposer"]).output().is_ok_and(|o| o.status.success())
-}
+use mediafiles_check::media_composer_running;
 
 /// settings.txt: language on the first line, "dark" or "light" on the second.
 fn load_settings() -> Settings {
@@ -985,7 +981,8 @@ fn add_tasks(texts: &[String], source: &str, me: &str) {
             continue;
         }
         // "… : <drive>/<folder>" – a folder of this system that exists here
-        let folder = t.rsplit_once(": ").and_then(|(_, p)| p.split_once('/')).map(|(v, f)| fy::mxf_dir(&Path::new("/Volumes").join(v)).join(f)).filter(|p| mine && p.is_dir());
+        // after "[system] <task>: " – drive and folder names may contain ": " themselves
+        let folder = t.strip_prefix(&me).and_then(|r| r.split_once(": ")).and_then(|(_, p)| p.split_once('/')).map(|(v, f)| fy::mxf_dir(&Path::new("/Volumes").join(v)).join(f)).filter(|p| mine && p.is_dir());
         all.push(TaskEntry { text: t.clone(), source: source.to_string(), mine, folder, done: false });
     }
     save_tasks(&all);
@@ -2115,6 +2112,11 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
             Ok(mut journal) => {
                 let mut reserved: HashMap<PathBuf, HashSet<String>> = HashMap::new();
                 for (p, name) in &chosen {
+                    // a long run: Media Composer may have been started meanwhile – the next groups wait for the next run
+                    if media_composer_running() {
+                        errors.push(notice(3, &p.main, "Media Composer was started – this group and the ones after it were left as they are", 0));
+                        break;
+                    }
                     let res = reserved.entry(p.mxf.clone()).or_insert_with(|| away.iter().filter(|a| a.0 == p.mxf).map(|a| mediafiles_check::key(&a.1)).collect());
                     let result = rebalance::plan(&p.mxf, &p.main, rebalance::per_folder(limit), name.as_deref(), p.mc_folder, res, Some(&mut counted)).and_then(|fresh| rebalance::execute(&fresh, &mut journal, &path));
                     log::write(&format!("rebalance {} (limit {limit}{}): {}", p.mxf.join(&p.main).display(), name.as_ref().map_or(String::new(), |n| format!(", renamed to {n}")), result.as_ref().map_or_else(|e| e.to_string(), |(e, m)| format!("{} moved, {} skipped, folders {:?}", m.moved, m.skipped.len(), e.folders))));
