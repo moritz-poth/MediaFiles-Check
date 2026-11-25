@@ -1,128 +1,13 @@
 //! Exchange I/O tests on real folders: every run records each file (path, size, checksum) before and after
 //! and checks the rules – nothing on the sending side changes, on the receiving side files are only added,
 //! a replaced database is in Exchange-Backup, and no temporary file is left behind.
-use mediafiles_check::Gate;
-use mediafiles_check::exchange::collect::{self, Targets, BACKUP_DIR, DELIVERY_FILE};
-use mediafiles_check::exchange::plan::{self, Options, Plan};
-use mediafiles_check::exchange::{hash_file, mxf_dir, scan, Manifest};
-use std::collections::BTreeMap;
+//! `MFC_IO_ROOT` puts the test folders on another file system (scripts/exchange-disks.sh: disk images).
+mod common;
+use common::*;
+use mediafiles_check::exchange::collect::{self, DELIVERY_FILE};
+use mediafiles_check::exchange::mxf_dir;
+use mediafiles_check::exchange::plan::{self, Options};
 use std::fs;
-use std::path::{Path, PathBuf};
-
-const DB: [&str; 2] = ["msmFMID.pmr", "msmMMOB.mdb"];
-
-/// Every file below `root`: relative path -> checksum.
-type Snap = BTreeMap<String, String>;
-
-fn snap(root: &Path) -> Snap {
-    fn walk(root: &Path, dir: &Path, out: &mut Snap) {
-        for e in fs::read_dir(dir).into_iter().flatten().flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                walk(root, &p, out);
-            } else {
-                out.insert(p.strip_prefix(root).unwrap().to_string_lossy().into_owned(), hash_file(&p).unwrap());
-            }
-        }
-    }
-    let mut s = Snap::new();
-    walk(root, root, &mut s);
-    s
-}
-
-struct Lab {
-    root: PathBuf,
-}
-
-impl Lab {
-    fn new(name: &str) -> Lab {
-        let root = std::env::temp_dir().join(format!("mfc-io-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).unwrap();
-        Lab { root }
-    }
-    /// drive `side/vol` (side = "A" sender, "B" receiver)
-    fn drive(&self, side: &str, vol: &str) -> PathBuf {
-        self.root.join(side).join(vol)
-    }
-    /// folder with files "name" (content = name) or "name=content"; "+db" adds both database files
-    fn folder(&self, side: &str, vol: &str, folder: &str, files: &[&str]) {
-        let dir = mxf_dir(&self.drive(side, vol)).join(folder);
-        fs::create_dir_all(&dir).unwrap();
-        for f in files {
-            if *f == "+db" {
-                for d in DB {
-                    fs::write(dir.join(d), format!("{side} {folder} {d}")).unwrap();
-                }
-                continue;
-            }
-            let (n, c) = f.split_once('=').unwrap_or((f, f));
-            fs::write(dir.join(n), c).unwrap();
-        }
-    }
-    fn scan(&self, side: &str) -> Manifest {
-        let mut vols: Vec<PathBuf> = fs::read_dir(self.root.join(side)).unwrap().flatten().map(|e| e.path()).collect();
-        vols.sort();
-        let mut m = scan::scan(&vols, false, None, &mut |_, _, _| {}, &Gate::default()).unwrap().manifest;
-        m.system = side.into();
-        m
-    }
-    fn dest(&self) -> PathBuf {
-        self.root.join("Delivery")
-    }
-    fn targets(&self, vols: &[&str]) -> Targets {
-        Targets { media: vols.iter().map(|v| (v.to_string(), self.drive("B", v))).collect(), ..Default::default() }
-    }
-    fn read(&self, side: &str, vol: &str, rel: &str) -> Option<String> {
-        fs::read_to_string(mxf_dir(&self.drive(side, vol)).join(rel)).ok()
-    }
-}
-
-impl Drop for Lab {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
-
-/// Compare A with B, collect, check: A unchanged, delivery verifies, no part files.
-fn collect_checked(lab: &Lab, opts: &Options) -> Plan {
-    let (a, b) = (lab.scan("A"), lab.scan("B"));
-    let p = plan::plan(&a, &b, opts);
-    let before = snap(&lab.root.join("A"));
-    let errors = collect::collect(&a, "B", &p, &lab.dest(), "en", &mut |_| {}).unwrap();
-    assert!(errors.is_empty(), "{errors:?}");
-    assert_eq!(snap(&lab.root.join("A")), before, "collecting changed the sender");
-    assert!(collect::verify(&lab.dest(), &mut |_| {}).unwrap().is_empty());
-    no_temp_files(&lab.root);
-    p
-}
-
-/// Import and check the receiving side's rules; returns (problems, tasks).
-fn import_checked(lab: &Lab, t: &Targets) -> (Vec<String>, Vec<String>) {
-    let b = lab.root.join("B");
-    let before = snap(&b);
-    let r = collect::import(&lab.dest(), t, "en", &mut |_| {}).unwrap();
-    let after = snap(&b);
-    for (path, hash) in &before {
-        match after.get(path) {
-            Some(h) if h == hash => {}
-            // the import's own half-written file from an interrupted run is written again
-            _ if path.ends_with(".exchange-part") => {}
-            _ => {
-                // only a database may change, and then its old version is in the backup
-                assert!(DB.iter().any(|d| path.ends_with(d)), "{path} was changed or removed");
-                assert!(after.iter().any(|(p, h)| p.contains(BACKUP_DIR) && h == hash), "{path}: old database not in the backup");
-            }
-        }
-    }
-    no_temp_files(&lab.root);
-    (r.problems, r.tasks)
-}
-
-fn no_temp_files(root: &Path) {
-    let left: Vec<String> = snap(root).into_keys().filter(|p| p.contains(".exchange-part") || p.contains(".exchange-new") || p.ends_with(".tmp")).collect();
-    assert!(left.is_empty(), "left behind: {left:?}");
-}
 
 // ── normal runs ──
 
@@ -205,10 +90,10 @@ fn importing_twice_changes_nothing_more() {
     fs::create_dir_all(mxf_dir(&lab.drive("B", "V"))).unwrap();
     collect_checked(&lab, &Options::default());
     import_checked(&lab, &lab.targets(&["V"]));
-    let first = snap(&lab.root.join("B"));
+    let first = snap(&lab.b);
     let (problems, _) = import_checked(&lab, &lab.targets(&["V"]));
     assert!(problems.is_empty(), "{problems:?}");
-    assert_eq!(snap(&lab.root.join("B")), first);
+    assert_eq!(snap(&lab.b), first);
 }
 
 #[test]
@@ -319,13 +204,13 @@ fn broken_delivery_file_is_refused() {
     delivered(&lab);
     let file = lab.dest().join(DELIVERY_FILE);
     let json = fs::read_to_string(&file).unwrap();
-    let before = snap(&lab.root.join("B"));
+    let before = snap(&lab.b);
     for bad in [json[..json.len() / 2].to_string(), json.replace("mediafiles-exchange-delivery", "other"), json.replace("\"V/1/b.mxf\"", "\"V/../../b.mxf\""), json.replace("\"V/1/b.mxf\"", "\"V\\\\1/b.mxf\"")] {
         fs::write(&file, bad).unwrap();
         assert!(collect::verify(&lab.dest(), &mut |_| {}).is_err());
         assert!(collect::import(&lab.dest(), &lab.targets(&["V"]), "en", &mut |_| {}).is_err());
     }
-    assert_eq!(snap(&lab.root.join("B")), before);
+    assert_eq!(snap(&lab.b), before);
 }
 
 // ── the sender changes between scan and collect ──

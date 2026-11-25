@@ -92,8 +92,10 @@ pub const RESERVE: u64 = 1 << 30;
 /// Fails when `needed` bytes plus `RESERVE` do not fit on the drive of `path` (or its nearest existing parent).
 pub fn check_space(path: &Path, needed: u64) -> io::Result<()> {
     let Some(free) = path.ancestors().find(|p| p.exists()).and_then(free_bytes) else { return Ok(()) };
-    if free < needed.saturating_add(RESERVE) {
-        return Err(io::Error::new(io::ErrorKind::StorageFull, format!("{}: not enough space – needs {} MB plus 1 GB reserve, {} MB free", path.display(), needed >> 20, free >> 20)));
+    // test lab only (scripts/exchange-disks.sh): small disk images can't keep 1 GB free
+    let reserve = std::env::var("MFC_LAB_RESERVE").ok().and_then(|v| v.parse().ok()).unwrap_or(RESERVE);
+    if free < needed.saturating_add(reserve) {
+        return Err(io::Error::new(io::ErrorKind::StorageFull, format!("{}: not enough space – needs {} MB plus {} MB reserve, {} MB free", path.display(), needed >> 20, reserve >> 20, free >> 20)));
     }
     Ok(())
 }
