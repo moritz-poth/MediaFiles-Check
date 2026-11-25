@@ -101,7 +101,7 @@ pub fn show_runs(app: &AppWindow) {
                 Action::Move => ["{n} files of {label} moved ({size})", "{n} Dateien von {label} verschoben ({size})", "{n} fichiers de {label} déplacés ({size})", "{n} archivos de {label} movidos ({size})"],
                 Action::Swap => ["{n} files moved between the import and the render drive ({size})", "{n} Dateien zwischen Import- und Render-Laufwerk verschoben ({size})", "{n} fichiers déplacés entre le disque d’import et le disque de rendu ({size})", "{n} archivos movidos entre la unidad de importación y la de render ({size})"],
             };
-            let text = pick(&lang, what).replace("{n}", &r.moved.len().to_string()).replace("{size}", &size_text(r.bytes())).replace("{label}", &r.label);
+            let text = pick(&lang, what).replace("{n}", &r.moved.len().to_string()).replace("{size}", &size_text(r.bytes(), &lang)).replace("{label}", &r.label);
             RunRow { text: text.into(), detail: r.date.clone().into(), db_done: r.db_done, kind: 2, index: 0, date: r.date.clone().into() }
         })
         .collect();
@@ -141,7 +141,7 @@ fn scanned_drives(st: &InvState) -> Vec<PathBuf> {
 fn show_plan(app: &AppWindow, st: &InvState) {
     let g = app.global::<Inventory>();
     g.set_plan_count(st.plan.len() as i32);
-    g.set_plan_size(size_text(st.plan.iter().map(|s| s.size).sum()).into());
+    g.set_plan_size(size_text(st.plan.iter().map(|s| s.size).sum(), &lang_of(app)).into());
     // set aside: the folder list shows where the files come from
     g.set_plan_text(if st.action == Some(Action::Aside) && g.get_task() == 0 { String::new() } else { plan_text(&st.plan) }.into());
 }
@@ -198,7 +198,7 @@ fn prepare(app: &AppWindow, st: &mut InvState, kind: i32, limit: usize) {
             folders.sort_by(|a, b| b.2.cmp(&a.2));
             let rows: Vec<FolderRow> = folders
                 .iter()
-                .map(|(dir, n, size)| FolderRow { name: folder_label(dir).into(), detail: format!("{n} · {}", size_text(*size)).into(), selected: !kept.contains(dir) })
+                .map(|(dir, n, size)| FolderRow { name: folder_label(dir).into(), detail: format!("{n} · {}", size_text(*size, &lang_of(app))).into(), selected: !kept.contains(dir) })
                 .collect();
             g.set_aside_folders(ModelRc::new(VecModel::from(rows)));
             g.set_aside_options(ModelRc::new(VecModel::from(st.aside_options.to_vec())));
@@ -319,7 +319,7 @@ fn confirm(app: &AppWindow, inv: &Inv, renames: &Rc<RefCell<Renames>>) {
                 let copied = run.action == Action::Copy;
                 g.set_done_copied(copied);
                 let text = if copied { ["{n} files copied ({size}).", "{n} Dateien kopiert ({size}).", "{n} fichiers copiés ({size}).", "{n} archivos copiados ({size})."] } else { ["{n} files moved ({size}).", "{n} Dateien verschoben ({size}).", "{n} fichiers déplacés ({size}).", "{n} archivos movidos ({size})."] };
-                let mut lines = vec![pick(&lang, text).replace("{n}", &m.moved.to_string()).replace("{size}", &size_text(run.bytes()))];
+                let mut lines = vec![pick(&lang, text).replace("{n}", &m.moved.to_string()).replace("{size}", &size_text(run.bytes(), &lang))];
                 if !m.skipped.is_empty() {
                     lines.push(pick(&lang, ["Left where they are:", "Liegen geblieben:", "Laissés en place :", "Se quedaron:"]).to_string());
                     lines.extend(m.skipped.iter().take(20).map(|(f, why)| format!("· {f} – {why}")));
@@ -509,7 +509,7 @@ fn sound_text(i: &Item) -> String {
     parts.join(" · ")
 }
 
-fn row(i: &Item, selected: bool) -> MediaRow {
+fn row(i: &Item, selected: bool, lang: &str) -> MediaRow {
     let info = i.info.clone().unwrap_or_default();
     MediaRow {
         clip: info.clip.clone().unwrap_or_default().into(),
@@ -529,7 +529,7 @@ fn row(i: &Item, selected: bool) -> MediaRow {
         fps: if info.picture.is_some() { info.rate.map(rate_text).unwrap_or_default() } else { String::new() }.into(),
         duration: duration_text(i).into(),
         sound: sound_text(i).into(),
-        size: size_text(i.size).into(),
+        size: size_text(i.size, lang).into(),
         project: i.project.clone().unwrap_or_default().into(),
         place: format!("{} / {}", i.drive, i.folder).into(),
         file: i.name().into(),
@@ -597,7 +597,7 @@ fn refresh_table(st: &mut InvState) {
     st.shown = shown;
     let Some(w) = st.win.borrow().as_ref().map(|w| w.as_weak()) else { return };
     let Some(w) = w.upgrade() else { return };
-    let rows: Vec<MediaRow> = st.shown.iter().map(|&i| row(&st.items[i], st.selected.contains(&st.items[i].path))).collect();
+    let rows: Vec<MediaRow> = st.shown.iter().map(|&i| row(&st.items[i], st.selected.contains(&st.items[i].path), &st.lang)).collect();
     // widest text per column (characters; the font is monospaced) for the double-click on a column edge
     let fit: Vec<i32> = (0..13)
         .map(|c| {
@@ -644,7 +644,7 @@ fn refresh_table(st: &mut InvState) {
     w.set_sort_up(!down);
     let chosen: Vec<&Item> = st.items.iter().filter(|i| st.selected.contains(&i.path)).collect();
     w.set_selected(chosen.len() as i32);
-    w.set_selected_size(size_text(chosen.iter().map(|i| i.size).sum()).into());
+    w.set_selected_size(size_text(chosen.iter().map(|i| i.size).sum(), &st.lang).into());
     w.set_rows(ModelRc::new(VecModel::from(rows)));
 }
 
@@ -672,9 +672,9 @@ fn show_overview(app: &AppWindow, st: &InvState) {
         }
     }
     g.set_counts(ModelRc::new(VecModel::from(counts.to_vec())));
-    g.set_sizes(ModelRc::new(VecModel::from(sizes.iter().map(|s| SharedString::from(size_text(*s))).collect::<Vec<_>>())));
+    g.set_sizes(ModelRc::new(VecModel::from(sizes.iter().map(|s| SharedString::from(size_text(*s, &lang_of(app)))).collect::<Vec<_>>())));
     g.set_files(st.items.len() as i32);
-    g.set_total(size_text(st.items.iter().map(|i| i.size).sum()).into());
+    g.set_total(size_text(st.items.iter().map(|i| i.size).sum(), &lang_of(app)).into());
     g.set_projects(st.projects as i32);
     g.set_unreadable(st.items.iter().filter(|i| i.error.is_some()).count() as i32);
 }
@@ -935,7 +935,7 @@ fn save_list(app: &AppWindow, st: &InvState) {
     ];
     let mut text = head.iter().map(|h| pick(lang, *h)).collect::<Vec<_>>().join("\t") + "\n";
     for &k in &st.shown {
-        let r = row(&st.items[k], false);
+        let r = row(&st.items[k], false, lang);
         let kind = pick(lang, [["Media", "Medium", "Média", "Medio"], ["Render", "Render", "Rendu", "Render"], ["Unknown", "Unbekannt", "Inconnu", "Desconocido"]][r.kind as usize]);
         let from = [pick(lang, ["header", "Dateikopf", "en-tête", "cabecera"]), pick(lang, ["project", "Projekt", "projet", "proyecto"]), "–"][r.from as usize];
         let used = match r.used {

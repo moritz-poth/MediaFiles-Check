@@ -1578,7 +1578,7 @@ component ExchangePane inherits VerticalLayout {
         spacing: 14px;
         PageHead { title: @tr("Collect a delivery"); }
         Para {
-            text: Exchange.has-compare ? @tr("{n} file to collect ({})" | "{n} files to collect ({})" % Exchange.copy-files, Exchange.copy-size) + " " + @tr("Collect… is under Exchange › Compare.")
+            text: Exchange.has-compare ? @tr("{n} file to collect ({})" | "{n} files to collect ({})" % Exchange.copy-files, Exchange.copy-size) + ". " + @tr("Collect… is under Exchange › Compare.")
                 : @tr("Compare with the other system first: Exchange › Compare. Collecting copies the files it is missing, with checksums, into a delivery folder.");
         }
     }
@@ -3135,7 +3135,7 @@ export component AppWindow inherits CheckWindow {
                 current: root.renamed.length == 0 ? 0 : root.renamed-ready ? 2 : 1;
             }
             if root.renamed.length == 0: Para {
-                text: @tr("No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check) or when rebalancing and setting duplicates aside.");
+                text: @tr("No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check DBs) or when rebalancing and setting duplicates aside.");
             }
             if root.renamed.length > 0: Card {
 ScrollBox {
@@ -3620,6 +3620,8 @@ ScrollBox {
         // ── Duplikate: Ergebnis ──
         if root.page == Page.dups: VerticalLayout {
             spacing: Metrics.spacing;
+            // fixed height: the list takes what is left, so long texts (fr/de) never make the page scroll
+            height: Metrics.page-height;
             PageHead {
                 title: @tr("Duplicates");
                 CheckButton {
@@ -3639,10 +3641,12 @@ ScrollBox {
             }
             VerticalLayout {
                 spacing: 10px;
+                vertical-stretch: 1;
                 Para { text: root.dup-summary; color: Theme.text; }
                 if root.dup-groups.length > 0: Card {
-ScrollBox {
-                    limit: 300px;
+                    vertical-stretch: 1;
+                    min-height: 0px;
+FillScroll {
                     for g[gi] in root.dup-groups: Rectangle {
  if gi > 0: Rectangle { y: 0; height: 1px; background: Theme.row-line; }
  VerticalLayout {
@@ -3706,6 +3710,7 @@ ScrollBox {
                     text: root.mc-running ? @tr("Quit Media Composer first.") : @tr("Media Composer must stay closed while moving – on network drives on every workstation.");
                     color: Theme.warning;
                 }
+                Rectangle { vertical-stretch: 1; }
             }
         }
 

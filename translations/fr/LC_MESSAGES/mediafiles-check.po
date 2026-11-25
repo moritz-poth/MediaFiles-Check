@@ -875,8 +875,8 @@ msgstr "Rien à faire à la main pour l’instant."
 msgid "No runs yet."
 msgstr "Aucune opération pour l’instant."
 
-msgid "No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check) or when rebalancing and setting duplicates aside."
-msgstr "Aucun dossier n’est renommé pour l’instant. Les dossiers sont renommés pour Media Composer depuis un résultat (Vérifier) ou lors du rééquilibrage et de la mise de côté de doublons."
+msgid "No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check DBs) or when rebalancing and setting duplicates aside."
+msgstr "Aucun dossier n’est renommé pour l’instant. Les dossiers sont renommés pour Media Composer depuis un résultat (Vérifier BD) ou lors du rééquilibrage et de la mise de côté de doublons."
 
 msgid "Set old databases aside"
 msgstr "Mettre de côté les anciennes bases"
@@ -984,7 +984,7 @@ msgid "No folder on the selected drives has more than {} files, the two database
 msgstr "Aucun dossier des disques choisis ne contient plus de {} fichiers, les deux fichiers de base de données compris."
 
 msgid "Media Composer must stay closed while moving – on network drives on every workstation."
-msgstr "Media Composer doit rester fermé pendant le déplacement – sur les disques réseau, sur chaque poste."
+msgstr "Fermez Media Composer pendant le déplacement – sur les disques réseau, sur chaque poste."
 
 msgid "Counts every file of a folder, the two database files included – a folder keeps at most this many minus 2 media files. Rebalancing moves the oldest media files of a fuller folder into new folders. We recommend no more than 5000 (between 100 and 50000)."
 msgstr "Compte chaque fichier d’un dossier, les deux fichiers de base de données compris – un dossier garde donc au plus ce nombre moins 2 fichiers média. Le rééquilibrage déplace les fichiers média les plus anciens d’un dossier trop plein vers de nouveaux dossiers. Nous recommandons 5000 au maximum (entre 100 et 50000)."

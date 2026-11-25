@@ -94,6 +94,37 @@ fn full_drive_is_refused_before_anything_is_written() {
     assert_eq!(snap(&lab.b), before);
 }
 
+/// The free-space check passes, then another program fills the drive while files are copied (ENOSPC mid-copy).
+#[test]
+#[ignore]
+fn drive_fills_up_during_the_import() {
+    let lab = Lab::new("enospc");
+    big(&lab, 120, MB);
+    collect_checked(&lab, &Options::default());
+    // outside the lab folder, on the same drive
+    let filler = PathBuf::from(env::var("MFC_IO_B").unwrap()).join("filler.bin");
+    let mut filled = false;
+    let r = collect::import(&lab.dest(), &lab.targets(&["V"]), "en", &mut |line| {
+        if !filled && line.starts_with("[40/") {
+            filled = true;
+            use std::io::Write;
+            let mut f = fs::File::create(&filler).unwrap();
+            let chunk = vec![0u8; MB];
+            while f.write_all(&chunk).is_ok() {}
+            let _ = f.sync_all();
+        }
+    });
+    assert!(filled);
+    match &r {
+        Ok(r) => assert!(!r.problems.is_empty(), "drive full but no problem reported"),
+        Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::StorageFull, "{e}"),
+    }
+    no_wrong_file(&lab);
+    no_temp_files(&lab.b);
+    fs::remove_file(&filler).unwrap();
+    finishes(&lab);
+}
+
 #[test]
 #[ignore]
 fn read_only_drive_changes_nothing() {

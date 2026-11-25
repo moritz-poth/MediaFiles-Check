@@ -875,8 +875,8 @@ msgstr "Gerade gibt es nichts von Hand zu tun."
 msgid "No runs yet."
 msgstr "Noch keine Läufe."
 
-msgid "No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check) or when rebalancing and setting duplicates aside."
-msgstr "Gerade ist kein Ordner umbenannt. Ordner werden aus einem Prüfergebnis (Prüfen) oder beim Rebalancing und Beiseitelegen von Duplikaten für Media Composer umbenannt."
+msgid "No folder is renamed right now. Folders are renamed for Media Composer from a check result (Check DBs) or when rebalancing and setting duplicates aside."
+msgstr "Gerade ist kein Ordner umbenannt. Ordner werden aus einem Prüfergebnis (DBs prüfen) oder beim Rebalancing und Beiseitelegen von Duplikaten für Media Composer umbenannt."
 
 msgid "Set old databases aside"
 msgstr "Alte Datenbanken beiseitelegen"

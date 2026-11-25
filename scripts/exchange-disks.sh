@@ -2,7 +2,7 @@
 # Exchange I/O tests on real file systems (disk images, never a real drive; mounted outside /Volumes, so
 # Media Composer and Finder don't see them):
 #   1. tests/exchange_io.rs on APFS, case-sensitive APFS, exFAT and HFS+
-#   2. tests/exchange_faults.rs: full drive, read-only drive, drive pulled out, app killed (APFS sender, exFAT receiver)
+#   2. tests/exchange_faults.rs: full drive, drive filling up mid-copy, read-only drive, drive pulled out, app killed (APFS sender, exFAT receiver)
 # Usage: scripts/exchange-disks.sh [name filter for the fault tests]
 set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"

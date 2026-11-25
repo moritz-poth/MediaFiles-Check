@@ -2190,12 +2190,14 @@ struct Dups {
 /// at most this many groups on the page (the report lists all; the rest are set aside with the automatic choice)
 const DUPS_SHOWN: usize = 300;
 
-fn size_text(bytes: u64) -> String {
-    match bytes {
+/// "1.4 MB" in English, "1,4 MB" in the other languages (like `exchange::flow::format_size`).
+fn size_text(bytes: u64, lang: &str) -> String {
+    let s = match bytes {
         b if b >= 1 << 30 => format!("{:.1} GB", b as f64 / (1u64 << 30) as f64),
         b if b >= 1 << 20 => format!("{:.1} MB", b as f64 / (1u64 << 20) as f64),
         b => format!("{} KB", b.div_ceil(1024)),
-    }
+    };
+    if lang == "en" { s } else { s.replace('.', ",") }
 }
 
 /// Folders renamed for Media Composer right now (their names on the drive): copies there are not touched.
@@ -2226,7 +2228,7 @@ fn show_dups(app: &AppWindow, d: &Dups, renamed: &[PathBuf], lang: &str) {
         ])
         .replace("{g}", &f.groups.len().to_string())
         .replace("{f}", &f.files.to_string())
-        .replace("{size}", &size_text(f.groups.iter().zip(&d.selected).filter(|(g, s)| **s && !dup_blocked(g, renamed)).map(|(g, _)| g.extra()).sum()))
+        .replace("{size}", &size_text(f.groups.iter().zip(&d.selected).filter(|(g, s)| **s && !dup_blocked(g, renamed)).map(|(g, _)| g.extra()).sum(), lang))
     };
     if f.groups.len() > DUPS_SHOWN {
         summary += &pick(lang, [" The first {n} are shown; the report lists all.", " Die ersten {n} werden gezeigt, der Bericht listet alle.", " Les {n} premiers sont affichés ; le rapport les liste tous.", " Se muestran los primeros {n}; el informe los lista todos."]).replace("{n}", &DUPS_SHOWN.to_string());
@@ -2246,7 +2248,7 @@ fn show_dups(app: &AppWindow, d: &Dups, renamed: &[PathBuf], lang: &str) {
             let blocked = dup_blocked(g, renamed);
             let detail = pick(lang, ["{k} copies · {size} each", "{k} Kopien · je {size}", "{k} copies · {size} chacune", "{k} copias · {size} cada una"])
                 .replace("{k}", &g.copies.len().to_string())
-                .replace("{size}", &size_text(g.copies[g.keep].size));
+                .replace("{size}", &size_text(g.copies[g.keep].size, lang));
             let note = if blocked {
                 pick(lang, ["A copy is in a folder renamed for Media Composer – rename it back first.", "Eine Kopie liegt in einem für Media Composer umbenannten Ordner – erst zurückbenennen.", "Une copie est dans un dossier renommé pour Media Composer – renommez-le d’abord à l’inverse.", "Una copia está en una carpeta renombrada para Media Composer: primero devuélvele el nombre."])
             } else if g.sizes_differ() {
@@ -2286,7 +2288,7 @@ fn show_dup_runs(app: &AppWindow, lang: &str) {
         .map(|(i, r)| {
             let text = pick(lang, ["{n} copies set aside ({size})", "{n} Kopien zur Seite gelegt ({size})", "{n} copies mises de côté ({size})", "{n} copias apartadas ({size})"])
                 .replace("{n}", &r.moved.len().to_string())
-                .replace("{size}", &size_text(r.bytes()));
+                .replace("{size}", &size_text(r.bytes(), lang));
             let detail = pick(lang, ["Duplicates · {}", "Duplikate · {}", "Doublons · {}", "Duplicados · {}"]).replace("{}", &r.date);
             RunRow { text: text.into(), detail: detail.into(), db_done: r.db_done, kind: 1, index: i as i32, date: r.date.clone().into() }
         })
@@ -2891,7 +2893,7 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
                             "{n} copias apartadas ({size}) en «MediaFiles Check Duplicates» en sus unidades.",
                         ])
                         .replace("{n}", &m.moved.to_string())
-                        .replace("{size}", &size_text(run.bytes()))];
+                        .replace("{size}", &size_text(run.bytes(), &lang))];
                         if !m.skipped.is_empty() {
                             lines.push(pick(&lang, ["Left where they are (changed or gone meanwhile): {}", "Liegen geblieben (inzwischen geändert oder weg): {}", "Laissées en place (modifiées ou disparues entre-temps) : {}", "Se quedaron (cambiadas o desaparecidas entretanto): {}"]).replace("{}", &m.skipped.join(", ")));
                         }
@@ -3824,6 +3826,14 @@ fn main() -> Result<(), slint::PlatformError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn size_text_uses_the_decimal_comma_outside_english() {
+        assert_eq!(super::size_text(1_468_006, "en"), "1.4 MB");
+        assert_eq!(super::size_text(1_468_006, "de"), "1,4 MB");
+        assert_eq!(super::size_text(3 << 30, "fr"), "3,0 GB");
+        assert_eq!(super::size_text(2000, "es"), "2 KB");
+    }
+
     /// Column edges of the media table with real pointer events: dragging changes only that column,
     /// the list does not pan along, a double-click fits the column and dragging still works after it,
     /// the wheel scrolls rows vertically under a fixed header and moves header and rows together sideways.
