@@ -848,7 +848,7 @@ export global Projects {
     in property <string> folder;
     in property <[DriveRow]> projects;
     in property <int> selected-count;
-    in property <string> error;
+    in-out property <string> error;  // shown as a Note at the bottom of the window, × clears it
     in property <int> missing;
     // was die Anforderung enthält: nur Dateien aus den im Baum eingeschalteten Ordnern
     in property <int> request-count;
@@ -1041,10 +1041,6 @@ component ProjectsPane inherits VerticalLayout {
                 clicked => { Projects.show-media(1); }
             }
         }
-        StatusLine {
-            text: Projects.error;
-            color: Theme.error;
-        }
     }
 
     // ── Anfordern ──
@@ -1088,10 +1084,6 @@ component ProjectsPane inherits VerticalLayout {
                     Text { text: t; width: Metrics.content-width - 60px; wrap: word-wrap; font-size: 12px; color: Theme.text; }
                 }
             }
-        }
-        StatusLine {
-            text: Projects.error;
-            color: Theme.error;
         }
     }
 }
@@ -1738,7 +1730,7 @@ export global Inventory {
     in-out property <bool> paused;
     callback pause(bool);
     callback cancel();
-    in property <string> error;
+    in-out property <string> error;  // shown as a Note at the bottom of the window, × clears it
     // Übersicht: 0 Medien benutzt, 1 Renders benutzt, 2 Medien unbenutzt, 3 Renders unbenutzt, 4 unbekannt,
     // 5 Medien gesamt, 6 Renders gesamt (Anzahl und Größe)
     in property <[int]> counts: [0, 0, 0, 0, 0, 0, 0];
@@ -2025,12 +2017,6 @@ component ScanPane inherits VerticalLayout {
             text: @tr("Lists every media file on the switched-on drives with its clip, codec and size, and sorts out render files. A file the switched-on projects do not use is unused – media of other projects on the same drives would count as unused too. Nothing is changed.");
         }
         if Access.denied != "": AccessNote { }
-        if Inventory.error != "": Text {
-            text: Inventory.error;
-            wrap: word-wrap;
-            font-size: 12px;
-            color: Theme.error;
-        }
         if Inventory.step == 2 && Inventory.current != "": Para {
             text: @tr("Current scan: {} · {n} file" | "Current scan: {} · {n} files" % Inventory.files, Inventory.current) + " – " + @tr("every tab works with it.");
             color: Theme.text;
@@ -2794,7 +2780,7 @@ export component AppWindow inherits CheckWindow {
         ];
     in property <[DriveRow]> drives;
     in property <int> selected-count;
-    in property <string> error;
+    in-out property <string> error;  // shown as a Note at the bottom of the window, × clears it
     // Fortschritt
     in property <string> work-text;
     in property <float> work-value;
@@ -3092,10 +3078,6 @@ export component AppWindow inherits CheckWindow {
                 color: root.check-volumes == "" ? Theme.warning : Theme.muted;
             }
             if Access.denied != "": AccessNote { }
-            StatusLine {
-                text: root.error;
-                color: Theme.error;
-            }
         }
 
         // ── DBs prüfen › Neue Datenbanken ──
@@ -3818,14 +3800,21 @@ ScrollBox {
         }
     }
 
-    // Fehlermeldung des Austauschs: unten mittig über dem Inhalt, × blendet sie aus (user 2026-11-25)
-    if Exchange.error != "" && root.tab == 0: Note {
+    // Fehlermeldung des Reiters: unten mittig über dem Inhalt, × blendet sie aus (user 2026-11-25)
+    property <string> tab-error: root.tab == 0 ? Exchange.error : root.tab == 1 ? root.error : root.tab == 2 ? Projects.error
+        : root.tab == 5 || root.tab == 6 ? Inventory.error : "";
+    if root.tab-error != "": Note {
         x: (root.width - self.width) / 2;
         y: root.height - self.height - 24px;
-        message: Exchange.error;
+        message: root.tab-error;
         kind: 2;
         window-width: root.width;
-        close => { Exchange.error = ""; }
+        close => {
+            if root.tab == 0 { Exchange.error = ""; }
+            else if root.tab == 1 { root.error = ""; }
+            else if root.tab == 2 { Projects.error = ""; }
+            else { Inventory.error = ""; }
+        }
     }
 
     // ── Erster Start ──
