@@ -1113,10 +1113,10 @@ fn forward_menu(shared: &Shared, weak: &slint::Weak<AppWindow>) {
     shared.on_show_release(move || w.upgrade().into_iter().for_each(|a| a.global::<Shared>().invoke_show_release()));
 }
 
-/// Short message over the settings after sending (success 3 s, failure 8 s – the file name stays readable).
+/// Short message over the settings after sending (`Note`: success goes after 3 s, a failure stays until its ×).
 fn toast(w: &slint::Weak<SettingsWindow>, outcome: &Outcome, lang: &str) {
-    let (text, ok) = match outcome {
-        Outcome::Sent => (pick(lang, ["Sent – thank you!", "Gesendet – danke!", "Envoyé – merci !", "Enviado, ¡gracias!"]).to_string(), true),
+    let (text, kind) = match outcome {
+        Outcome::Sent => (pick(lang, ["Sent – thank you!", "Gesendet – danke!", "Envoyé – merci !", "Enviado, ¡gracias!"]).to_string(), 0),
         Outcome::Failed(path) if !path.is_empty() => {
             let file = Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             (pick(lang, [
@@ -1124,16 +1124,20 @@ fn toast(w: &slint::Weak<SettingsWindow>, outcome: &Outcome, lang: &str) {
                 "Der Bericht konnte nicht gesendet werden. Er liegt in „Downloads“ als „{}“ – bitte später noch einmal versuchen oder uns die Datei schicken.",
                 "Le rapport n’a pas pu être envoyé. Il est enregistré dans Téléchargements sous « {} » – réessayez plus tard ou envoyez-nous le fichier.",
                 "No se pudo enviar el informe. Está guardado en Descargas como «{}»: inténtalo más tarde o envíanos el archivo.",
-            ]).replace("{}", &file), false)
+            ]).replace("{}", &file), 1)
         }
-        Outcome::Failed(_) => (pick(lang, ["The report could not be sent or saved.", "Der Bericht konnte weder gesendet noch gesichert werden.", "Le rapport n’a pu être ni envoyé ni enregistré.", "No se pudo enviar ni guardar el informe."]).to_string(), false),
+        Outcome::Failed(_) => (pick(lang, ["The report could not be sent or saved.", "Der Bericht konnte weder gesendet noch gesichert werden.", "Le rapport n’a pu être ni envoyé ni enregistré.", "No se pudo enviar ni guardar el informe."]).to_string(), 2),
     };
     let Some(win) = w.upgrade() else { return };
-    win.set_toast_ok(ok);
+    win.set_toast_kind(kind);
     win.set_toast_text(text.clone().into());
     win.set_toast_visible(true);
+    // only "sent" goes away by itself; a failure stays until its × (user 2026-11-25)
+    if kind != 0 {
+        return;
+    }
     let w = w.clone();
-    slint::Timer::single_shot(Duration::from_secs(if ok { 3 } else { 8 }), move || {
+    slint::Timer::single_shot(Duration::from_secs(3), move || {
         // slides out; the text stays until the next toast so the box keeps its size while fading
         w.upgrade().into_iter().filter(|w| w.get_toast_text() == text.as_str()).for_each(|w| w.set_toast_visible(false));
     });
@@ -3744,7 +3748,6 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         })
     });
-
     app.run()
 }
 

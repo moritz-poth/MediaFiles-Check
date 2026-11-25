@@ -115,6 +115,58 @@ export global Theme {
     out property <color> card: dark ? #25292d : #fbfbfa;
     out property <color> card-line: dark ? #33383d : #d6d9dc;
     out property <color> row-line: dark ? #2f3439 : #e4e6e8;
+    // Meldungen unten im Fenster (`Note`, user 2026-11-25: Pastell, Palette C) – gleich in hell und dunkel
+    out property <color> note-ok: #cdebdc;
+    out property <color> note-warning: #fce2c0;
+    out property <color> note-error: #f3c9d6;
+    out property <color> note-text: #2a2d31;
+}
+
+// Meldung unten mittig (user 2026-11-25): vollflächig Pastell, dunkelgraue Schrift, × oben rechts,
+// höchstens halb so breit wie das Fenster, so hoch wie der Text. kind: 0 erledigt, 1 Hinweis, 2 Fehler
+component Note inherits Rectangle {
+    in property <string> message;
+    in property <int> kind;
+    in property <length> window-width;
+    callback close();
+    width: min(measure.preferred-width + 44px, root.window-width / 2);
+    height: label.preferred-height + 18px;
+    border-radius: 8px;
+    background: root.kind == 0 ? Theme.note-ok : root.kind == 1 ? Theme.note-warning : Theme.note-error;
+    drop-shadow-blur: 10px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: #00000040;
+    // ungebrochene Breite des Textes: kurze Meldungen sind nur so breit wie ihr Text
+    measure := Text { visible: false; text: root.message; font-size: 11px; font-weight: 600; }
+    label := Text {
+        x: 14px;
+        y: 9px;
+        width: parent.width - 44px;
+        text: root.message;
+        wrap: word-wrap;
+        font-size: 11px;
+        font-weight: 600;
+        color: Theme.note-text;
+        accessible-role: text;
+    }
+    close-area := TouchArea {
+        x: parent.width - self.width - 2px;
+        y: 2px;
+        width: 24px;
+        height: 22px;
+        mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: @tr("Close");
+        clicked => { root.close(); }
+        Text {
+            text: "×";
+            font-size: 15px;
+            color: Theme.note-text;
+            opacity: close-area.has-hover ? 1 : 0.6;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
 }
 
 component Headline inherits VerticalLayout {
@@ -3767,45 +3819,13 @@ ScrollBox {
     }
 
     // Fehlermeldung des Austauschs: unten mittig über dem Inhalt, × blendet sie aus (user 2026-11-25)
-    if Exchange.error != "" && root.tab == 0: Rectangle {
+    if Exchange.error != "" && root.tab == 0: Note {
         x: (root.width - self.width) / 2;
         y: root.height - self.height - 24px;
-        width: min(note-measure.preferred-width + 54px, root.width - 80px);
-        height: note.preferred-height + 18px;
-        note-measure := Text { visible: false; text: Exchange.error; font-size: 11px; font-weight: 600; }
-        border-radius: 8px;
-        background: Theme.background;
-        border-width: 1px;
-        border-color: Theme.error;
-        drop-shadow-blur: 10px;
-        drop-shadow-offset-y: 4px;
-        drop-shadow-color: #00000040;
-        note := Text {
-            x: 14px;
-            width: parent.width - 48px;
-            text: Exchange.error;
-            wrap: word-wrap;
-            vertical-alignment: center;
-            font-size: 11px;
-            font-weight: 600;
-            color: Theme.error;
-            accessible-role: text;
-        }
-        close-note := TouchArea {
-            x: parent.width - 30px;
-            width: 26px;
-            mouse-cursor: pointer;
-            accessible-role: button;
-            accessible-label: @tr("Close");
-            clicked => { Exchange.error = ""; }
-            Text {
-                text: "×";
-                font-size: 15px;
-                color: close-note.has-hover ? Theme.text : Theme.muted;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
+        message: Exchange.error;
+        kind: 2;
+        window-width: root.width;
+        close => { Exchange.error = ""; }
     }
 
     // ── Erster Start ──
@@ -4024,8 +4044,9 @@ export component SettingsWindow inherits CheckWindow {
     in-out property <bool> report-attach: true;
     // kurze Meldung nach dem Senden wie Mountpoints Toast (Rust blendet sie nach 3 s, Fehler 8 s, aus)
     in property <string> toast-text;
-    in property <bool> toast-ok;
-    in property <bool> toast-visible;
+    // 0 sent (green), 1 saved in Downloads (orange), 2 neither (red)
+    in property <int> toast-kind;
+    in-out property <bool> toast-visible;
     callback start-selftest();
     callback send-selftest();
     callback save-selftest();
@@ -4569,31 +4590,15 @@ export component SettingsWindow inherits CheckWindow {
     }
 
     // Toast wie Mountpoints .toast: unten mittig (44 über dem Rand), so breit wie der Text, gleitet von unten herein
-    if root.toast-text != "": Rectangle {
+    if root.toast-text != "": Note {
         x: (root.width - self.width) / 2;
-        y: root.toast-visible ? root.height - self.height - 44px : root.height;
+        y: root.toast-visible ? root.height - self.height - 24px : root.height;
         opacity: root.toast-visible ? 1 : 0;
         animate y, opacity { duration: 200ms; easing: ease-out; }
-        width: min(measure.preferred-width, root.width - 60px) + 28px;
-        // ungebrochene Breite des Textes (der Toast ist so breit wie sein Text, höchstens fast fensterbreit)
-        measure := Text { visible: false; text: root.toast-text; font-size: 11px; font-weight: 600; }
-        height: toast.preferred-height + 18px;
-        border-radius: 8px;
-        background: root.toast-ok ? Theme.online : Theme.background;
-        border-width: root.toast-ok ? 0px : 1px;
-        border-color: Theme.partial;
-        drop-shadow-blur: 10px;
-        drop-shadow-offset-y: 4px;
-        drop-shadow-color: #00000040;
-        toast := Text {
-            width: parent.width - 28px;
-            text: root.toast-text;
-            wrap: word-wrap;
-            font-size: 11px;
-            font-weight: 600;
-            color: root.toast-ok ? Theme.on-primary : Theme.text;
-            accessible-role: text;
-        }
+        message: root.toast-text;
+        kind: root.toast-kind;
+        window-width: root.width;
+        close => { root.toast-visible = false; }
     }
 }
 
