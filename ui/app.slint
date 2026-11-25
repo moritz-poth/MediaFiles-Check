@@ -752,6 +752,71 @@ component UpdateOffer inherits VerticalLayout {
     }
 }
 
+// Neue Version im Hauptfenster: schwebende Karte unten mittig (user 2026-11-25, wie Fona/CineMosaic) – der Inhalt
+// verschiebt sich nie; × blendet sie bis zum nächsten Start aus
+component UpdateCard inherits Rectangle {
+    callback close();
+    // as wide as its row (the 960 px main window keeps 50 px on each side)
+    width: min(row.preferred-width + 28px, 860px);
+    height: col.preferred-height + 24px;
+    border-radius: 12px;
+    background: Theme.background;
+    border-width: 1px;
+    border-color: Theme.line;
+    drop-shadow-blur: 16px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: #00000040;
+    accessible-role: groupbox;
+    accessible-label: @tr("Version {} is available.", Shared.update-version);
+    col := VerticalLayout {
+        x: 14px;
+        y: 12px;
+        width: parent.width - 28px;
+        spacing: 6px;
+        row := HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                alignment: center;
+                // Pfeil im Kreis: Download
+                Path {
+                    width: 18px;
+                    height: 18px;
+                    viewbox-width: 18;
+                    viewbox-height: 18;
+                    commands: "M 9 1 A 8 8 0 1 1 8.99 1 Z M 9 5 L 9 12.5 M 5.5 9.5 L 9 13 L 12.5 9.5";
+                    stroke: Theme.text;
+                    stroke-width: 1.5px;
+                    fill: transparent;
+                }
+            }
+            Text {
+                text: @tr("Version {} is available.", Shared.update-version);
+                font-weight: 600;
+                color: Theme.text;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            CheckButton { small: true; text: @tr("What's new"); clicked => { Shared.show-release(); } }
+            CheckButton { small: true; text: @tr("Install update"); primary: true; enabled: Shared.update-state != 3; clicked => { Shared.install-update(); } }
+            close-area := TouchArea {
+                width: 18px;
+                mouse-cursor: pointer;
+                accessible-role: button;
+                accessible-label: @tr("Close");
+                clicked => { root.close(); }
+                Text {
+                    text: "×";
+                    font-size: 15px;
+                    color: close-area.has-hover ? Theme.text : Theme.muted;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        if Shared.update-state == 3 || Shared.update-state == 4: UpdateStatus { width: parent.width; font-size: 11px; }
+    }
+}
+
 component CheckWindow inherits Window {
     default-font-family: "JetBrains Mono";
     default-font-size: 13px;
@@ -2974,42 +3039,6 @@ export component AppWindow inherits CheckWindow {
             height: 0.5px;
             background: Theme.dark ? #000000 : #c6c6c6;
         }
-        // neue Version: Hinweis zwischen Reitern und Inhalt
-        if Shared.update-version != "": Rectangle {
-            background: Theme.sidebar;
-            VerticalLayout {
-                padding-left: 16px;
-                padding-right: 16px;
-                padding-top: 8px;
-                padding-bottom: 8px;
-                spacing: 6px;
-                HorizontalLayout {
-                    spacing: 8px;
-                    Text {
-                        text: @tr("Version {} is available.", Shared.update-version);
-                        horizontal-stretch: 1;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        font-weight: 600;
-                        color: Theme.text;
-                    }
-                    CheckButton {
-                        text: @tr("What's new");
-                        small: true;
-                        clicked => { Shared.show-release(); }
-                    }
-                    CheckButton {
-                        text: @tr("Install update");
-                        small: true;
-                        primary: true;
-                        enabled: Shared.update-state != 3;
-                        clicked => { Shared.install-update(); }
-                    }
-                }
-                UpdateStatus { width: 800px - 32px; }
-            }
-        }
-        if Shared.update-version != "": Rectangle { height: 1px; background: Theme.line; }
         HorizontalLayout {
         // Seitenleiste: Schritte des Reiters in der Reihenfolge, in der man sie macht
         Rectangle {
@@ -3803,9 +3832,18 @@ ScrollBox {
     // Fehlermeldung des Reiters: unten mittig über dem Inhalt, × blendet sie aus (user 2026-11-25)
     property <string> tab-error: root.tab == 0 ? Exchange.error : root.tab == 1 ? root.error : root.tab == 2 ? Projects.error
         : root.tab == 5 || root.tab == 6 ? Inventory.error : "";
-    if root.tab-error != "": Note {
+    // die Update-Karte sitzt unten; eine Fehlermeldung steht dann darüber
+    property <bool> update-closed;
+    property <bool> update-shown: Shared.update-version != "" && !root.update-closed;
+    update-card := UpdateCard {
+        visible: root.update-shown;
         x: (root.width - self.width) / 2;
         y: root.height - self.height - 24px;
+        close => { root.update-closed = true; }
+    }
+    if root.tab-error != "": Note {
+        x: (root.width - self.width) / 2;
+        y: root.height - self.height - 24px - (root.update-shown ? update-card.height + 10px : 0);
         message: root.tab-error;
         kind: 2;
         window-width: root.width;
