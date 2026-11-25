@@ -80,11 +80,33 @@ pub fn is_mirror(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return false };
     let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: valid NUL-terminated path and a zeroed statfs to fill
     if unsafe { libc::statfs(c.as_ptr(), &mut s) } != 0 {
         return false;
     }
     let from = unsafe { std::ffi::CStr::from_ptr(s.f_mntfromname.as_ptr()) }.to_string_lossy();
     from.starts_with("mountpoint@") || from.starts_with("mirror@")
+}
+
+/// What is mounted at `path`'s volume (disk, share URL, …): the same share mounted twice ("/Volumes/Media" and
+/// "/Volumes/Media-1" after a reconnect) has the same source – its files are the same files, not copies.
+#[cfg(target_os = "macos")]
+fn mount_source(path: &Path) -> Option<String> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: valid NUL-terminated path and a zeroed statfs to fill
+    if unsafe { libc::statfs(c.as_ptr(), &mut s) } != 0 {
+        return None;
+    }
+    let on = unsafe { std::ffi::CStr::from_ptr(s.f_mntonname.as_ptr()) }.to_string_lossy().into_owned();
+    // only for a drive itself (its mount point), not for a folder on a drive
+    (Path::new(&on) == path).then(|| unsafe { std::ffi::CStr::from_ptr(s.f_mntfromname.as_ptr()) }.to_string_lossy().into_owned())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn mount_source(_: &Path) -> Option<String> {
+    None
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -122,8 +144,10 @@ pub struct Found {
 pub fn find(roots: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str), gate: &crate::Gate) -> Found {
     let mut out = Found::default();
     let mut folders = vec![];
+    let mut sources = HashSet::new();
     for r in roots {
-        if is_mirror(r) {
+        // a mirror, or a second mount of a volume already in the list: its files are not copies
+        if is_mirror(r) || mount_source(r).is_some_and(|s| !sources.insert(s)) {
             out.mirrors.push(r.clone());
         } else {
             folders.extend(crate::folders(r));

@@ -227,7 +227,8 @@ fn prepare(app: &AppWindow, st: &mut InvState, kind: i32, limit: usize) {
             let action = if g.get_bin_mode() == 1 { Action::Move } else { Action::Copy };
             let Some((_, refs)) = &st.bin else { return };
             let wanted = |id: &MobId| refs.media.contains(id) || (g.get_bin_renders() && refs.renders.contains(id));
-            let found: Vec<&Item> = all.iter().copied().filter(|i| i.file_id.is_some_and(|id| wanted(&id))).collect();
+            // Unknown files never move by a rule (only when picked in the table)
+            let found: Vec<&Item> = all.iter().copied().filter(|i| !matches!(i.kind, Kind::Unknown) && i.file_id.is_some_and(|id| wanted(&id))).collect();
             let present: HashSet<MobId> = found.iter().filter_map(|i| i.file_id).collect();
             let ids = refs.media.iter().chain(refs.renders.iter().filter(|_| g.get_bin_renders()));
             g.set_bin_missing(ids.filter(|id| !present.contains(*id)).count() as i32);
@@ -247,9 +248,14 @@ fn prepare(app: &AppWindow, st: &mut InvState, kind: i32, limit: usize) {
     app.set_page(Page::Media);
 }
 
-fn confirm(app: &AppWindow, inv: &Inv) {
+fn confirm(app: &AppWindow, inv: &Inv, renames: &Rc<RefCell<Renames>>) {
     if media_composer_running() {
         app.global::<Inventory>().set_mc_running(true);
+        return;
+    }
+    // a folder renamed for Media Composer must keep exactly its recorded files until it is renamed back
+    if renames_open(&renames.borrow()) {
+        app.global::<Inventory>().set_error(app.get_txt_renames_open());
         return;
     }
     let (action, steps) = {
@@ -373,6 +379,10 @@ fn undo(app: &AppWindow, renames: &Rc<RefCell<Renames>>, i: i32) {
     if run_going(app) {
         return;
     }
+    if renames_open(&renames.borrow()) {
+        app.global::<Inventory>().set_error(app.get_txt_renames_open());
+        return;
+    }
     if media_composer_running() {
         app.global::<Inventory>().set_mc_running(true);
         return;
@@ -392,7 +402,10 @@ fn undo(app: &AppWindow, renames: &Rc<RefCell<Renames>>, i: i32) {
                     if !u.skipped.is_empty() {
                         rows.push(notice(7, &short_list(&u.skipped.iter().map(|s| s.0.clone()).collect::<Vec<_>>()), "", u.skipped.len()));
                     }
-                    journal.entries.remove(i as usize);
+                    // with files left behind the entry stays: they are recorded only here, undo can run again later
+                    if u.skipped.is_empty() {
+                        journal.entries.remove(i as usize);
+                    }
                     if let Err(e) = save_json(&journal, &path) {
                         rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
                     }
@@ -1028,8 +1041,8 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
         move || prepare(&ww.unwrap(), &mut inv.borrow_mut(), 2, settings.borrow().limit)
     });
     g.on_confirm({
-        let (ww, inv) = (app.as_weak(), inv.clone());
-        move || confirm(&ww.unwrap(), &inv)
+        let (ww, inv, renames) = (app.as_weak(), inv.clone(), renames.clone());
+        move || confirm(&ww.unwrap(), &inv, &renames)
     });
     g.on_db({
         let (ww, inv, renames) = (app.as_weak(), inv.clone(), renames.clone());

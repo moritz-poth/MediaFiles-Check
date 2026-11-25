@@ -10,7 +10,7 @@
 use crate::inventory::{Item, Kind};
 use crate::mxf_dir;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -194,10 +194,12 @@ pub fn execute(action: Action, steps: &[Step], delete_originals: bool, label: &s
     let mut run = Run { date: chrono::Local::now().format("%Y-%m-%d %H:%M").to_string(), action, moved: vec![], originals: vec![], changed: vec![], db_done: false, leftovers: vec![], label: label.to_string() };
     let mut out = Moved::default();
     let mut todo = vec![];
+    // two files of the same name and folder on different drives go to one target: only the first goes
+    let mut targets = HashSet::new();
     for s in steps {
         if !unchanged(s) {
             out.skipped.push((file_name(&s.from), "changed or gone since the scan".into()));
-        } else if s.to.symlink_metadata().is_ok() {
+        } else if s.to.symlink_metadata().is_ok() || !targets.insert(crate::key(&s.to.to_string_lossy())) {
             out.skipped.push((file_name(&s.from), "the name is taken at the target".into()));
         } else {
             todo.push(s);
@@ -413,6 +415,25 @@ mod tests {
         fs::create_dir_all(dir).unwrap();
         fs::write(dir.join(name), body).unwrap();
         dir.join(name)
+    }
+
+    #[test]
+    fn two_files_for_one_target_move_only_once() {
+        let root = setup("clash");
+        // the same name in the same folder on drives A and B, both go to C. On one test volume Move would rename;
+        // Copy takes the path a move across drives takes (copy_verified), where the second file met the first copy
+        // and counted as "already there" – with Move its original was then deleted
+        let a = file(&root.join("A/Avid MediaFiles/MXF/1"), "x.mxf", "same");
+        let b = file(&root.join("B/Avid MediaFiles/MXF/1"), "x.mxf", "same");
+        fs::create_dir_all(root.join("C/Avid MediaFiles/MXF")).unwrap();
+        let items = [item(&a, Kind::Media), item(&b, Kind::Media)];
+        let refs: Vec<&Item> = items.iter().collect();
+        let steps = plan_to_drive(&refs, &root.join("C"));
+        let (run, moved) = execute(Action::Copy, &steps, false, "", &root.join("media-runs.json"), &mut |_, _, _| {}).unwrap();
+        assert_eq!((moved.moved, moved.skipped.len()), (1, 1));
+        assert_eq!(run.moved.len(), 1, "only the file that really went is recorded");
+        assert!(a.exists() && b.exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
