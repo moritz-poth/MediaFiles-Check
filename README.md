@@ -40,7 +40,7 @@ Avid has not published the format of `msmFMID.pmr`. MediaFiles Check reads it as
 
 ## Install
 
-Requires macOS 11 or later, Apple Silicon or Intel. Download `MediaFiles-Check-<version>.zip` from [Releases](../../releases), unzip, move the app to Applications. It is not signed with a paid Apple certificate: on first launch open **System Settings → Privacy & Security** and click **Open Anyway** (once). When macOS asks whether MediaFiles Check may access files on removable or network volumes, allow it – until then every read of a drive waits.
+Requires macOS 11 or later, Apple Silicon or Intel. Download `MediaFiles-Check-<version>.dmg` from [Releases](../../releases), open it and drag the app onto Applications. It is not signed with a paid Apple certificate: on first launch open **System Settings → Privacy & Security** and click **Open Anyway** (once). When macOS asks whether MediaFiles Check may access files on removable or network volumes, allow it – until then every read of a drive waits.
 
 ## Build
 
