@@ -753,6 +753,10 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             let app = weak.unwrap();
             let Some(folder) = rfd::FileDialog::new().set_title(app.get_txt_choose_delivery()).pick_folder() else { return };
             match Incoming::open(folder, &Mappings::load(&exchange_dir())) {
+                // collected for another system: its folders and databases would land on the wrong drives (user 2026-11-25: refuse)
+                Ok(i) if fy::key(&i.delivery.to) != fy::key(&fscan::computer_name()) => {
+                    err(&app, app.get_txt_not_for_us().replacen("{}", &i.delivery.to, 1).replacen("{}", &fscan::computer_name(), 1));
+                }
                 Ok(i) => {
                     app.global::<Exchange>().set_error("".into());
                     show_incoming(&app, &i);

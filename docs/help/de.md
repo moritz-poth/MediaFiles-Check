@@ -55,7 +55,7 @@ Jede Datei wird mit Prüfsumme in einen neuen Ordner wie `261102-1830_Mac Studio
 ## Austausch: Importieren
 
 1. Media Composer beenden.
-2. Austausch › **Importieren** → **Lieferung wählen…**.
+2. Austausch › **Importieren** → **Lieferung wählen…**. Eine Lieferung, die für ein anderes System gesammelt wurde, wird abgelehnt – spiel sie dort ein.
 3. Jedes Laufwerk der Lieferung braucht ein Laufwerk auf diesem Schnittplatz; gleichnamige werden automatisch zugeordnet. Mit **Trennen** gehen die Mediendateien auf ein Laufwerk und die Render-Dateien auf ein anderes (erkannt am MXF-Header).
 4. **Ordner:** Die Seite zeigt, wie viele Ordner zusammengeführt werden; **Ordner festlegen…** öffnet ein Fenster mit allen Ordnern der Lieferung: für jeden Ordner **Zusammenführen** (in den Ordner mit demselben Namen) oder **Eigener Ordner** (`<Absender>_<Ordner>`, z. B. `Mac Studio_1`; gibt es ihn schon, kommen die Dateien hinein). **Alle zusammenführen** / **Alle in eigene Ordner** wählt für alle.
 5. **Prüfen & importieren** prüft zuerst jede Datei. Nur eine vollständige, unbeschädigte Lieferung wird importiert – Dateien kommen nur dazu, eine Mediendatei wird nie überschrieben. Ersetzte Datenbanken bleiben in `Avid MediaFiles/Exchange-Backup/`.

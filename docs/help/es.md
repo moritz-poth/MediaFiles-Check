@@ -55,7 +55,7 @@ Cada archivo se copia con control de suma en una carpeta nueva como `261102-1830
 ## Intercambio: importar
 
 1. Cierra Media Composer.
-2. Intercambio › **Importar** → **Elegir entrega…**.
+2. Intercambio › **Importar** → **Elegir entrega…**. Una entrega reunida para otro sistema se rechaza: impórtala allí.
 3. Cada unidad de la entrega necesita una unidad en este puesto; las del mismo nombre se asignan solas. Con **Separar**, los archivos de medios van a una unidad y los de render a otra (se reconocen por su cabecera MXF).
 4. **Carpetas:** la página muestra cuántas carpetas se combinan; **Elegir carpetas…** abre una ventana con todas las carpetas de la entrega: para cada carpeta **Combinar** (en la carpeta con el mismo nombre) o **Carpeta propia** (`<remitente>_<carpeta>`, p. ej. `Mac Studio_1`; si ya existe, los archivos van ahí). **Combinar todas** / **Todas en carpetas propias** lo elige para todas.
 5. **Verificar e importar** verifica primero cada archivo. Solo se importa una entrega completa y sin daños: los archivos solo se añaden, nunca se sobrescribe un archivo de medios. Las bases de datos reemplazadas se guardan en `Avid MediaFiles/Exchange-Backup/`.

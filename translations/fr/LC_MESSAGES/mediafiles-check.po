@@ -1261,6 +1261,9 @@ msgstr "Renommer pour Media Composer…"
 msgid "Quit Media Composer first."
 msgstr "Quittez d'abord Media Composer."
 
+msgid "This delivery is for {}, not for this system ({}). Import it there."
+msgstr "Cette livraison est pour {}, pas pour ce système ({}). Importez-la là-bas."
+
 msgid "Media Composer must stay closed while renaming."
 msgstr "Media Composer doit rester fermé pendant le renommage."
 

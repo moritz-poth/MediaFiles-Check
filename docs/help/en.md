@@ -55,7 +55,7 @@ Every file is copied with a checksum check into a new folder like `261102-1830_M
 ## Exchange: import
 
 1. Quit Media Composer.
-2. Exchange › **Import** → **Choose delivery…**.
+2. Exchange › **Import** → **Choose delivery…**. A delivery collected for another system is refused – import it there.
 3. Every drive of the delivery needs a drive on this system; drives with the same name are assigned automatically. With **Separate**, media files go to one drive and render files to another (recognised by their MXF header).
 4. **Folders:** the page shows how many folders merge; **Choose folders…** opens a window with every folder of the delivery:  **Merge** (into the folder of the same name) or **Own folder** (`<sender>_<folder>`, e.g. `Mac Studio_1`; if it exists already, the files go into it). **All merge** / **All in own folders** sets every folder.
 5. **Verify & import** first verifies every file. Only a complete, undamaged delivery is imported – files are only added, a media file is never overwritten. Replaced databases are kept in `Avid MediaFiles/Exchange-Backup/`.

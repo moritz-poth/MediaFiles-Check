@@ -55,7 +55,7 @@ Chaque fichier est copié avec contrôle de somme dans un nouveau dossier comme 
 ## Échange : importer
 
 1. Quittez Media Composer.
-2. Échange › **Importer** → **Choisir la livraison…**.
+2. Échange › **Importer** → **Choisir la livraison…**. Une livraison rassemblée pour un autre système est refusée – importez-la là-bas.
 3. Chaque disque de la livraison a besoin d’un disque sur ce poste ; les disques du même nom sont associés automatiquement. Avec **Séparer**, les fichiers média vont sur un disque et les fichiers de rendu sur un autre (reconnus par leur en-tête MXF).
 4. **Dossiers :** la page indique combien de dossiers sont fusionnés ; **Choisir les dossiers…** ouvre une fenêtre avec tous les dossiers de la livraison : pour chaque dossier **Fusionner** (dans le dossier du même nom) ou **Dossier propre** (`<expéditeur>_<dossier>`, p. ex. `Mac Studio_1` ; s’il existe déjà, les fichiers y vont). **Tout fusionner** / **Tous dans des dossiers propres** règle tous les dossiers.
 5. **Vérifier et importer** vérifie d’abord chaque fichier. Seule une livraison complète et intacte est importée – les fichiers sont seulement ajoutés, un fichier média n’est jamais écrasé. Les bases de données remplacées sont gardées dans `Avid MediaFiles/Exchange-Backup/`.

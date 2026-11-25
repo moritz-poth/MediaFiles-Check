@@ -441,6 +441,7 @@ T = {
          "{n} de estas carpetas tienen nombres que Media Composer no actualiza. MediaFiles Check puede cambiarles el nombre para que Media Composer reconstruya sus bases de datos y después recuperarlos.")),
     "Rename for Media Composer…": ("Für Media Composer umbenennen…", "Renommer pour Media Composer…", "Cambiar el nombre para Media Composer…"),
     "Quit Media Composer first.": ("Zuerst Media Composer beenden.", "Quittez d'abord Media Composer.", "Primero cierra Media Composer."),
+    "This delivery is for {}, not for this system ({}). Import it there.": ("Diese Lieferung ist für {}, nicht für dieses System ({}). Spiel sie dort ein.", "Cette livraison est pour {}, pas pour ce système ({}). Importez-la là-bas.", "Esta entrega es para {}, no para este sistema ({}). Impórtala allí."),
     "Media Composer must stay closed while renaming.": ("Media Composer muss beim Umbenennen geschlossen bleiben.", "Media Composer doit rester fermé pendant le renommage.", "Media Composer debe permanecer cerrado mientras se cambian los nombres."),
     "Back": ("Zurück", "Retour", "Atrás"),
     "Rename": ("Umbenennen", "Renommer", "Cambiar el nombre"),
