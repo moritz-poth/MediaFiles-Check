@@ -53,6 +53,11 @@ impl Manifest {
         if m.format != FORMAT {
             return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{} is not an Exchange manifest", path.display())));
         }
+        // the other side's volume and folder names become paths of the delivery: each must stay one path part
+        let names = m.volumes.iter().flat_map(|v| std::iter::once(&v.name).chain(v.folders.iter().flat_map(|f| std::iter::once(&f.name).chain(f.files.iter().map(|e| &e.name)))));
+        if let Some(bad) = names.into_iter().find(|n| !path_part(n)) {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}: invalid name \"{bad}\"", path.display())));
+        }
         Ok(m)
     }
 
@@ -64,6 +69,58 @@ impl Manifest {
 /// Vergleichsschlüssel: macOS speichert Umlaute zerlegt (NFD), Windows zusammengesetzt (NFC) und ignoriert Groß-/Kleinschreibung.
 pub fn key(s: &str) -> String {
     s.nfc().collect::<String>().to_lowercase()
+}
+
+/// One plain part of a path: not empty, no separator, not "." or "..".
+pub fn path_part(s: &str) -> bool {
+    !s.is_empty() && s != "." && s != ".." && !s.contains(['/', '\\', '\0'])
+}
+
+/// MXF file names in a folder as compare keys, without dot files (AppleDouble "._x.mxf" on exFAT and network drives).
+pub fn mxf_names(dir: &Path) -> io::Result<std::collections::HashSet<String>> {
+    Ok(fs::read_dir(dir)?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !n.starts_with('.') && n.to_lowercase().ends_with(".mxf"))
+        .map(|n| key(&n))
+        .collect())
+}
+
+/// Kept free on every drive the exchange writes to: Media Composer still has to write its databases.
+pub const RESERVE: u64 = 1 << 30;
+
+/// Fails when `needed` bytes plus `RESERVE` do not fit on the drive of `path` (or its nearest existing parent).
+pub fn check_space(path: &Path, needed: u64) -> io::Result<()> {
+    let Some(free) = path.ancestors().find(|p| p.exists()).and_then(free_bytes) else { return Ok(()) };
+    if free < needed.saturating_add(RESERVE) {
+        return Err(io::Error::new(io::ErrorKind::StorageFull, format!("{}: not enough space – needs {} MB plus 1 GB reserve, {} MB free", path.display(), needed >> 20, free >> 20)));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn free_bytes(path: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: valid NUL-terminated path and a zeroed statvfs to fill
+    (unsafe { libc::statvfs(c.as_ptr(), &mut st) } == 0).then(|| st.f_bavail as u64 * st.f_frsize as u64)
+}
+
+#[cfg(not(unix))]
+fn free_bytes(_: &Path) -> Option<u64> {
+    None
+}
+
+/// Tells macOS not to keep this file's data in memory, so a read-back really comes from the drive.
+pub fn no_cache(f: &File) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: plain fcntl on an open descriptor; failing (e.g. some network file systems) only means cached reads
+        unsafe { libc::fcntl(f.as_raw_fd(), libc::F_NOCACHE, 1) };
+    }
+    let _ = f;
 }
 
 pub fn mxf_dir(volume: &Path) -> PathBuf {

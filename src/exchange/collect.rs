@@ -43,6 +43,9 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
     let mut files = vec![];
     let mut errors = vec![];
     let mut dbs: BTreeMap<String, (usize, Vec<String>)> = BTreeMap::new();
+    let target = |c: &crate::exchange::plan::Copy| dest.join(&c.to_volume).join(&c.to_folder).join(&c.name);
+    check_space(dest, plan.copies.iter().filter(|c| !target(c).exists()).map(|c| c.size).sum())?;
+    let mut tasks = plan.tasks.clone();
     for (i, c) in plan.copies.iter().enumerate() {
         let rel = format!("{}/{}/{}", c.to_volume, c.to_folder, c.name);
         progress(&format!("[{}/{}] {rel}", i + 1, plan.copies.len()));
@@ -51,7 +54,18 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
             continue;
         };
         let src = mxf_dir(Path::new(&vol.path)).join(&c.from_folder).join(&c.name);
-        let dst = dest.join(&c.to_volume).join(&c.to_folder).join(&c.name);
+        let dst = target(c);
+        // a database describes its folder as it is now: only while that still is the scanned folder does it fit the delivery
+        if c.hash.is_none() {
+            let scanned = vol.folders.iter().find(|f| f.name == c.from_folder).map(|f| f.files.iter().map(|e| key(&e.name)).collect());
+            if scanned.is_none() || mxf_names(src.parent().unwrap_or(&src)).ok() != scanned {
+                let t = Task::RebuildDb { system: to_system.into(), volume: c.to_volume.clone(), folder: c.to_folder.clone() };
+                if !tasks.contains(&t) {
+                    tasks.push(t);
+                }
+                continue;
+            }
+        }
         match copy_verified(&src, &dst, c.hash.as_deref()) {
             Ok((size, hash)) => {
                 files.push(Delivered { path: rel, size, hash });
@@ -69,7 +83,7 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
     let db_folders: BTreeMap<String, Vec<String>> = dbs.into_iter().filter(|(_, (n, _))| *n == DB_FILES.len()).map(|(k, (_, f))| (k, f)).collect();
 
     fs::create_dir_all(dest)?;
-    let tasks: Vec<String> = plan.tasks.iter().map(|t| t.describe(lang)).collect();
+    let tasks: Vec<String> = tasks.iter().map(|t| t.describe(lang)).collect();
     let t = |a: [&'static str; 4]| crate::pick(lang, a);
     let mut text = t([
         "MediaFiles Check – delivery from {from} for {to}\n\n\
@@ -159,7 +173,7 @@ fn load(dest: &Path) -> io::Result<Delivery> {
 
 fn safe_path(p: &str) -> bool {
     let parts: Vec<&str> = p.split('/').collect();
-    parts.len() == 3 && parts.iter().all(|x| !x.is_empty() && *x != "." && *x != ".." && !x.contains('\\') && !x.contains('\0'))
+    parts.len() == 3 && parts.iter().all(|x| path_part(x))
 }
 
 /// Lieferung lesen, ohne etwas zu prüfen (für die Übersicht vor dem Einspielen).
@@ -232,6 +246,28 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
         volumes.insert(vol, path);
     }
 
+    // where every media file goes; render files to their own drive if the volume is separated
+    // shortcut: a file whose header says nothing counts as media, like Media › Overview's rule-based moves leave it
+    let mut media = vec![];
+    for f in d.files.iter().filter(|f| !is_db(&split(&f.path).2)) {
+        let (vol, folder, name) = split(&f.path);
+        let id = format!("{vol}/{folder}");
+        let render = t.render.get(&vol).filter(|_| crate::mxf::file_info(&dest.join(&f.path)).is_ok_and(|i| i.render == Some(true)));
+        let drive = render.unwrap_or(&volumes[&vol]).clone();
+        let to_folder = if t.own_folder.contains(&id) { own_folder_name(&d.from, &folder) } else { folder };
+        media.push((f, id, drive, to_folder, name));
+    }
+    // nothing starts unless every drive keeps its reserve afterwards
+    let mut needed: BTreeMap<&PathBuf, u64> = BTreeMap::new();
+    for (f, _, drive, folder, name) in &media {
+        if !mxf_dir(drive).join(folder).join(name).exists() {
+            *needed.entry(drive).or_default() += f.size;
+        }
+    }
+    for (drive, bytes) in needed {
+        check_space(drive, bytes)?;
+    }
+
     let mut problems = vec![];
     let total = d.files.len();
     let mut done = 0;
@@ -239,21 +275,15 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
     let mut landed: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
     let mut touched: BTreeMap<PathBuf, (String, String)> = BTreeMap::new();
     // Mediendateien zuerst: eine Datenbank darf erst ersetzt werden, wenn ihre Dateien da sind
-    for f in d.files.iter().filter(|f| !is_db(&split(&f.path).2)) {
+    for (f, id, drive, to_folder, name) in media {
         done += 1;
         progress(&format!("[{done}/{total}] {}", f.path));
-        let (vol, folder, name) = split(&f.path);
-        let id = format!("{vol}/{folder}");
-        // shortcut: a file whose header says nothing counts as media, like Media › Overview's rule-based moves leave it
-        let render = t.render.get(&vol).filter(|_| crate::mxf::file_info(&dest.join(&f.path)).is_ok_and(|i| i.render == Some(true)));
-        let drive = render.unwrap_or(&volumes[&vol]);
-        let to_folder = if t.own_folder.contains(&id) { own_folder_name(&d.from, &folder) } else { folder };
-        let dir = mxf_dir(drive).join(&to_folder);
+        let dir = mxf_dir(&drive).join(&to_folder);
         if let Err(e) = copy_verified(&dest.join(&f.path), &dir.join(&name), Some(&f.hash)) {
             problems.push(format!("{}: {e}", f.path));
         }
         landed.entry(id).or_default().insert(dir.clone());
-        touched.insert(dir, (scan::volume_name(drive), to_folder));
+        touched.insert(dir, (scan::volume_name(&drive), to_folder));
     }
 
     let backup = format!("{}_{}", yymmdd(now_secs()), now_secs());
@@ -263,30 +293,52 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
         let Some(dir) = landed.get(id).filter(|s| s.len() == 1).and_then(|s| s.first()) else { continue };
         // Hat sich der Ordner seit dem Scan verändert, passt die gelieferte Datenbank nicht mehr.
         let want: HashSet<String> = expected.iter().map(|n| key(n)).collect();
-        let have: HashSet<String> = fs::read_dir(dir)?
-            .flatten()
-            .map(|e| key(&e.file_name().to_string_lossy()))
-            .filter(|n| n.ends_with(".mxf"))
-            .collect();
-        if want != have {
-            problems.push(format!("{id}: folder contains other files than expected – database not replaced, please rebuild it"));
-            continue;
+        match mxf_names(dir) {
+            Ok(have) if have == want => {}
+            Ok(_) => {
+                problems.push(format!("{id}: folder contains other files than expected – database not replaced, please rebuild it"));
+                continue;
+            }
+            Err(e) => {
+                problems.push(format!("{id}: {e} – database not replaced, please rebuild it"));
+                continue;
+            }
         }
-        let drive = dir.ancestors().nth(3).unwrap_or(dir);
-        let folder = dir.file_name().unwrap_or_default();
-        let mut ok = true;
+        // both new files first go next to the old ones under a hidden name: if one fails, the old database stays whole
+        let mut staged = vec![];
         for f in d.files.iter().filter(|f| f.path.starts_with(&format!("{id}/")) && is_db(&split(&f.path).2)) {
             done += 1;
             progress(&format!("[{done}/{total}] {}", f.path));
             let name = split(&f.path).2;
-            let target = dir.join(&name);
-            if target.exists() && hash_file(&target)? != f.hash {
-                let saved = drive.join("Avid MediaFiles").join(BACKUP_DIR).join(&backup).join(folder);
-                fs::create_dir_all(&saved)?;
-                crate::move_new(&target, &saved.join(&name))?;
+            let new = dir.join(format!(".{name}.exchange-new"));
+            let _ = fs::remove_file(&new); // left over from an interrupted import
+            match copy_verified(&dest.join(&f.path), &new, Some(&f.hash)) {
+                Ok(_) => staged.push((new, name, f.hash.clone())),
+                Err(e) => problems.push(format!("{}: {e} – database not replaced, please rebuild it", f.path)),
             }
-            if let Err(e) = copy_verified(&dest.join(&f.path), &target, Some(&f.hash)) {
-                problems.push(format!("{}: {e} – old database is in {BACKUP_DIR}/{backup}", f.path));
+        }
+        if staged.len() != DB_FILES.len() {
+            staged.iter().for_each(|(new, _, _)| { let _ = fs::remove_file(new); });
+            continue;
+        }
+        let drive = dir.ancestors().nth(3).unwrap_or(dir);
+        let saved = drive.join("Avid MediaFiles").join(BACKUP_DIR).join(&backup).join(dir.file_name().unwrap_or_default());
+        let mut ok = true;
+        for (new, name, hash) in staged {
+            let target = dir.join(&name);
+            let swap = || -> io::Result<()> {
+                if target.exists() {
+                    if hash_file(&target)? == hash {
+                        return fs::remove_file(&new);
+                    }
+                    fs::create_dir_all(&saved)?;
+                    crate::move_new(&target, &saved.join(&name))?;
+                }
+                crate::move_new(&new, &target)
+            };
+            if let Err(e) = swap() {
+                problems.push(format!("{id}/{name}: {e} – old database is in {BACKUP_DIR}/{backup}"));
+                let _ = fs::remove_file(&new);
                 ok = false;
             }
         }
@@ -325,9 +377,19 @@ pub(crate) fn copy_verified(src: &Path, dst: &Path, expected: Option<&str>) -> i
     }
     fs::create_dir_all(dst.parent().unwrap())?;
     let part = dst.with_file_name(format!("{}.exchange-part", dst.file_name().unwrap().to_string_lossy()));
+    let result = write_part(src, &part, expected).and_then(|r| crate::move_new(&part, dst).map(|_| r));
+    if result.is_err() {
+        let _ = fs::remove_file(&part);
+    }
+    result
+}
+
+/// Copies `src` to `part`, then reads `part` back from the drive; error if source or copy differ.
+fn write_part(src: &Path, part: &Path, expected: Option<&str>) -> io::Result<(u64, String)> {
     let mut hasher = blake3::Hasher::new();
     let mut input = File::open(src)?;
-    let mut out = File::create(&part)?;
+    let mut out = File::create(part)?;
+    no_cache(&out);
     let mut buf = vec![0u8; 1 << 20];
     let mut size = 0;
     loop {
@@ -335,36 +397,26 @@ pub(crate) fn copy_verified(src: &Path, dst: &Path, expected: Option<&str>) -> i
             Ok(0) => break,
             Ok(n) => n,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => {
-                drop(out);
-                let _ = fs::remove_file(&part);
-                return Err(e);
-            }
+            Err(e) => return Err(e),
         };
         hasher.update(&buf[..n]);
-        if let Err(e) = out.write_all(&buf[..n]) {
-            drop(out);
-            let _ = fs::remove_file(&part);
-            return Err(e);
-        }
+        out.write_all(&buf[..n])?;
         size += n as u64;
     }
     out.sync_all()?;
     drop(out);
 
     let hash = hasher.finalize().to_hex().to_string();
-    let fail = |msg: &str| {
-        let _ = fs::remove_file(&part);
-        Err(io::Error::other(msg.to_string()))
-    };
     if expected.is_some_and(|e| e != hash) {
-        return fail("source differs from the scan (changed or damaged) – please scan again");
+        return Err(io::Error::other("source differs from the scan (changed or damaged) – please scan again"));
     }
-    // shortcut: das Nachlesen kann aus dem OS-Cache kommen; F_NOCACHE/FILE_FLAG_NO_BUFFERING, falls echte Medienprüfung nötig wird
-    if hash_file(&part)? != hash {
-        return fail("copy is faulty – check the target drive");
+    let back = File::open(part)?;
+    no_cache(&back);
+    let mut h = blake3::Hasher::new();
+    h.update_reader(back)?;
+    if h.finalize().to_hex().to_string() != hash {
+        return Err(io::Error::other("copy is faulty – check the target drive"));
     }
-    crate::move_new(&part, dst)?;
     Ok((size, hash))
 }
 
@@ -485,6 +537,93 @@ mod tests {
         assert!(!m.join(&own2).join("msmMMOB.mdb").exists());
         let rebuild: Vec<_> = r.tasks.iter().filter(|t| t.contains("Rebuild database")).cloned().collect();
         assert_eq!(rebuild, [format!("[B] Rebuild database: V/{own2}")]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A on drive V folder 1 (x, y + database), B has x in folder 1 with an old database; scanned and planned.
+    fn a_to_b(root: &Path) -> (PathBuf, PathBuf, Manifest, Plan) {
+        let (a, b) = (root.join("A/V"), root.join("B/V"));
+        write_folder(&mxf_dir(&a).join("1"), &[("x.mxf", "x"), ("y.mxf", "y"), ("msmFMID.pmr", "newF"), ("msmMMOB.mdb", "newM")]);
+        write_folder(&mxf_dir(&b).join("1"), &[("x.mxf", "x"), ("msmFMID.pmr", "oldF"), ("msmMMOB.mdb", "oldM")]);
+        let sa = scan::scan(&[a.clone()], false, None, &mut |_, _, _| {}, &crate::Gate::default()).unwrap().manifest;
+        let sb = scan::scan(&[b.clone()], false, None, &mut |_, _, _| {}, &crate::Gate::default()).unwrap().manifest;
+        let p = plan::plan(&sa, &sb, &Options::default());
+        (a, b, sa, p)
+    }
+
+    #[test]
+    fn database_of_a_folder_changed_since_the_scan_is_not_delivered() {
+        let root = tmp("changed");
+        let (a, _, sa, p) = a_to_b(&root);
+        // Media Composer wrote a new file (and its database) after the scan
+        fs::write(mxf_dir(&a).join("1/z.mxf"), "z").unwrap();
+        let dest = root.join("Lieferung");
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        let d = load(&dest).unwrap();
+        assert!(d.db_folders.is_empty() && !dest.join("V/1/msmFMID.pmr").exists());
+        assert_eq!(d.tasks, ["[B] Rebuild database: V/1"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn old_database_stays_whole_when_the_new_one_fails() {
+        let root = tmp("halfdb");
+        let (_, b, sa, p) = a_to_b(&root);
+        let dest = root.join("Lieferung");
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        fs::write(dest.join("V/1/msmMMOB.mdb"), "damaged").unwrap();
+        let t = Targets { media: [("V".to_string(), b.clone())].into(), ..Default::default() };
+        let r = import(&dest, &t, "en", &mut |_| {}).unwrap();
+        let read = |n: &str| fs::read_to_string(mxf_dir(&b).join("1").join(n)).unwrap();
+        assert_eq!((read("y.mxf").as_str(), read("msmFMID.pmr").as_str(), read("msmMMOB.mdb").as_str()), ("y", "oldF", "oldM"));
+        assert_eq!(r.problems.len(), 1, "{:?}", r.problems);
+        assert_eq!(r.tasks, ["[B] Rebuild database: V/1"]);
+        let left: Vec<_> = fs::read_dir(mxf_dir(&b).join("1")).unwrap().flatten().map(|e| e.file_name()).filter(|n| n.to_string_lossy().contains("exchange")).collect();
+        assert!(left.is_empty(), "{left:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn apple_double_files_do_not_block_the_database() {
+        let root = tmp("appledouble");
+        let (_, b, sa, p) = a_to_b(&root);
+        fs::write(mxf_dir(&b).join("1/._x.mxf"), "resource fork").unwrap();
+        let dest = root.join("Lieferung");
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        let t = Targets { media: [("V".to_string(), b.clone())].into(), ..Default::default() };
+        assert!(import(&dest, &t, "en", &mut |_| {}).unwrap().problems.is_empty());
+        assert_eq!(fs::read_to_string(mxf_dir(&b).join("1/msmMMOB.mdb")).unwrap(), "newM");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn nothing_is_written_without_space() {
+        let root = tmp("space");
+        let (_, _, sa, mut p) = a_to_b(&root);
+        p.copies[0].size = u64::MAX / 2;
+        let dest = root.join("Lieferung");
+        assert_eq!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap_err().kind(), io::ErrorKind::StorageFull);
+        assert!(!dest.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_no_part_file() {
+        let root = tmp("part");
+        write_folder(&root, &[("a.mxf", "aaa")]);
+        assert!(copy_verified(&root.join("a.mxf"), &root.join("t/a.mxf"), Some("not the hash")).is_err());
+        assert_eq!(fs::read_dir(root.join("t")).unwrap().count(), 0);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn manifest_names_must_be_plain() {
+        let root = tmp("names");
+        for (folder, ok) in [("Avid.1", true), ("..", false), ("../x", false), ("a\\b", false)] {
+            let m = Manifest { format: FORMAT.into(), volumes: vec![Volume { name: "V".into(), folders: vec![Folder { name: folder.into(), ..Default::default() }], ..Default::default() }], ..Default::default() };
+            m.save(&root.join("m.json")).unwrap();
+            assert_eq!(Manifest::load(&root.join("m.json")).is_ok(), ok, "{folder}");
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
