@@ -8,6 +8,7 @@
 #   scripts/testlab.sh reset      restore the clean state, apply the test situations, clear the app state
 #   scripts/testlab.sh start a|b  start the app as system A or B
 #   scripts/testlab.sh status
+#   scripts/testlab.sh fingerprint <label>   checksum of every file on the lab drives -> fp-<label>.txt (before/after a test)
 set -eu
 
 LAB="${MFC_LAB:-$HOME/MFC-Testlab}"
@@ -171,6 +172,13 @@ start() {
   say "System $(echo "$1" | tr ab AB) gestartet (Laufwerke $drives)."
 }
 
+fingerprint() {
+  guard
+  [ -n "${1:-}" ] || die "fingerprint <Name>"
+  (cd "$LAB/drives" && find . -type f ! -name .DS_Store ! -path '*/.fseventsd/*' ! -path '*/.Spotlight-V100/*' -print0 | sort -z | xargs -0 shasum -a 256) > "$LAB/fp-$1.txt"
+  say "$(wc -l < "$LAB/fp-$1.txt" | tr -d ' ') Dateien → $LAB/fp-$1.txt"
+}
+
 status() {
   guard
   say "Labor: $LAB   sauberer Stand: $([ -d "$LAB/golden" ] && echo ja || echo nein)"
@@ -189,5 +197,6 @@ case "${1:-}" in
   reset) reset ;;
   start) start "${2:-}" ;;
   status) status ;;
-  *) sed -n 2,9p "$0"; exit 1 ;;
+  fingerprint) fingerprint "${2:-}" ;;
+  *) sed -n 2,10p "$0"; exit 1 ;;
 esac
