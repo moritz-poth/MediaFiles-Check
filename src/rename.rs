@@ -172,6 +172,14 @@ pub enum Repair {
 /// the recorded MXF files (unique names) – not by the path alone, so a drive mounted under another name still works.
 pub fn repair(r: &mut Renamed) -> Option<Repair> {
     if r.dir().is_dir() {
+        if is_ours(r) {
+            return None;
+        }
+        // another drive of the same name sits at this place: look for ours, otherwise wait for it
+        if let Some(m) = crate::find_moved(&r.mxf, &r.current, &r.files) {
+            r.mxf = m;
+            return Some(Repair::Moved);
+        }
         return None;
     }
     if let Some(m) = crate::find_moved(&r.mxf, &r.current, &r.files) {
@@ -197,9 +205,17 @@ pub enum Status {
     Ready,
 }
 
+/// The folder at the recorded place holds at least one of the recorded MXF files (Media Composer names are unique),
+/// so it is the renamed folder and not a folder of the same name on another drive. A folder recorded without files
+/// can't tell and counts as it.
+pub fn is_ours(r: &Renamed) -> bool {
+    let dir = r.dir();
+    r.files.is_empty() || r.files.iter().any(|(n, _)| dir.join(n).is_file())
+}
+
 pub fn status(r: &Renamed) -> Status {
     let dir = r.dir();
-    if !dir.is_dir() {
+    if !dir.is_dir() || !is_ours(r) {
         return Status::Offline;
     }
     let now = db_stamps(&dir);
@@ -278,6 +294,25 @@ pub fn rename_back(r: &Renamed, added: &[String], choice: Added, computer: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_of_the_same_name_on_another_drive_is_not_the_renamed_one() {
+        let root = std::env::temp_dir().join(format!("mfc-rename-other-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let mxf = root.join("Avid MediaFiles/MXF");
+        // the drive at this place now is another one: its own "2" with its own files and database
+        fs::create_dir_all(mxf.join("2")).unwrap();
+        fs::write(mxf.join("2/theirs.mxf"), b"t").unwrap();
+        for f in [PMR, MDB] {
+            fs::write(mxf.join("2").join(f), b"db").unwrap();
+        }
+        let mut r = Renamed { mxf: mxf.clone(), original: "Projekt".into(), current: "2".into(), files: vec![("ours.mxf".into(), 1)], db: [None, None] };
+        assert_eq!(status(&r), Status::Offline, "never offered for renaming back");
+        assert_eq!(repair(&mut r), None, "the entry stays until its drive is back");
+        fs::write(mxf.join("2/ours.mxf"), b"o").unwrap();
+        assert_ne!(status(&r), Status::Offline);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn setup(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("mfc-rename-{name}-{}", std::process::id()));

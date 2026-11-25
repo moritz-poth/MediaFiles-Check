@@ -3831,7 +3831,7 @@ ScrollBox {
     }
 
     // Fehlermeldung des Reiters: unten mittig über dem Inhalt, × blendet sie aus (user 2026-11-25)
-    property <string> tab-error: root.tab == 0 ? Exchange.error : root.tab == 1 ? root.error : root.tab == 2 ? Projects.error
+    property <string> tab-error: root.tab == 0 ? Exchange.error : root.tab == 1 || root.tab == 3 ? root.error : root.tab == 2 ? Projects.error
         : root.tab == 5 || root.tab == 6 ? Inventory.error : "";
     // die Update-Karte sitzt unten; eine Fehlermeldung steht dann darüber
     property <bool> update-closed;
@@ -3850,7 +3850,7 @@ ScrollBox {
         window-width: root.width;
         close => {
             if root.tab == 0 { Exchange.error = ""; }
-            else if root.tab == 1 { root.error = ""; }
+            else if root.tab == 1 || root.tab == 3 { root.error = ""; }
             else if root.tab == 2 { Projects.error = ""; }
             else { Inventory.error = ""; }
         }

@@ -1883,9 +1883,13 @@ fn is_mc_folder(mxf: &Path, name: &str, computer: &str) -> bool {
     rename::is_avid_name(name, rename::is_network(mxf), computer)
 }
 
-/// Folders renamed for Media Composer right now: (MXF folder, original name).
+/// Folders renamed for Media Composer right now: (MXF folder, name) for the original AND the current name – a group
+/// is blocked under either (the current one, e.g. "2", is a normal subfolder for the search otherwise).
 fn renamed_away(st: &Renames) -> Vec<(PathBuf, String)> {
-    st.journal.as_ref().map(|j| j.entries.iter().map(|e| (e.mxf.clone(), e.original.clone())).collect()).unwrap_or_default()
+    st.journal
+        .as_ref()
+        .map(|j| j.entries.iter().flat_map(|e| [(e.mxf.clone(), e.original.clone()), (e.mxf.clone(), e.current.clone())]).collect())
+        .unwrap_or_default()
 }
 
 /// "Start" for these history entries: set the databases of every changed folder aside and rename those Media
@@ -1899,13 +1903,19 @@ fn rewrite_runs(st: &mut Renames, which: impl Fn(&Rebalanced) -> bool) -> Vec<No
     };
     let (mut rows, mut to_rename) = (vec![], vec![]);
     for r in journal.entries.iter_mut().filter(|r| !r.db_done && which(r)) {
+        if !r.belongs() {
+            rows.push(notice(3, &r.mxf.join(&r.original).display().to_string(), "the drive there is not the one that was rebalanced – connect that drive", 0));
+            continue;
+        }
+        let errors = rows.iter().filter(|x| x.kind == 3).count();
         for name in r.changed.clone() {
             let folder = r.mxf.join(&name);
             if folder.is_dir() {
                 rewrite_original(&folder, &st.computer, &mut rows, &mut to_rename);
             }
         }
-        r.db_done = true;
+        // an error keeps the run open, so "Start" stays offered
+        r.db_done = rows.iter().filter(|x| x.kind == 3).count() == errors;
     }
     rows.extend(rename_for_mc(st, &to_rename));
     if let Err(e) = save_json(&journal, &path) {
@@ -2076,6 +2086,11 @@ fn start_rebalance(app: &AppWindow, rebal: &Rc<RefCell<Rebal>>, limit: usize, re
         r.plans.iter().enumerate().filter(|(_, p)| p.1 && !p.0.blocked).map(|(i, p)| (p.0.clone(), r.names.get(&i).cloned())).collect()
     };
     let away = renamed_away(&renames.borrow());
+    // folders may have been renamed for Media Composer since the search: those groups don't change now
+    let chosen: Vec<(Plan, Option<String>)> = chosen
+        .into_iter()
+        .filter(|(p, _)| !rebalance::blocked_by(&p.main, &away.iter().filter(|a| a.0 == p.mxf).map(|a| a.1.clone()).collect::<Vec<_>>()))
+        .collect();
     app.set_work_value(0.0);
     app.set_work_text("".into());
     let Some(work) = begin_work(app) else { return };
@@ -2962,8 +2977,10 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
                 Err(e) => rows.push(notice(3, "duplicates.json", &e.to_string(), 0)),
                 Ok(mut journal) => {
                     for run in journal.entries.iter_mut().filter(|r| !r.db_done) {
-                        rows.extend(rewrite_folders(&mut st, &run.changed));
-                        run.db_done = true;
+                        let new_rows = rewrite_folders(&mut st, &run.changed);
+                        // an error (database not set aside, folder not renamed) keeps the run open, so "Start" stays offered
+                        run.db_done = !new_rows.iter().any(|r| r.kind == 3);
+                        rows.extend(new_rows);
                     }
                     if let Err(e) = save_json(&journal, &path) {
                         rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
@@ -2988,6 +3005,9 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
                 app.set_mc_running(true);
                 return;
             }
+            if run_going(&app) {
+                return;
+            }
             if renames_open(&renames.borrow()) {
                 log::write("refused: folders still renamed for Media Composer");
                 return;
@@ -3001,7 +3021,8 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
                     let index = usize::try_from(i).ok().or_else(|| done.and_then(|d| journal.entries.iter().position(|r| *r == d)));
                     if let Some(run) = index.and_then(|i| journal.entries.get_mut(i)) {
                         rows = rewrite_folders(&mut renames.borrow_mut(), &run.changed);
-                        run.db_done = true;
+                        // an error keeps the run open, so "Start" stays offered
+                        run.db_done = !rows.iter().any(|r| r.kind == 3);
                         if let Err(e) = save_json(&journal, &path) {
                             rows.push(notice(3, &path.display().to_string(), &e.to_string(), 0));
                         }
@@ -3023,6 +3044,15 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             let app = weak.unwrap();
             if media_composer_running() {
                 app.set_mc_running(true);
+                return;
+            }
+            if run_going(&app) {
+                return;
+            }
+            // undo moves files back and rewrites databases: not while folders are renamed for Media Composer
+            if renames_open(&renames.borrow()) {
+                log::write("refused: folders still renamed for Media Composer");
+                app.set_error(app.get_txt_renames_open());
                 return;
             }
             let lang = app.get_language().to_string();
@@ -3205,6 +3235,9 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
                 app.set_mc_running(true);
                 return;
             }
+            if run_going(&app) {
+                return;
+            }
             if renames_open(&renames.borrow()) {
                 log::write("refused: folders still renamed for Media Composer");
                 return;
@@ -3232,6 +3265,15 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             let app = weak.unwrap();
             if media_composer_running() {
                 app.set_mc_running(true);
+                return;
+            }
+            if run_going(&app) {
+                return;
+            }
+            // undo moves files back and rewrites databases: not while folders are renamed for Media Composer
+            if renames_open(&renames.borrow()) {
+                log::write("refused: folders still renamed for Media Composer");
+                app.set_error(app.get_txt_renames_open());
                 return;
             }
             let path = rebalance_journal_path();
@@ -3553,6 +3595,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let app = weak.unwrap();
             if media_composer_running() {
                 app.set_mc_running(true);
+                return;
+            }
+            if run_going(&app) {
                 return;
             }
             if renames_open(&renames.borrow()) {

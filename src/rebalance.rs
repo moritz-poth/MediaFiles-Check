@@ -293,8 +293,7 @@ pub fn full_folders(volumes: &[PathBuf], limit: usize, renamed: &[(PathBuf, Stri
             if !seen.insert(key(base_name(main))) {
                 continue;
             }
-            let base = key(base_name(main));
-            let blocked = away.iter().any(|a| key(base_name(a)) == base || member_of(a).is_some_and(|(b, _)| key(b) == base));
+            let blocked = blocked_by(main, &away);
             let members = members(&mxf, main);
             let files = mxf_names(&mxf.join(main)) + members.iter().map(|m| mxf_names(&mxf.join(m))).sum::<usize>();
             if members.is_empty() && !blocked && files <= per {
@@ -379,23 +378,47 @@ pub struct Rebalanced {
     /// folders whose databases have to be rewritten
     #[serde(default)]
     pub changed: Vec<String>,
+    /// names of up to 20 files the last run moved: they identify the group's drive (folder names like "1" are
+    /// everywhere). Older entries have none.
+    #[serde(default)]
+    pub sample: Vec<String>,
 }
 
 fn yes() -> bool {
     true
 }
 
+/// The group of `main` has a folder that is renamed for Media Composer right now (`away`: original and current names
+/// of renamed folders in the same MXF folder): it must not change until it is renamed back.
+pub fn blocked_by(main: &str, away: &[String]) -> bool {
+    let base = key(base_name(main));
+    away.iter().any(|a| key(a) == key(main) || key(base_name(a)) == base || member_of(a).is_some_and(|(b, _)| key(b) == base))
+}
+
 impl Rebalanced {
     /// After the drive came back under another path (e.g. "/Volumes/Media 1" after a crash): the MXF folder on another
     /// drive that holds the main folder and all its rebalanced folders. Updates `mxf`; true if it changed.
     pub fn relocate(&mut self) -> bool {
-        let folders = &self.folders;
-        if folders.is_empty() || self.mxf.is_dir() {
+        // without recorded file names another drive with folders of the same names could be taken for it
+        if self.folders.is_empty() || self.sample.is_empty() || self.mxf.is_dir() {
             return false;
         }
-        let names: Vec<&str> = std::iter::once(self.original.as_str()).chain(folders.iter().map(String::as_str)).collect();
-        let found = crate::find_volumes().into_iter().map(|v| crate::mxf_dir(&v)).find(|m| names.iter().all(|n| m.join(n).is_dir()));
+        let found = crate::find_volumes().into_iter().map(|v| crate::mxf_dir(&v)).find(|m| self.names().iter().all(|n| m.join(n).is_dir()) && self.holds_sample(m));
         found.map(|m| self.mxf = m).is_some()
+    }
+
+    fn names(&self) -> Vec<&str> {
+        std::iter::once(self.original.as_str()).chain(self.folders.iter().map(String::as_str)).collect()
+    }
+
+    fn holds_sample(&self, mxf: &Path) -> bool {
+        self.sample.iter().any(|f| self.names().iter().any(|n| mxf.join(n).join(f).is_file()))
+    }
+
+    /// The group at `mxf` is the one this entry recorded (not a group of the same names on another drive mounted
+    /// at the same place). Entries from before `sample` can't tell and count as it.
+    pub fn belongs(&self) -> bool {
+        self.sample.is_empty() || self.holds_sample(&self.mxf)
     }
 }
 
@@ -494,6 +517,7 @@ pub fn execute(p: &Plan, journal: &mut Journal, journal_path: &Path) -> io::Resu
         folders: p.folders.iter().map(|f| f.0.clone()).collect(),
         files: p.moves.len(),
         changed,
+        sample: p.moves.iter().take(20).map(|m| m.file.clone()).collect(),
     };
     match i {
         Some(i) => journal.entries[i] = entry.clone(),
@@ -573,6 +597,9 @@ pub struct Undone {
 /// databases set aside) and gives the main folder its old name back if rebalancing renamed it and the name is free.
 /// The main folder's database is set aside too, so Media Composer rebuilds it with all files.
 pub fn undo(r: &Rebalanced) -> io::Result<Undone> {
+    if !r.belongs() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, format!("{}: the drive there is not the one that was rebalanced – connect that drive", r.mxf.display())));
+    }
     let main = r.mxf.join(&r.original);
     if !main.is_dir() {
         return Err(io::Error::new(io::ErrorKind::NotFound, format!("{} not found – if it is renamed for Media Composer, rename it back first", main.display())));
@@ -595,6 +622,33 @@ pub fn undo(r: &Rebalanced) -> io::Result<Undone> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn renamed_folders_block_their_group_under_both_names() {
+        let away = ["Projekt".to_string(), "2".to_string()];
+        assert!(blocked_by("2", &away), "current name of a renamed folder");
+        assert!(blocked_by("Projekt", &away));
+        assert!(blocked_by("Projekt.1", &away), "same group");
+        assert!(!blocked_by("1", &away));
+    }
+
+    #[test]
+    fn a_history_entry_knows_its_drive_by_recorded_files() {
+        let root = std::env::temp_dir().join(format!("mfc-rebal-belongs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let mxf = root.join("Avid MediaFiles/MXF");
+        fs::create_dir_all(mxf.join("1-rebalanced-1")).unwrap();
+        fs::create_dir_all(mxf.join("1")).unwrap();
+        let r = Rebalanced { mxf: mxf.clone(), original: "1".into(), date: String::new(), db_done: false, renamed_from: None, folders: vec!["1-rebalanced-1".into()], files: 1, changed: vec![], sample: vec!["moved.mxf".into()] };
+        assert!(!r.belongs(), "same folder names, other files: another drive");
+        assert!(undo(&r).is_err());
+        fs::write(mxf.join("1-rebalanced-1/moved.mxf"), b"m").unwrap();
+        assert!(r.belongs());
+        let old = Rebalanced { sample: vec![], ..r };
+        assert!(old.belongs(), "entries from before can't tell");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn clips_stay_together() {
@@ -618,7 +672,6 @@ mod tests {
         let chunks = layout(files[..3].to_vec(), 2);
         assert_eq!(chunks.iter().map(|c| c.len()).collect::<Vec<_>>(), [2, 1]);
     }
-    use super::*;
 
     fn setup(name: &str, folder: &str, n: usize) -> PathBuf {
         let root = std::env::temp_dir().join(format!("mfc-rebalance-{name}-{}", std::process::id()));
