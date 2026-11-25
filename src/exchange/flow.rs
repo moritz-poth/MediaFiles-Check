@@ -79,6 +79,8 @@ impl Compare {
         for d in &self.drives {
             if (1..=d.options.len()).contains(&d.selected) {
                 o.volume_map.insert(d.name.clone(), d.options[d.selected - 1].clone());
+            } else if d.selected > d.options.len() {
+                o.skip.insert(d.name.clone());
             }
         }
         o
@@ -239,6 +241,15 @@ mod tests {
         c.remember(&mut m);
         let again = Compare::new(local, remote, &m);
         assert_eq!((again.drives[0].selected, again.drives[1].selected), (2, 2));
+    }
+
+    #[test]
+    fn dont_send_is_respected_for_a_drive_of_the_same_name() {
+        let local = Manifest { system: "A".into(), volumes: vec![vol("Data", &[("1", &["a"])])], ..Default::default() };
+        let remote = Manifest { system: "B".into(), volumes: vec![vol("Data", &[])], ..Default::default() };
+        let mut c = Compare::new(local, remote, &Mappings::default());
+        c.drives[0].selected = c.drives[0].options.len() + 1; // Don't send
+        assert_eq!(media(&c.plan()).0, 0);
     }
 
     #[test]

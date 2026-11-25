@@ -74,7 +74,7 @@ fn two_volumes_into_one() {
     lab.folder("A", "V1", "1", &["a.mxf", "+db"]);
     lab.folder("A", "V2", "1", &["b.mxf", "+db"]);
     fs::create_dir_all(mxf_dir(&lab.drive("B", "W"))).unwrap();
-    let opts = Options { volume_map: [("V1".into(), "W".into()), ("V2".into(), "W".into())].into() };
+    let opts = Options { volume_map: [("V1".into(), "W".into()), ("V2".into(), "W".into())].into(), ..Default::default() };
     collect_checked(&lab, &opts);
     let (problems, tasks) = import_checked(&lab, &lab.targets(&["W"]));
     assert!(problems.is_empty(), "{problems:?}");

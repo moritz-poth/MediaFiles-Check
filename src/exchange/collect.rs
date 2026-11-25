@@ -168,6 +168,15 @@ fn load(dest: &Path) -> io::Result<Delivery> {
     if let Some(bad) = d.files.iter().find(|f| !safe_path(&f.path)) {
         return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}: invalid path in the delivery", bad.path)));
     }
+    // only MXF files and the two database files, each path once (also ignoring case and Unicode form)
+    let mut seen = HashSet::new();
+    let file_ok = |p: &str| {
+        let name = p.rsplit('/').next().unwrap_or_default();
+        is_db(name) || (!name.starts_with('.') && name.to_lowercase().ends_with(".mxf"))
+    };
+    if let Some(bad) = d.files.iter().find(|f| !file_ok(&f.path) || !seen.insert(key(&f.path))) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{}: not an MXF or database file, or listed twice", bad.path)));
+    }
     Ok(d)
 }
 
@@ -274,6 +283,8 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
     // delivery folder -> folders its files went to; folder -> (drive name, folder name)
     let mut landed: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
     let mut touched: BTreeMap<PathBuf, (String, String)> = BTreeMap::new();
+    // delivery folders where a media file could not be imported: their database never fits
+    let mut failed: HashSet<String> = HashSet::new();
     // Mediendateien zuerst: eine Datenbank darf erst ersetzt werden, wenn ihre Dateien da sind
     for (f, id, drive, to_folder, name) in media {
         done += 1;
@@ -281,6 +292,7 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
         let dir = mxf_dir(&drive).join(&to_folder);
         if let Err(e) = copy_verified(&dest.join(&f.path), &dir.join(&name), Some(&f.hash)) {
             problems.push(format!("{}: {e}", f.path));
+            failed.insert(id.clone());
         }
         landed.entry(id).or_default().insert(dir.clone());
         touched.insert(dir, (scan::volume_name(&drive), to_folder));
@@ -291,6 +303,11 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
     for (id, expected) in &d.db_folders {
         // the database fits one folder only: separated into media and render files it fits none
         let Some(dir) = landed.get(id).filter(|s| s.len() == 1).and_then(|s| s.first()) else { continue };
+        // the names may match while a file of the same name with other content stayed (its copy was refused)
+        if failed.contains(id) {
+            problems.push(format!("{id}: not every file could be imported – database not replaced, please rebuild it"));
+            continue;
+        }
         // Hat sich der Ordner seit dem Scan verändert, passt die gelieferte Datenbank nicht mehr.
         let want: HashSet<String> = expected.iter().map(|n| key(n)).collect();
         match mxf_names(dir) {
@@ -323,28 +340,43 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
         }
         let drive = dir.ancestors().nth(3).unwrap_or(dir);
         let saved = drive.join("Avid MediaFiles").join(BACKUP_DIR).join(&backup).join(dir.file_name().unwrap_or_default());
-        let mut ok = true;
-        for (new, name, hash) in staged {
-            let target = dir.join(&name);
-            let swap = || -> io::Result<()> {
-                if target.exists() {
-                    if hash_file(&target)? == hash {
-                        return fs::remove_file(&new);
-                    }
+        // the old files of the pair go aside first, then both new ones in; any failure puts the old pair back,
+        // so the folder never holds one old and one new database file
+        let (mut aside, mut placed) = (vec![], vec![]);
+        let swap = (|| -> io::Result<()> {
+            for (_, name, hash) in &staged {
+                let target = dir.join(name);
+                if target.exists() && hash_file(&target)? != *hash {
                     fs::create_dir_all(&saved)?;
-                    crate::move_new(&target, &saved.join(&name))?;
+                    crate::move_new(&target, &saved.join(name))?;
+                    aside.push((target, saved.join(name)));
                 }
-                crate::move_new(&new, &target)
-            };
-            if let Err(e) = swap() {
-                problems.push(format!("{id}/{name}: {e} – old database is in {BACKUP_DIR}/{backup}"));
-                let _ = fs::remove_file(&new);
-                ok = false;
             }
+            for (new, name, _) in &staged {
+                let target = dir.join(name);
+                if target.exists() {
+                    // the same file is there already
+                    fs::remove_file(new)?;
+                    continue;
+                }
+                crate::move_new(new, &target)?;
+                placed.push(target);
+            }
+            Ok(())
+        })();
+        if let Err(e) = swap {
+            // only the copies placed just now are removed; the old database files come back from the backup
+            placed.iter().for_each(|t| { let _ = fs::remove_file(t); });
+            let restored = aside.iter().all(|(t, b)| crate::move_new(b, t).is_ok());
+            staged.iter().for_each(|(new, _, _)| { let _ = fs::remove_file(new); });
+            problems.push(if restored {
+                format!("{id}: {e} – the old database stays, please rebuild it")
+            } else {
+                format!("{id}: {e} – the old database is in {BACKUP_DIR}/{backup}, please rebuild it")
+            });
+            continue;
         }
-        if ok {
-            db_done.insert(dir.clone());
-        }
+        db_done.insert(dir.clone());
     }
 
     // The sender's "rebuild database" tasks name the folders as planned; the folders that really got files replace them.
@@ -627,6 +659,58 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+
+    #[test]
+    fn database_stays_when_a_file_of_its_folder_was_refused() {
+        let root = tmp("refused");
+        let (_, b, sa, p) = a_to_b(&root);
+        let dest = root.join("Lieferung");
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        // since the manifest, B got a y.mxf of its own: the delivered one is refused, the names still match
+        fs::write(mxf_dir(&b).join("1/y.mxf"), "other").unwrap();
+        let t = Targets { media: [("V".to_string(), b.clone())].into(), ..Default::default() };
+        let r = import(&dest, &t, "en", &mut |_| {}).unwrap();
+        assert_eq!(fs::read_to_string(mxf_dir(&b).join("1/msmFMID.pmr")).unwrap(), "oldF");
+        assert_eq!(fs::read_to_string(mxf_dir(&b).join("1/y.mxf")).unwrap(), "other");
+        assert_eq!(r.problems.len(), 2, "{:?}", r.problems);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_swap_puts_the_old_database_pair_back() {
+        let root = tmp("swap");
+        let (_, b, sa, p) = a_to_b(&root);
+        let dest = root.join("Lieferung");
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        // the old msmMMOB.mdb can't be read (here: a folder of that name) – msmFMID.pmr is swapped first
+        let mdb = mxf_dir(&b).join("1/msmMMOB.mdb");
+        fs::remove_file(&mdb).unwrap();
+        fs::create_dir(&mdb).unwrap();
+        let t = Targets { media: [("V".to_string(), b.clone())].into(), ..Default::default() };
+        let r = import(&dest, &t, "en", &mut |_| {}).unwrap();
+        assert_eq!(fs::read_to_string(mxf_dir(&b).join("1/msmFMID.pmr")).unwrap(), "oldF", "never one new and one old file");
+        assert_eq!(r.problems.len(), 1, "{:?}", r.problems);
+        let left: Vec<_> = fs::read_dir(mxf_dir(&b).join("1")).unwrap().flatten().map(|e| e.file_name()).filter(|n| n.to_string_lossy().contains("exchange")).collect();
+        assert!(left.is_empty(), "{left:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn delivery_holds_only_mxf_and_database_files_once() {
+        let dir = tmp("delnames");
+        let file = |path: &str| Delivered { path: path.into(), size: 1, hash: "x".into() };
+        for (files, ok) in [
+            (vec![file("V/1/a.mxf"), file("V/1/msmFMID.pmr")], true),
+            (vec![file("V/1/notes.command")], false),
+            (vec![file("V/1/.msmMMOB.mdb.exchange-new")], false),
+            (vec![file("V/1/msmFMID.pmr"), file("V/1/MSMFMID.PMR")], false),
+        ] {
+            let d = Delivery { format: DELIVERY_FORMAT.into(), from: "A".into(), to: "B".into(), created: 0, files, db_folders: Default::default(), tasks: vec![] };
+            fs::write(dir.join(DELIVERY_FILE), serde_json::to_vec(&d).unwrap()).unwrap();
+            assert_eq!(load(&dir).is_ok(), ok);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn delivery_paths_must_stay_inside() {

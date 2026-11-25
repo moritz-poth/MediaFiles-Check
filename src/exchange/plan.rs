@@ -9,6 +9,8 @@ use std::fmt;
 pub struct Options {
     /// lokaler Volume-Name -> Volume-Name auf der Gegenseite (ohne Eintrag: gleicher Name)
     pub volume_map: HashMap<String, String>,
+    /// local volumes the user chose not to send ("Don't send"), even if the other side has one of the same name
+    pub skip: HashSet<String>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -83,7 +85,7 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options) -> Plan {
     }
     let mut proposals = vec![];
 
-    for lv in &local.volumes {
+    for lv in local.volumes.iter().filter(|v| !opts.skip.contains(&v.name)) {
         let mapped = opts.volume_map.get(&lv.name).cloned();
         let rv = remote.volumes.iter().find(|rv| key(&rv.name) == key(mapped.as_deref().unwrap_or(&lv.name)));
         let Some(to_volume) = mapped.or_else(|| rv.map(|rv| rv.name.clone())) else {
@@ -239,7 +241,7 @@ mod tests {
     fn two_local_volumes_into_one_remote_volume() {
         let a = ma("A", vec![("V1", vec![fo("1", &["a"])]), ("V2", vec![fo("1", &["b"])])]);
         let b = ma("B", vec![("W", vec![])]);
-        let opts = Options { volume_map: [("V1".into(), "W".into()), ("V2".into(), "W".into())].into() };
+        let opts = Options { volume_map: [("V1".into(), "W".into()), ("V2".into(), "W".into())].into(), ..Default::default() };
         let (copies, p) = run(&a, &b, &opts);
         assert_eq!(copies, ["W/1/a", "W/1/b"]);
         assert_eq!(p.tasks, [rebuild("W", "1")]);

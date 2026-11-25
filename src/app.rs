@@ -531,6 +531,16 @@ fn begin_work(app: &AppWindow) -> Option<WorkGuard> {
     Some(WorkGuard(app.as_weak()))
 }
 
+/// Collect and import are runs too: nothing else may move files or rewrite databases meanwhile, and they don't start
+/// while another run is going. Their progress is the Exchange page, not the Working page.
+fn begin_exchange(app: &AppWindow) -> Option<WorkGuard> {
+    if run_going(app) {
+        return None;
+    }
+    WORK_BUSY.store(true, std::sync::atomic::Ordering::SeqCst);
+    Some(WorkGuard(app.as_weak()))
+}
+
 /// Shows Pause/Cancel on Check's Working page for a scan and returns its gate.
 fn work_gate(app: &AppWindow) -> Arc<Gate> {
     app.set_work_paused(false);
@@ -624,7 +634,7 @@ fn start_work(app: &AppWindow, kind: i32) {
 }
 
 /// Wires the "Exchange" tab (compare, collect, import).
-fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Settings>>) {
+fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Settings>>, renames: &Rc<RefCell<Renames>>) {
     let x = app.global::<Exchange>();
     x.set_system_name(shorten(&fscan::computer_name(), TITLE_CHARS).into());
     show_volumes(app, &drives.borrow());
@@ -722,7 +732,13 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             let app = weak.unwrap();
             let c = compare.borrow();
             let Some(c) = c.as_ref() else { return };
+            // the databases are copied as they are on the drive: Media Composer must not write them meanwhile
+            if media_composer_running() {
+                err(&app, app.get_txt_quit_mc().to_string());
+                return;
+            }
             let Some(parent) = rfd::FileDialog::new().set_title(app.get_txt_choose_target()).pick_folder() else { return };
+            let Some(work) = begin_exchange(&app) else { return };
             let mut m = Mappings::load(&exchange_dir());
             c.remember(&mut m);
             m.save(&exchange_dir());
@@ -732,6 +748,7 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             start_work(&app, 0);
             let (weak, mut progress) = (weak.clone(), progress_to(&weak));
             std::thread::spawn(move || {
+                let _work = work;
                 let result = fcollect::collect(&local, &to, &plan, &dest, &lang, &mut progress);
                 log::write(&format!("  collect: {:?}", result.as_ref().map(|e| e.len())));
                 let _ = slint::invoke_from_event_loop(move || {
@@ -839,11 +856,16 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
     });
 
     x.on_start_import({
-        let (weak, incoming) = (app.as_weak(), incoming.clone());
+        let (weak, incoming, renames) = (app.as_weak(), incoming.clone(), renames.clone());
         move || {
             let app = weak.unwrap();
             if media_composer_running() {
                 err(&app, app.get_txt_quit_mc().to_string());
+                return;
+            }
+            // while folders are renamed for Media Composer nothing else rewrites databases
+            if renames_open(&renames.borrow()) {
+                err(&app, app.get_txt_renames_open().to_string());
                 return;
             }
             let i = incoming.borrow();
@@ -852,10 +874,12 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             i.remember(&mut m);
             m.save(&exchange_dir());
             let (dest, targets, from, me, lang) = (i.dir.clone(), i.targets(), i.delivery.from.clone(), i.delivery.to.clone(), app.get_language().to_string());
+            let Some(work) = begin_exchange(&app) else { return };
             log::write(&format!("import {}", dest.display()));
             start_work(&app, 1);
             let (weak, mut progress) = (weak.clone(), progress_to(&weak));
             std::thread::spawn(move || {
+                let _work = work;
                 // everything is verified first; only a complete delivery is imported
                 let problems = match fcollect::verify(&dest, &mut progress) {
                     Ok(p) => p,
@@ -3591,7 +3615,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    wire_exchange(&app, &drives, &settings);
+    wire_exchange(&app, &drives, &settings, &renames);
     let welcome_seen = || app_dir().map(|d| d.join("welcome-seen"));
     app.set_show_welcome(welcome_seen().is_some_and(|p| !p.exists()));
     app.on_welcome_done({
