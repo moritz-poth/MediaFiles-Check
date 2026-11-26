@@ -260,8 +260,8 @@ struct SourceMob {
     /// a media file (`Mob::is_file`), not a tape or import source
     file: bool,
     name: String,
-    /// its tape / camera clip / imported file and whether it is sound (`Bin::source_name`)
-    source: Option<(String, bool)>,
+    /// its tape / camera clip / imported file, whether it is sound, and the track of the source (`Bin::source_of`)
+    source: Option<Source>,
 }
 
 /// An item of a bin (what Media Composer lists, plus hidden mobs) with the media it reaches.
@@ -330,7 +330,7 @@ impl BinSummary {
                 ama: m.ama,
                 file: m.is_file(),
                 name: m.name.clone(),
-                source: if m.is_file() { bin.source_name(m).map(|n| (n, matches!(m.descriptor.as_deref(), Some("PCMA" | "WAVE" | "AIFC")))) } else { None },
+                source: if m.is_file() { bin.source_of(m).map(|(n, track)| (n, matches!(m.descriptor.as_deref(), Some("PCMA" | "WAVE" | "AIFC")), track)) } else { None },
             })
             .map(|m| pool.source(m))
             .collect();
@@ -425,7 +425,8 @@ pub struct Refs {
 }
 
 /// Raised when `BinSummary` or the file layout changes: an older cache is read anew.
-const BIN_CACHE_VERSION: u32 = 5;
+// 6: sources carry their track (2026-11-26)
+const BIN_CACHE_VERSION: u32 = 6;
 
 /// Bin path -> (size, modification date, summary). Media Composer rewrites the whole bin file when it saves it, so a
 /// bin with the same size and date has not changed and is not read again.
@@ -435,7 +436,10 @@ struct BinCache {
     pool: Pool,
 }
 
-type DiskSource = (u32, Option<String>, bool, bool, String, Option<(String, bool)>);
+type DiskSource = (u32, Option<String>, bool, bool, String, Option<Source>);
+
+/// source name, sound or not, track of the source
+type Source = (String, bool, u16);
 /// id, name, flags (clip kind 1 master, 2 subclip, 3 sequence; +4 render master, +8 composition), and as indexes
 /// into `lists`: media, unresolved, renders, renders unresolved
 type DiskItem = (u32, String, u8, u32, u32, u32, u32);
@@ -649,8 +653,8 @@ pub fn scan_of(projects: &ProjectBins, available: &HashSet<MobId>) -> ScanResult
     let mut missing: HashMap<MobId, Missing> = HashMap::new();
     let mut by_bin: BTreeMap<(String, String), BTreeMap<MobId, BTreeSet<(String, ClipKind)>>> = BTreeMap::new();
     // missing file mobs: locator class, name, AMA, source; and the sources of the files that are on the drives
-    let mut files: HashMap<MobId, (Option<String>, String, bool, Option<(String, bool)>)> = HashMap::new();
-    let mut on_drives: HashSet<(String, bool)> = HashSet::new();
+    let mut files: HashMap<MobId, (Option<String>, String, bool, Option<Source>)> = HashMap::new();
+    let mut on_drives: HashSet<Source> = HashSet::new();
     let mut renders: HashSet<MobId> = HashSet::new();
     // missing file -> the master clip it belongs to
     let mut owners: HashMap<MobId, String> = HashMap::new();
@@ -909,5 +913,23 @@ mod tests {
         let r = scan(&[root.join("Avid Projects/A")], &HashSet::new(), &mut |_, _, _| {}, &crate::Gate::default());
         assert_eq!((r.bins, r.failed.len(), r.missing.len()), (2, 2, 0));
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn one_sound_channel_never_stands_in_for_the_other() {
+        // a stereo clip: A01 and A02 come from the same imported file, tracks 1 and 2; only A02 is on the drives
+        let id = |n: u8| { let mut m = MobId::default(); m[0] = n; m };
+        let file = |n: u8, track: u16| Arc::new(SourceMob { id: id(n), locator: Some("MSML".into()), file: true, name: "Clip_61".into(), source: Some(("Clip_61.mov".into(), true, track)), ..Default::default() });
+        let clip = Arc::new(ItemSum { id: id(9), name: "Clip_61".into(), clip: Some(ClipKind::Master), media: vec![id(1), id(2)], ..Default::default() });
+        let bin = BinSummary { sources: vec![file(1, 1), file(2, 2)], items: vec![clip] };
+        let projects: ProjectBins = vec![(PathBuf::from("/P"), vec![(PathBuf::from("/P/A2.avb"), Ok(bin.clone()))])];
+        let r = scan_of(&projects, &[id(2)].into());
+        assert_eq!((r.missing.len(), r.relink), (1, 0), "A01 must be requested");
+        // another file of track 1 of the same source on the drives (e.g. imported again): that one can be relinked
+        let mut again = bin;
+        again.sources.push(file(3, 1));
+        let projects: ProjectBins = vec![(PathBuf::from("/P"), vec![(PathBuf::from("/P/A2.avb"), Ok(again))])];
+        let r = scan_of(&projects, &[id(2), id(3)].into());
+        assert_eq!((r.missing.len(), r.relink), (0, 1));
     }
 }

@@ -486,6 +486,12 @@ impl Bin {
 
     /// Name of the source a file mob was made from (tape / camera clip or imported file), if stored in this bin.
     pub fn source_name(&self, file: &Mob) -> Option<String> {
+        self.source_of(file).map(|s| s.0)
+    }
+
+    /// The source a file mob was made from and the track of it the file holds: A01 and A02 of a stereo clip come
+    /// from the same source but different tracks, so one never stands in for the other.
+    pub fn source_of(&self, file: &Mob) -> Option<(String, u16)> {
         let mut stack = file.tracks.clone();
         let mut seen = HashSet::new();
         while let Some(p) = stack.pop() {
@@ -494,8 +500,8 @@ impl Bin {
             }
             match self.parts.get(&p) {
                 Some(Part::Parts(v)) => stack.extend(v),
-                Some(Part::Clip(id, _)) => match self.mob(id) {
-                    Some(m) if m.kind == MobKind::Source && !m.is_file() && !m.name.trim().is_empty() => return Some(m.name.clone()),
+                Some(Part::Clip(id, track)) => match self.mob(id) {
+                    Some(m) if m.kind == MobKind::Source && !m.is_file() && !m.name.trim().is_empty() => return Some((m.name.clone(), *track)),
                     _ => {}
                 },
                 None => {}
