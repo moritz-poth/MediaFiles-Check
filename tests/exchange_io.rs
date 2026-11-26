@@ -44,6 +44,29 @@ fn receiver_with_more_files_gets_files_and_a_rebuild_task() {
     assert_eq!(tasks, ["[B] Rebuild database: V/1"]);
     assert_eq!(lab.read("B", "V", "1/b.mxf").as_deref(), Some("b.mxf"));
     assert_eq!(lab.read("B", "V", "1/msmFMID.pmr").as_deref(), Some("B 1 msmFMID.pmr"), "database kept");
+    // a second import brings nothing new: no task for a folder that got nothing
+    let (problems, tasks) = import_checked(&lab, &lab.targets(&["V"]));
+    assert!(problems.is_empty() && tasks.is_empty(), "{problems:?} {tasks:?}");
+}
+
+#[test]
+fn own_folder_for_a_partly_present_folder_is_no_problem() {
+    let lab = Lab::new("ownpart");
+    lab.folder("A", "V", "1", &["a.mxf", "b.mxf", "+db"]);
+    lab.folder("B", "V", "1", &["a.mxf", "+db"]);
+    collect_checked(&lab, &Options::default());
+    let mut t = lab.targets(&["V"]);
+    t.own_folder.insert("V/1".into());
+    let (problems, tasks) = import_checked(&lab, &t);
+    let own = collect::own_folder_name("A", "1");
+    // only b.mxf arrives in the own folder: the database does not fit it, which is expected, not a failure
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(tasks, [format!("[B] Rebuild database: V/{own}")]);
+    assert!(lab.read("B", "V", &format!("{own}/msmFMID.pmr")).is_none());
+    // imported again (as after a crash): the files are there already, the task must still come
+    let (problems, again) = import_checked(&lab, &t);
+    assert!(problems.is_empty(), "{problems:?}");
+    assert_eq!(again, tasks);
 }
 
 #[test]
@@ -173,7 +196,8 @@ fn damaged_file_is_found_and_never_imported() {
     assert!(!problems.is_empty());
     assert!(lab.read("B", "V", "1/b.mxf").is_none());
     assert_eq!(lab.read("B", "V", "1/msmFMID.pmr").as_deref(), Some("B 1 msmFMID.pmr"));
-    assert_eq!(tasks, ["[B] Rebuild database: V/1"]);
+    // nothing new landed in V/1: its own database still fits, so no rebuild task
+    assert!(tasks.is_empty(), "{tasks:?}");
 }
 
 #[test]
@@ -224,8 +248,10 @@ fn source_changed_after_the_scan_is_not_delivered() {
     let p = plan::plan(&a, &b, &Options::default());
     lab.folder("A", "V", "1", &["a.mxf=changed"]);
     fs::remove_file(mxf_dir(&lab.drive("A", "V")).join("1/b.mxf")).unwrap();
-    let errors = collect::collect(&a, "B", &p, &lab.dest(), "en", &mut |_| {}).unwrap();
+    let (errors, tasks) = collect::collect(&a, "B", &p, &lab.dest(), "en", &mut |_| {}).unwrap();
     assert_eq!(errors.len(), 2, "{errors:?}");
+    // the sender's result page shows that the database was left out
+    assert_eq!(tasks, ["[B] Rebuild database: V/1"]);
     // what is in the delivery is consistent; the database is left out (folder differs from the scan)
     assert!(collect::verify(&lab.dest(), &mut |_| {}).unwrap().is_empty());
     no_temp_files(&lab.root);

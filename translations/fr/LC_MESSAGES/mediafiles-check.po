@@ -1227,7 +1227,7 @@ msgid "JetBrains Mono font – SIL Open Font License 1.1. Slint UI toolkit – u
 msgstr "Police JetBrains Mono – SIL Open Font License 1.1. Boîte à outils Slint – utilisée sous la GNU GPL v3."
 
 msgid "Avid and Media Composer are trademarks of Avid Technology, Inc. MediaFiles Check is not affiliated with Avid."
-msgstr "Avid et Media Composer sont des marques d'Avid Technology, Inc. MediaFiles Check n'est pas affilié à Avid."
+msgstr "Avid et Media Composer sont des marques d’Avid Technology, Inc. MediaFiles Check n’est pas affilié à Avid."
 
 msgid "{} (was {})"
 msgstr "{} (était {})"

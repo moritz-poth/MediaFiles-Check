@@ -38,8 +38,9 @@ fn is_db(name: &str) -> bool {
     DB_FILES.iter().any(|d| d.eq_ignore_ascii_case(name))
 }
 
-/// Kopiert alle Dateien des Plans nach `dest/<Volume>/<Ordner>/`. Bricht bei einzelnen Fehlern nicht ab, sondern gibt sie zurück.
-pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<Vec<String>> {
+/// Kopiert alle Dateien des Plans nach `dest/<Volume>/<Ordner>/`. Bricht bei einzelnen Fehlern nicht ab, sondern gibt sie zurück –
+/// mit den Aufgaben der Lieferung (in `lang`, auch die, die erst beim Sammeln dazukamen).
+pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<(Vec<String>, Vec<String>)> {
     let mut files = vec![];
     let mut errors = vec![];
     let mut dbs: BTreeMap<String, (usize, Vec<String>)> = BTreeMap::new();
@@ -153,7 +154,7 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
         tasks,
     };
     write_atomic(&dest.join(DELIVERY_FILE), &serde_json::to_vec_pretty(&delivery)?)?;
-    Ok(errors)
+    Ok((errors, delivery.tasks))
 }
 
 fn load(dest: &Path) -> io::Result<Delivery> {
@@ -259,12 +260,18 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
     // where every media file goes; render files to their own drive if the volume is separated
     // shortcut: a file whose header says nothing counts as media, like Media › Overview's rule-based moves leave it
     let mut media = vec![];
+    // delivery folders that do not go 1:1 into the receiver's folder of the same name (own folder, render drive):
+    // there the database only fits if the folder ends up complete – otherwise a rebuild task, not a problem
+    let mut not_merged: HashSet<String> = HashSet::new();
     for f in d.files.iter().filter(|f| !is_db(&split(&f.path).2)) {
         let (vol, folder, name) = split(&f.path);
         let id = format!("{vol}/{folder}");
         let render = t.render.get(&vol).filter(|_| crate::mxf::file_info(&dest.join(&f.path)).is_ok_and(|i| i.render == Some(true)));
         let drive = render.unwrap_or(&volumes[&vol]).clone();
         let to_folder = if t.own_folder.contains(&id) { own_folder_name(&d.from, &folder) } else { folder };
+        if render.is_some() || t.own_folder.contains(&id) {
+            not_merged.insert(id.clone());
+        }
         media.push((f, id, drive, to_folder, name));
     }
     // nothing starts unless every drive keeps its reserve afterwards
@@ -284,6 +291,8 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
     // delivery folder -> folders its files went to; folder -> (drive name, folder name)
     let mut landed: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
     let mut touched: BTreeMap<PathBuf, (String, String)> = BTreeMap::new();
+    // every target folder's (drive name, folder name), for rebuild tasks
+    let mut names: BTreeMap<PathBuf, (String, String)> = BTreeMap::new();
     // delivery folders where a media file could not be imported: their database never fits
     let mut failed: HashSet<String> = HashSet::new();
     // Mediendateien zuerst: eine Datenbank darf erst ersetzt werden, wenn ihre Dateien da sind
@@ -291,12 +300,20 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
         done += 1;
         progress(&format!("[{done}/{total}] {}", f.path));
         let dir = mxf_dir(&drive).join(&to_folder);
-        if let Err(e) = copy_verified(&dest.join(&f.path), &dir.join(&name), Some(&f.hash)) {
-            problems.push(format!("{}: {e}", f.path));
-            failed.insert(id.clone());
+        let new = !dir.join(&name).exists();
+        names.insert(dir.clone(), (scan::volume_name(&drive), to_folder.clone()));
+        match copy_verified(&dest.join(&f.path), &dir.join(&name), Some(&f.hash)) {
+            // only a folder that really got a new file needs its database rebuilt
+            Ok(_) if new => {
+                touched.insert(dir.clone(), (scan::volume_name(&drive), to_folder));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                problems.push(format!("{}: {e}", f.path));
+                failed.insert(id.clone());
+            }
         }
-        landed.entry(id).or_default().insert(dir.clone());
-        touched.insert(dir, (scan::volume_name(&drive), to_folder));
+        landed.entry(id).or_default().insert(dir);
     }
 
     let backup = format!("{}_{}", yymmdd(now_secs()), now_secs());
@@ -318,6 +335,13 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
         let want: HashSet<String> = expected.iter().map(|n| key(n)).collect();
         match mxf_names(dir) {
             Ok(have) if have == want => {}
+            // incomplete there (also when an earlier, interrupted import brought the files): the database must be rebuilt
+            Ok(_) if not_merged.contains(id) => {
+                if let Some(n) = names.get(dir) {
+                    touched.insert(dir.clone(), n.clone());
+                }
+                continue;
+            }
             Ok(_) => {
                 problems.push(format!("{id}: folder contains other files than expected – database not replaced, please rebuild it"));
                 continue;
@@ -493,16 +517,16 @@ mod tests {
         let remote = Manifest { system: "B".into(), volumes: vec![Volume { name: "V".into(), ..Default::default() }], ..Default::default() };
         let p = plan::plan(&s.manifest, &remote, &Options::default());
         let dest = root.join("Lieferung");
-        assert!(collect(&s.manifest, "B", &p, &dest, "de", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&s.manifest, "B", &p, &dest, "de", &mut |_| {}).unwrap().0.is_empty());
         assert!(dest.join("V/Avid8.1/msmMMOB.mdb").exists());
         assert!(fs::read_to_string(dest.join(tasks_file("de"))).unwrap().contains("NUR DEN INHALT"));
         assert!(verify(&dest, &mut |_| {}).unwrap().is_empty());
         // zweiter Lauf setzt fort statt zu überschreiben
-        assert!(collect(&s.manifest, "B", &p, &dest, "de", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&s.manifest, "B", &p, &dest, "de", &mut |_| {}).unwrap().0.is_empty());
 
         fs::write(dest.join("V/Avid8.1/a.mxf"), "XXX").unwrap();
         assert_eq!(verify(&dest, &mut |_| {}).unwrap().len(), 1);
-        assert_eq!(collect(&s.manifest, "B", &p, &dest, "de", &mut |_| {}).unwrap().len(), 1);
+        assert_eq!(collect(&s.manifest, "B", &p, &dest, "de", &mut |_| {}).unwrap().0.len(), 1);
 
         // stille Veränderung (gleiche Größe, gleiches Datum) findet nur die vollständige Prüfung
         let a = folder.join("a.mxf");
@@ -527,7 +551,7 @@ mod tests {
         let sb = scan::scan(&[b.clone()], false, None, &mut |_, _, _| {}, &crate::Gate::default()).unwrap().manifest;
         let p = plan::plan(&sa, &sb, &Options::default());
         let dest = root.join("Lieferung");
-        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().0.is_empty());
         assert!(fs::read_to_string(dest.join(tasks_file("en"))).unwrap().contains("ONLY THE CONTENTS"));
 
         // seit dem Scan ist auf B in Ordner 2 eine Datei dazugekommen -> dessen DB darf nicht ersetzt werden
@@ -562,7 +586,7 @@ mod tests {
         let sb = scan::scan(&[b.clone()], false, None, &mut |_, _, _| {}, &crate::Gate::default()).unwrap().manifest;
         let p = plan::plan(&sa, &sb, &Options::default());
         let dest = root.join("Lieferung");
-        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().0.is_empty());
 
         let t = Targets { media: [("V".to_string(), b.clone())].into(), own_folder: ["V/1".to_string(), "V/2".to_string()].into(), ..Default::default() };
         let r = import(&dest, &t, "en", &mut |_| {}).unwrap();
@@ -596,7 +620,7 @@ mod tests {
         // Media Composer wrote a new file (and its database) after the scan
         fs::write(mxf_dir(&a).join("1/z.mxf"), "z").unwrap();
         let dest = root.join("Lieferung");
-        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().0.is_empty());
         let d = load(&dest).unwrap();
         assert!(d.db_folders.is_empty() && !dest.join("V/1/msmFMID.pmr").exists());
         assert_eq!(d.tasks, ["[B] Rebuild database: V/1"]);
@@ -608,7 +632,7 @@ mod tests {
         let root = tmp("halfdb");
         let (_, b, sa, p) = a_to_b(&root);
         let dest = root.join("Lieferung");
-        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().0.is_empty());
         fs::write(dest.join("V/1/msmMMOB.mdb"), "damaged").unwrap();
         let t = Targets { media: [("V".to_string(), b.clone())].into(), ..Default::default() };
         let r = import(&dest, &t, "en", &mut |_| {}).unwrap();
@@ -627,7 +651,7 @@ mod tests {
         let (_, b, sa, p) = a_to_b(&root);
         fs::write(mxf_dir(&b).join("1/._x.mxf"), "resource fork").unwrap();
         let dest = root.join("Lieferung");
-        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().0.is_empty());
         let t = Targets { media: [("V".to_string(), b.clone())].into(), ..Default::default() };
         assert!(import(&dest, &t, "en", &mut |_| {}).unwrap().problems.is_empty());
         assert_eq!(fs::read_to_string(mxf_dir(&b).join("1/msmMMOB.mdb")).unwrap(), "newM");
@@ -671,7 +695,7 @@ mod tests {
         let root = tmp("refused");
         let (_, b, sa, p) = a_to_b(&root);
         let dest = root.join("Lieferung");
-        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().0.is_empty());
         // since the manifest, B got a y.mxf of its own: the delivered one is refused, the names still match
         fs::write(mxf_dir(&b).join("1/y.mxf"), "other").unwrap();
         let t = Targets { media: [("V".to_string(), b.clone())].into(), ..Default::default() };
@@ -687,7 +711,7 @@ mod tests {
         let root = tmp("swap");
         let (_, b, sa, p) = a_to_b(&root);
         let dest = root.join("Lieferung");
-        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().is_empty());
+        assert!(collect(&sa, "B", &p, &dest, "en", &mut |_| {}).unwrap().0.is_empty());
         // the old msmMMOB.mdb can't be read (here: a folder of that name) – msmFMID.pmr is swapped first
         let mdb = mxf_dir(&b).join("1/msmMMOB.mdb");
         fs::remove_file(&mdb).unwrap();

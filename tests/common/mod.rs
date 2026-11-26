@@ -102,7 +102,7 @@ pub fn collect_checked(lab: &Lab, opts: &Options) -> Plan {
     let (a, b) = (lab.scan("A"), lab.scan("B"));
     let p = plan::plan(&a, &b, opts);
     let before = snap(&lab.root.join("A"));
-    let errors = collect::collect(&a, "B", &p, &lab.dest(), "en", &mut |_| {}).unwrap();
+    let (errors, _) = collect::collect(&a, "B", &p, &lab.dest(), "en", &mut |_| {}).unwrap();
     assert!(errors.is_empty(), "{errors:?}");
     assert_eq!(snap(&lab.root.join("A")), before, "collecting changed the sender");
     assert!(collect::verify(&lab.dest(), &mut |_| {}).unwrap().is_empty());

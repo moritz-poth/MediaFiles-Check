@@ -89,7 +89,12 @@ fn lang_of(app: &AppWindow) -> String {
 /// The History of the Media tab (also read by Tasks for databases still to rewrite).
 pub fn show_runs(app: &AppWindow) {
     let lang = lang_of(app);
-    let runs: media_moves::Journal = load_json(&journal_path()).unwrap_or_default();
+    let (runs, error) = match load_json::<media_moves::Journal>(&journal_path()) {
+        Ok(j) => (j, String::new()),
+        // shown above the (empty) list – the runs themselves refuse to start then
+        Err(e) => (media_moves::Journal::default(), pick(&lang, ["History cannot be read ({e}) – nothing is started until it can", "Verlauf nicht lesbar ({e}) – nichts wird gestartet, bis er lesbar ist", "Historique illisible ({e}) – rien ne démarre tant qu’il ne l’est pas", "Historial ilegible ({e}): no se inicia nada hasta que se pueda leer"]).replace("{e}", &e.to_string())),
+    };
+    app.global::<Inventory>().set_runs_error(error.into());
     let rows: Vec<RunRow> = runs
         .entries
         .iter()
@@ -151,9 +156,8 @@ fn prepare_bin_page(app: &AppWindow, st: &mut InvState) {
     let g = app.global::<Inventory>();
     st.action = None;
     st.plan.clear();
-    if g.get_task() != 6 {
-        g.set_delete_originals(false);
-    }
+    // asked every time, also when going from one bin to the next
+    g.set_delete_originals(false);
     g.set_task(6);
     show_plan(app, st);
     g.set_view(1);

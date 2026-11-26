@@ -444,17 +444,10 @@ pub struct Moved {
     pub kept: Vec<String>,
 }
 
-/// Renames the main folder (if planned), moves the files, sets the databases of emptied rebalanced folders aside and
-/// removes those folders when nothing else is in them. Never overwrites, never deletes a file.
+/// Moves the files (the main folder already has its new name, see `execute`), sets the databases of emptied
+/// rebalanced folders aside and removes those folders when nothing else is in them. Never overwrites, never deletes a file.
 fn apply(p: &Plan) -> io::Result<Moved> {
     let main = p.final_main().to_string();
-    if let Some(to) = &p.rename_to {
-        let target = p.mxf.join(to);
-        if target.exists() {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} exists already", target.display())));
-        }
-        crate::move_new(&p.mxf.join(&p.main), &target)?;
-    }
     let name = |f: &str| if f == p.main { main.clone() } else { f.to_string() };
     let mut out = Moved::default();
     for (folder, _) in &p.folders {
@@ -520,11 +513,31 @@ pub fn execute(p: &Plan, journal: &mut Journal, journal_path: &Path) -> io::Resu
         changed,
         sample: p.moves.iter().take(20).map(|m| m.file.clone()).collect(),
     };
+    let before = journal.entries.clone();
     match i {
         Some(i) => journal.entries[i] = entry.clone(),
         None => journal.entries.push(entry.clone()),
     }
-    crate::save_json(journal, journal_path)?;
+    if let Err(e) = crate::save_json(journal, journal_path) {
+        journal.entries = before;
+        return Err(e);
+    }
+    if let Some(to) = &p.rename_to {
+        let target = p.mxf.join(to);
+        let renamed = if target.exists() {
+            Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} exists already", target.display())))
+        } else {
+            crate::move_new(&p.mxf.join(&p.main), &target)
+        };
+        // nothing changed on the drive: the History must not show the new name either
+        if let Err(e) = renamed {
+            journal.entries = before;
+            return Err(match crate::save_json(journal, journal_path) {
+                Ok(()) => e,
+                Err(s) => io::Error::new(e.kind(), format!("{e} (rebalanced.json not saved: {s})")),
+            });
+        }
+    }
     let moved = apply(p)?;
     Ok((entry, moved))
 }
@@ -782,6 +795,14 @@ mod tests {
         let p = plan(&mxf, "1", 5, Some("Projekt"), true, &mut HashSet::new(), Some(&mut |_, _, _| {})).unwrap();
         assert_eq!(p.folders.iter().map(|f| f.0.as_str()).collect::<Vec<_>>(), ["Projekt-rebalanced-1", "Projekt-rebalanced-2"]);
         assert_eq!(p.emptied, ["1-rebalanced-1", "1-rebalanced-2"]);
+        // the name was taken meanwhile (another workstation): nothing changes, the History stays as it was
+        let saved = j.entries.clone();
+        fs::create_dir(mxf.join("Projekt")).unwrap();
+        assert!(execute(&p, &mut j, &jp).is_err());
+        assert_eq!(j.entries, saved);
+        assert_eq!(crate::load_json::<Journal>(&jp).unwrap().entries, saved);
+        assert!(dir.exists());
+        fs::remove_dir(mxf.join("Projekt")).unwrap();
         let (e, _) = execute(&p, &mut j, &jp).unwrap();
         assert!(!dir.exists() && !mxf.join("1-rebalanced-1").exists());
         assert_eq!((count(&mxf.join("Projekt")), count(&mxf.join("Projekt-rebalanced-1"))), (2, 5));

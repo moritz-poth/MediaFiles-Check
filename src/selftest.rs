@@ -144,7 +144,9 @@ fn rename_cycle(base: &Path) -> Result<String, Failed> {
         return fail("status should be “ready” after Media Composer wrote the database");
     }
     let d = io(rename::diff(&r))?;
-    io(rename::rename_back(&r, &d.added, rename::Added::FirstFolder, "MFCSelftest"))?;
+    if let Some(e) = io(rename::rename_back(&r, &d.added, rename::Added::FirstFolder, "MFCSelftest"))?.error {
+        return fail(&format!("renaming back: {e}"));
+    }
     if !folder.join("a.mxf").exists() || !mxf.join("1/new.mxf").exists() {
         return fail("after renaming back the files are not where they belong");
     }

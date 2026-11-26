@@ -137,7 +137,8 @@ fn read_only_drive_changes_nothing() {
     remount_b(false);
     let r = r.unwrap();
     assert!(!r.problems.is_empty());
-    assert_eq!(r.tasks, ["[B] Rebuild database: V/1"]);
+    // nothing arrived, so V/1 still fits its own database: no rebuild task
+    assert!(r.tasks.is_empty(), "{:?}", r.tasks);
     assert_eq!(snap(&lab.b), before);
     finishes(&lab);
 }

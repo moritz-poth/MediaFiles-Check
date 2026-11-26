@@ -147,11 +147,18 @@ pub fn rename_for_avid(folder: &Path, new_name: &str, journal: &mut Journal, jou
     }
     let original = folder.file_name().unwrap_or_default().to_string_lossy().into_owned();
     journal.entries.push(Renamed { mxf, original, current: new_name.into(), files: mxf_files(folder)?, db: db_stamps(folder) });
-    crate::save_json(journal, journal_path)?;
+    // nothing renamed yet: an entry that could not be saved must not stay in memory either
+    if let Err(e) = crate::save_json(journal, journal_path) {
+        journal.entries.pop();
+        return Err(e);
+    }
     if let Err(e) = crate::move_new(folder, &target) {
         journal.entries.pop();
-        crate::save_json(journal, journal_path)?;
-        return Err(e);
+        // the rename error is what the user must see; a failed save only adds to it
+        return Err(match crate::save_json(journal, journal_path) {
+            Ok(()) => e,
+            Err(s) => io::Error::new(e.kind(), format!("{e} (journal not saved: {s})")),
+        });
     }
     Ok(())
 }
@@ -255,10 +262,13 @@ pub struct Back {
     pub moved_to: Option<(String, usize)>,
     /// files not moved because the target already has a file with that name
     pub not_moved: Vec<String>,
+    /// the folder has its original name again, but moving the new files stopped with this error
+    pub error: Option<String>,
 }
 
 /// Renames the folder back to its original name; afterwards moves the new files if asked.
 /// Never overwrites: an existing folder with the original name or an existing file stops/skips.
+/// Err only while the folder still has its current name; once renamed back, a later error is in `Back::error`.
 pub fn rename_back(r: &Renamed, added: &[String], choice: Added, computer: &str) -> io::Result<Back> {
     let original = r.mxf.join(&r.original);
     if original.exists() {
@@ -275,18 +285,21 @@ pub fn rename_back(r: &Renamed, added: &[String], choice: Added, computer: &str)
         _ => free_name(&r.mxf, network, computer, &HashSet::new()),
     };
     let target = r.mxf.join(&target_name);
-    fs::create_dir_all(&target)?;
     let mut moved = 0;
-    for f in added {
-        let dst = target.join(f);
-        match crate::move_new(&original.join(f), &dst) {
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => back.not_moved.push(f.clone()),
-            r => {
-                r?;
-                moved += 1;
+    let result = (|| -> io::Result<()> {
+        fs::create_dir_all(&target)?;
+        for f in added {
+            match crate::move_new(&original.join(f), &target.join(f)) {
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => back.not_moved.push(f.clone()),
+                r => {
+                    r?;
+                    moved += 1;
+                }
             }
         }
-    }
+        Ok(())
+    })();
+    back.error = result.err().map(|e| e.to_string());
     back.moved_to = Some((target_name, moved));
     Ok(back)
 }
@@ -404,6 +417,34 @@ mod tests {
         fs::create_dir_all(mxf.join("Avid10.1")).unwrap(); // someone made a folder with the old name
         assert!(rename_back(&j.entries[0], &[], Added::Keep, "Mac").is_err());
         assert!(mxf.join("2/a.mxf").exists());
+        fs::remove_dir_all(mxf.join("../..")).unwrap();
+    }
+
+    #[test]
+    fn a_journal_that_cannot_be_saved_leaves_no_entry() {
+        let mxf = setup("nosave");
+        // the journal's folder is a file: saving fails
+        let blocker = mxf.join("../../blocker");
+        fs::write(&blocker, b"").unwrap();
+        let mut j = Journal::default();
+        assert!(rename_for_avid(&mxf.join("Avid10.1"), "2", &mut j, &blocker.join("journal.json")).is_err());
+        assert!(j.entries.is_empty() && mxf.join("Avid10.1").exists() && !mxf.join("2").exists());
+        fs::remove_dir_all(mxf.join("../..")).unwrap();
+    }
+
+    #[test]
+    fn an_error_after_renaming_back_still_counts_as_renamed_back() {
+        let mxf = setup("backerr");
+        let jp = mxf.join("../../journal.json");
+        let mut j = Journal::default();
+        rename_for_avid(&mxf.join("Avid10.1"), "2", &mut j, &jp).unwrap();
+        fs::write(mxf.join("2/new.mxf"), b"n").unwrap();
+        // "1" is a file, so the new files cannot go there
+        fs::remove_dir_all(mxf.join("1")).unwrap();
+        fs::write(mxf.join("1"), b"").unwrap();
+        let back = rename_back(&j.entries[0], &["new.mxf".into()], Added::FirstFolder, "Mac").unwrap();
+        assert!(back.error.is_some() && back.moved_to == Some(("1".into(), 0)));
+        assert!(mxf.join("Avid10.1/new.mxf").exists() && !mxf.join("2").exists());
         fs::remove_dir_all(mxf.join("../..")).unwrap();
     }
 }

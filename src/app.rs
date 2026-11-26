@@ -263,8 +263,7 @@ fn save_drives_off(drives: &[(PathBuf, bool)]) {
     }
 }
 
-fn sync_drives(app: &AppWindow, drives: &Drives) {
-    let found = find_volumes();
+fn sync_drives(app: &AppWindow, drives: &Drives, found: Vec<PathBuf>) {
     let mut d = drives.borrow_mut();
     if found.iter().eq(d.iter().map(|x| &x.0)) {
         return;
@@ -739,21 +738,23 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             c.remember(&mut m);
             m.save(&exchange_dir());
             let (local, to, plan, dest, lang) = (c.local.clone(), c.remote.system.clone(), c.plan(), c.delivery_dir(&parent), app.get_language().to_string());
-            let tasks: Vec<String> = plan.tasks.iter().map(|t| t.describe(&lang)).collect();
             log::write(&format!("collect for {to} into {}", dest.display()));
             start_work(&app, 0);
             let (weak, mut progress) = (weak.clone(), progress_to(&weak));
             std::thread::spawn(move || {
                 let _work = work;
                 let result = fcollect::collect(&local, &to, &plan, &dest, &lang, &mut progress);
-                log::write(&format!("  collect: {:?}", result.as_ref().map(|e| e.len())));
+                log::write(&format!("  collect: {:?}", result.as_ref().map(|e| e.0.len())));
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(app) = weak.upgrade() else { return };
-                    add_tasks(&tasks, &app.get_txt_task_for().replace("{}", &to), &fscan::computer_name());
+                    // the delivery's tasks, with those collect added (a database left out because its folder changed)
+                    let planned: Vec<String> = plan.tasks.iter().map(|t| t.describe(&lang)).collect();
+                    let tasks = result.as_ref().map_or(&planned, |r| &r.1);
+                    add_tasks(tasks, &app.get_txt_task_for().replace("{}", &to), &fscan::computer_name());
                     app.global::<Tasks>().invoke_reload();
-                    match result {
-                        Ok(errors) => show_exchange_result(&app, if errors.is_empty() { 0 } else { 1 }, Some(&dest), &errors, &tasks),
-                        Err(e) => show_exchange_result(&app, 1, Some(&dest), &[e.to_string()], &tasks),
+                    match &result {
+                        Ok((errors, _)) => show_exchange_result(&app, if errors.is_empty() { 0 } else { 1 }, Some(&dest), errors, tasks),
+                        Err(e) => show_exchange_result(&app, 1, Some(&dest), &[e.to_string()], tasks),
                     }
                 });
             });
@@ -2436,6 +2437,9 @@ fn finish_back(app: &AppWindow, st: &mut Renames, choice: Added) {
                     notes.push(notice(1, &to, "", n));
                 }
                 notes.extend(b.not_moved.iter().map(|f| notice(4, f, "", 0)));
+                if let Some(e) = &b.error {
+                    notes.push(notice(3, &r.original, e, 0));
+                }
                 journal.entries.retain(|e| e != r);
                 if let Err(e) = save_json(journal, &journal_path()) {
                     notes.push(notice(3, &journal_path().display().to_string(), &e.to_string(), 0));
@@ -3363,7 +3367,10 @@ fn main() -> Result<(), slint::PlatformError> {
     app.set_language(settings.borrow().language.clone().into());
     apply_menus(&app.global::<Shared>(), &settings.borrow());
     let drives: Drives = Rc::default();
-    sync_drives(&app, &drives);
+    // a hanging mount must not keep the window from opening: the timer fills the list later
+    if let Some(found) = mediafiles_check::find_volumes_responsive() {
+        sync_drives(&app, &drives, found);
+    }
     let others = Others::default();
     let last: Last = Arc::default();
     let renames = Rc::new(RefCell::new(Renames::load()));
@@ -3575,8 +3582,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let (weak, drives, renames) = (app.as_weak(), drives.clone(), renames.clone());
         move || {
             let app = weak.unwrap();
-            sync_drives(&app, &drives);
-            show_renamed(&app, &mut renames.borrow_mut());
+            if let Some(found) = mediafiles_check::find_volumes_responsive() {
+                sync_drives(&app, &drives, found);
+                show_renamed(&app, &mut renames.borrow_mut());
+            }
             app.invoke_home();
         }
     });
@@ -3738,7 +3747,8 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    // shortcut: polls /Volumes every 2 s on the start pages (also Scan: drives mounted later appear); a hanging network share could stall it – use DiskArbitration if that happens
+    // polls /Volumes every 2 s on the start pages (also Scan: drives mounted later appear). The lookup runs in a
+    // thread first: while a network or macFUSE mount hangs, this tick reads nothing on disk, so the window never freezes
     let timer = slint::Timer::default();
     timer.start(slint::TimerMode::Repeated, Duration::from_secs(2), {
         let (weak, drives, renames, task_acts) = (app.as_weak(), drives.clone(), renames.clone(), task_acts.clone());
@@ -3748,12 +3758,14 @@ fn main() -> Result<(), slint::PlatformError> {
             mac_menu::ensure();
             match app.get_page() {
                 Page::Home | Page::Maintain | Page::Rebalstart | Page::Dupsstart | Page::Runs | Page::Exchange | Page::Projects | Page::Media | Page::Scan => {
-                    sync_drives(&app, &drives);
-                    inventory_ui::show_runs(&app);
-                    show_renamed(&app, &mut renames.borrow_mut());
-                    show_rebalanced(&app, &app.get_language());
-                    show_dup_runs(&app, &app.get_language());
-                    show_tasks(&app, &task_acts);
+                    if let Some(found) = mediafiles_check::find_volumes_responsive() {
+                        sync_drives(&app, &drives, found);
+                        inventory_ui::show_runs(&app);
+                        show_renamed(&app, &mut renames.borrow_mut());
+                        show_rebalanced(&app, &app.get_language());
+                        show_dup_runs(&app, &app.get_language());
+                        show_tasks(&app, &task_acts);
+                    }
                 }
                 _ => {}
             }

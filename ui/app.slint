@@ -460,15 +460,16 @@ component HistoryNote inherits Rectangle {
     in property <bool> empty;
     in property <bool> mc-running;
     in property <bool> blocked;
+    in property <string> error;
     height: 40px;
     Text {
         x: 0;
         width: parent.width;
-        text: root.mc-running ? @tr("Quit Media Composer first.") : root.blocked ? @tr("Rewrite databases waits until the renamed folders are renamed back (Check DBs › New databases).") : root.empty ? @tr("No runs yet.") : @tr("Every run can be undone.");
+        text: root.error != "" ? root.error : root.mc-running ? @tr("Quit Media Composer first.") : root.blocked ? @tr("Rewrite databases waits until the renamed folders are renamed back (Check DBs › New databases).") : root.empty ? @tr("No runs yet.") : @tr("Every run can be undone.");
         vertical-alignment: center;
         overflow: elide;
         font-size: 12px;
-        color: root.mc-running || root.blocked ? Theme.warning : Theme.muted;
+        color: root.error != "" || root.mc-running || root.blocked ? Theme.warning : Theme.muted;
     }
 }
 
@@ -1832,6 +1833,8 @@ export global Inventory {
     // der fertige Lauf hat kopiert (die Originale bleiben)
     in property <bool> done-copied;
     in property <[RunRow]> runs;
+    // the History file cannot be read (empty when fine)
+    in property <string> runs-error;
     callback prepare(int);
     callback swap-changed();
     callback confirm();
@@ -2624,7 +2627,7 @@ ScrollBox {
         spacing: 14px;
         height: Metrics.page-height;
         PageHead { title: @tr("History"); }
-        HistoryNote { empty: Inventory.runs.length == 0; mc-running: Inventory.mc-running; blocked: Inventory.renames-pending; }
+        HistoryNote { empty: Inventory.runs.length == 0; mc-running: Inventory.mc-running; blocked: Inventory.renames-pending; error: Inventory.runs-error; }
         if Inventory.runs.length > 0: Card {
             vertical-stretch: 1;
             min-height: 0px;

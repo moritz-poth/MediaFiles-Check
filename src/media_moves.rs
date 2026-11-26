@@ -8,7 +8,7 @@
 //! Every run is recorded in a journal before the first file moves, so it can be undone; afterwards the databases of
 //! the changed folders have to be rewritten (like rebalancing).
 use crate::inventory::{Item, Kind};
-use crate::mxf_dir;
+use crate::{drive_of, mxf_dir};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -81,10 +81,6 @@ fn file_name(p: &Path) -> String {
 }
 
 /// "<drive>" of "<drive>/Avid MediaFiles/MXF/<folder>/<file>".
-fn drive_of(file: &Path) -> Option<&Path> {
-    file.parent()?.parent()?.parent()?.parent()
-}
-
 fn step(i: &Item, to: PathBuf) -> Step {
     Step { from: i.path.clone(), to, size: i.size, modified: i.modified }
 }
@@ -213,7 +209,7 @@ pub fn execute(action: Action, steps: &[Step], delete_originals: bool, label: &s
         let from = if action == Action::Copy { None } else { s.from.parent() };
         for f in [from, s.to.parent()].into_iter().flatten() {
             // folders inside the aside folder have no database
-            if !f.starts_with(drive_of(&s.from).map(|d| d.join(ASIDE_DIR)).unwrap_or_default()) && !run.changed.iter().any(|c| c == f) {
+            if !drive_of(&s.from).is_some_and(|d| f.starts_with(d.join(ASIDE_DIR))) && !run.changed.iter().any(|c| c == f) {
                 run.changed.push(f.to_path_buf());
             }
         }
@@ -260,12 +256,20 @@ pub fn execute(action: Action, steps: &[Step], delete_originals: bool, label: &s
             run.moved.push((s.from.clone(), s.to.clone(), s.size));
             run.originals.push(None);
         } else {
+            // where the original goes – decided before copying: without a known drive it can only stay
+            let aside = match (delete_originals, drive_of(&s.from)) {
+                (true, _) => None,
+                (false, Some(d)) => Some(d.join(ASIDE_DIR).join(&at).join(s.from.parent().map(file_name).unwrap_or_default()).join(file_name(&s.from))),
+                (false, None) => {
+                    out.skipped.push((file_name(&s.from), "not in Avid MediaFiles/MXF – the original cannot go aside".into()));
+                    continue;
+                }
+            };
             if let Err(e) = crate::exchange::collect::copy_verified(&s.from, &s.to, None) {
                 out.skipped.push((file_name(&s.from), e.to_string()));
                 continue;
             }
             // the copy is recorded before the original goes
-            let aside = (!delete_originals).then(|| drive_of(&s.from).map(|d| d.join(ASIDE_DIR).join(&at).join(s.from.parent().map(file_name).unwrap_or_default()).join(file_name(&s.from)))).flatten();
             run.moved.push((s.from.clone(), s.to.clone(), s.size));
             run.originals.push(aside.clone());
             save(&run)?;

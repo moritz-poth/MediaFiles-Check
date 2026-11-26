@@ -422,6 +422,15 @@ pub fn mxf_dir(volume: &Path) -> PathBuf {
     volume.join("Avid MediaFiles").join("MXF")
 }
 
+/// The drive of a file at `<drive>/Avid MediaFiles/MXF/<folder>/<file>`; None for a file anywhere else (a scan may
+/// start at one MXF folder or a folder of MXF folders – there the drive is not known).
+pub fn drive_of(file: &Path) -> Option<&Path> {
+    let mxf = file.parent()?.parent()?;
+    let avid = mxf.parent()?;
+    let is = |p: &Path, n: &str| p.file_name().is_some_and(|f| f.to_string_lossy().eq_ignore_ascii_case(n));
+    (is(mxf, "MXF") && is(avid, "Avid MediaFiles")).then(|| avid.parent()).flatten()
+}
+
 /// Places macOS does not let this app read (privacy: removable and network volumes, Documents, …): listing them
 /// fails with "Operation not permitted" – a scan would find nothing there – until the user allows it.
 pub fn denied(places: &[PathBuf]) -> Vec<PathBuf> {
@@ -446,7 +455,7 @@ pub fn find_volumes() -> Vec<PathBuf> {
 }
 
 /// Like `find_volumes`, for the window's 2 s timer: a hanging network or macFUSE mount must not freeze the window.
-/// Looks in a thread and gives up after 2 s (None); while that thread is still stuck, it does not start another.
+/// Looks in a thread and gives up after 0.5 s (None); while that thread is still stuck, it does not start another.
 pub fn find_volumes_responsive() -> Option<Vec<PathBuf>> {
     use std::sync::atomic::{AtomicBool, Ordering};
     static LOOKING: AtomicBool = AtomicBool::new(false);
@@ -458,7 +467,7 @@ pub fn find_volumes_responsive() -> Option<Vec<PathBuf>> {
         let _ = tx.send(find_volumes());
         LOOKING.store(false, Ordering::SeqCst);
     });
-    rx.recv_timeout(std::time::Duration::from_secs(2)).ok()
+    rx.recv_timeout(std::time::Duration::from_millis(500)).ok()
 }
 
 /// The test lab's stand-in computer name (MFC_LAB_COMPUTER), so two "systems" can run on one Mac.
@@ -591,6 +600,14 @@ pub fn report_text(reports: &[FolderReport], lang: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drive_only_below_avid_mediafiles_mxf() {
+        let f = Path::new("/Volumes/Media/Avid MediaFiles/MXF/1/a.mxf");
+        assert_eq!(drive_of(f), Some(Path::new("/Volumes/Media")));
+        assert_eq!(drive_of(Path::new("/Volumes/Media/Projekt/1/a.mxf")), None);
+        assert_eq!(drive_of(Path::new("/Volumes/Media/1/a.mxf")), None);
+    }
 
     use crate::selftest::sample_pmr as pmr;
 

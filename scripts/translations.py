@@ -418,7 +418,7 @@ T = {
         "Fuente JetBrains Mono – SIL Open Font License 1.1. Kit de interfaz Slint – usado bajo la GNU GPL v3."),
     "Avid and Media Composer are trademarks of Avid Technology, Inc. MediaFiles Check is not affiliated with Avid.": (
         "Avid und Media Composer sind Marken von Avid Technology, Inc. MediaFiles Check steht in keiner Verbindung zu Avid.",
-        "Avid et Media Composer sont des marques d'Avid Technology, Inc. MediaFiles Check n'est pas affilié à Avid.",
+        "Avid et Media Composer sont des marques d’Avid Technology, Inc. MediaFiles Check n’est pas affilié à Avid.",
         "Avid y Media Composer son marcas de Avid Technology, Inc. MediaFiles Check no está afiliado a Avid."),
     # renaming for Media Composer
     "{} (was {})": ("{} (war {})", "{} (était {})", "{} (era {})"),

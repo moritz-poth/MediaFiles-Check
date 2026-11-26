@@ -9,7 +9,7 @@
 //! Setting aside moves the extra copies into "<drive>/MediaFiles Check Duplicates/<time>/<folder>/" on the same drive
 //! (a rename, nothing is copied or deleted), recorded in a journal first so it can be undone. Afterwards the databases
 //! of the changed folders have to be rewritten (like rebalancing).
-use crate::{key, mxf};
+use crate::{drive_of, key, mxf};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -226,10 +226,6 @@ pub fn find(roots: &[PathBuf], progress: &mut dyn FnMut(usize, usize, &str), gat
 }
 
 /// "<drive>/Avid MediaFiles/MXF/<folder>/<file>" → "<drive>"
-fn drive_of(file: &Path) -> Option<&Path> {
-    file.parent()?.parent()?.parent()?.parent()
-}
-
 /// One "set aside" run.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Run {
@@ -275,7 +271,10 @@ pub fn set_aside(groups: &[(Copy, Vec<Copy>)], journal_path: &Path) -> io::Resul
     for (keep, extras) in groups {
         let keep_ok = unchanged(keep);
         for c in extras {
-            let (Some(drive), Some(folder)) = (drive_of(&c.path), c.path.parent()) else { continue };
+            let (Some(drive), Some(folder)) = (drive_of(&c.path), c.path.parent()) else {
+                out.skipped.push(file_name(&c.path));
+                continue;
+            };
             if !keep_ok || !unchanged(c) {
                 out.skipped.push(file_name(&c.path));
                 continue;
@@ -293,27 +292,36 @@ pub fn set_aside(groups: &[(Copy, Vec<Copy>)], journal_path: &Path) -> io::Resul
     let mut journal: Journal = crate::load_json(journal_path)?;
     journal.entries.push(run.clone());
     crate::save_json(&journal, journal_path)?;
-    for (from, to, size) in &run.moved {
-        if to.exists() || fs::metadata(from).map(|m| m.len()).ok() != Some(*size) {
-            out.skipped.push(file_name(from));
+    let planned = run.moved.clone();
+    run.moved.clear();
+    for (from, to, size) in planned.iter().cloned() {
+        if to.exists() || fs::metadata(&from).map(|m| m.len()).ok() != Some(size) {
+            out.skipped.push(file_name(&from));
             continue;
         }
         fs::create_dir_all(to.parent().unwrap_or(Path::new(".")))?;
-        match crate::move_new(from, to) {
+        match crate::move_new(&from, &to) {
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                out.skipped.push(file_name(from));
+                out.skipped.push(file_name(&from));
                 continue;
             }
             r => r?,
         }
+        run.moved.push((from, to, size));
         out.moved += 1;
     }
+    // the History counts what really moved; only folders that lost a file need a new database
+    run.changed.retain(|f| run.moved.iter().any(|m| m.0.parent() == Some(f.as_path())));
     // a folder now without media files goes aside with its database, next to its copies (recorded first, for undo)
     run.leftovers = run.changed.iter().filter(|f| crate::rebalance::is_leftover(f)).filter_map(|f| run.moved.iter().find(|m| m.0.parent() == Some(f.as_path())).map(|m| (f.clone(), m.1.parent().unwrap_or(Path::new(".")).to_path_buf()))).collect();
-    if !run.leftovers.is_empty() {
+    if run.moved != planned || !run.leftovers.is_empty() {
         let mut journal: Journal = crate::load_json(journal_path)?;
-        if let Some(last) = journal.entries.iter_mut().rev().find(|r| r.date == run.date && r.moved == run.moved) {
-            last.leftovers = run.leftovers.clone();
+        if let Some(i) = journal.entries.iter().rposition(|r| r.date == run.date && r.moved == planned) {
+            if run.moved.is_empty() {
+                journal.entries.remove(i);
+            } else {
+                journal.entries[i] = run.clone();
+            }
         }
         crate::save_json(&journal, journal_path)?;
         for (folder, into) in &run.leftovers {
@@ -334,9 +342,15 @@ pub fn undo(run: &Run) -> io::Result<Moved> {
         fs::create_dir_all(folder)?;
         for e in rd.flatten() {
             let to = folder.join(e.file_name());
-            if crate::rebalance::is_leftover_entry(&e.path()) && !to.exists() {
-                crate::move_new(&e.path(), &to)?;
+            if !crate::rebalance::is_leftover_entry(&e.path()) {
+                continue;
             }
+            if to.exists() {
+                // a new database is there already: the old one stays aside, and the user hears of it
+                out.skipped.push(e.file_name().to_string_lossy().into_owned());
+                continue;
+            }
+            crate::move_new(&e.path(), &to)?;
         }
         dirs.push(from.clone());
     }
@@ -482,6 +496,42 @@ mod tests {
         assert_eq!(u.moved, 1);
         assert!(folder.join("clip.mxf").exists() && folder.join(crate::MDB).exists() && folder.join("Creating").is_dir());
         assert!(!root.join("B/MediaFiles Check Duplicates").exists(), "nothing left behind");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_history_counts_only_what_moved() {
+        let root = std::env::temp_dir().join(format!("mfc-dups-count-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let (a, b) = (root.join("A/Avid MediaFiles/MXF/1"), root.join("B/Avid MediaFiles/MXF/1"));
+        for d in [&a, &b] {
+            fs::create_dir_all(d).unwrap();
+            fs::write(d.join("x.mxf"), b"same").unwrap();
+            fs::write(d.join("y.mxf"), b"also").unwrap();
+        }
+        // outside Avid MediaFiles/MXF (a scan started at a plain folder): its drive is unknown, it stays
+        let loose = root.join("Loose/1");
+        fs::create_dir_all(&loose).unwrap();
+        fs::write(loose.join("x.mxf"), b"same").unwrap();
+        let copy = |p: PathBuf| Copy { modified: nanos(fs::metadata(&p).unwrap().modified()), path: p, size: 4, created: 0, in_db: false };
+        // x.mxf's place in the set-aside folder is taken already (this second and the next, the run's time stamp)
+        let now = chrono::Local::now();
+        for t in [now, now + chrono::Duration::seconds(1)] {
+            let taken = root.join("B/MediaFiles Check Duplicates").join(t.format("%Y-%m-%d %H%M%S").to_string()).join("1");
+            fs::create_dir_all(&taken).unwrap();
+            fs::write(taken.join("x.mxf"), b"there").unwrap();
+        }
+        let groups = vec![
+            (copy(a.join("x.mxf")), vec![copy(b.join("x.mxf")), copy(loose.join("x.mxf"))]),
+            (copy(a.join("y.mxf")), vec![copy(b.join("y.mxf"))]),
+        ];
+        let jp = root.join("duplicates.json");
+        let (run, m) = set_aside(&groups, &jp).unwrap();
+        assert_eq!((m.moved, m.skipped.len()), (1, 2), "{m:?}");
+        assert_eq!(run.moved.len(), 1);
+        assert!(run.moved[0].0.ends_with("y.mxf"));
+        assert_eq!(crate::load_json::<Journal>(&jp).unwrap().entries, vec![run]);
+        assert!(loose.join("x.mxf").exists() && b.join("x.mxf").exists());
         fs::remove_dir_all(&root).unwrap();
     }
 }
