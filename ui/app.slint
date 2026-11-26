@@ -1188,7 +1188,7 @@ export global Exchange {
     in property <string> remote-name;
     in property <string> remote-date;
     in property <bool> is-request;
-    // Laufwerke dieser Workstation: name, selected = wird gesendet (jedes unter seinem Namen; zugeordnet wird beim Import)
+    // gescannte Laufwerke dieser Workstation (jedes geht unter seinem Namen; zugeordnet wird beim Import)
     in property <[VolumeRow]> sends;
     in property <bool> skip-renders;
     in property <bool> skip-mixdowns;
@@ -1220,7 +1220,6 @@ export global Exchange {
     in property <bool> can-import;
     callback save-manifest();
     callback open-manifest();
-    callback send-toggled(int);
     // 0 Render-Dateien, 1 Mixdowns
     callback kind-toggled(int);
     callback collect();
@@ -1447,20 +1446,21 @@ component ExchangePane inherits VerticalLayout {
             color: Theme.muted;
         }
         if Exchange.has-compare && !Exchange.is-request: Section {
-            title: @tr("SEND");
-            Para { text: @tr("Every drive goes under its own name – {} chooses on import which of its drives it goes to.", Exchange.remote-name); }
+            title: @tr("DRIVES");
+            Para { text: @tr("The drives of the scan, each under its own name – {} chooses on import which of its drives it goes to.", Exchange.remote-name); }
             Card {
-                for r[i] in Exchange.sends: ToggleRow {
+                for r[i] in Exchange.sends: CardRow {
                     first: i == 0;
-                    toggled => { Exchange.send-toggled(i); }
-                    Text { text: r.name; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; color: r.selected ? Theme.text : Theme.muted; }
-                    VerticalLayout {
-                        alignment: center;
-                        Switch { on: r.selected; label: r.name; toggled => { Exchange.send-toggled(i); } }
-                    }
+                    Text { text: r.name; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; color: Theme.text; }
+                    Text { text: r.files; vertical-alignment: center; color: Theme.muted; }
                 }
+            }
+        }
+        if Exchange.has-compare && !Exchange.is-request: Section {
+            title: @tr("ALSO SEND");
+            Card {
                 ToggleRow {
-                    first: Exchange.sends.length == 0;
+                    first: true;
                     toggled => { Exchange.kind-toggled(0); }
                     Text { text: @tr("Render files"); horizontal-stretch: 1; vertical-alignment: center; color: !Exchange.skip-renders ? Theme.text : Theme.muted; }
                     VerticalLayout {

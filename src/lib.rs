@@ -133,7 +133,11 @@ pub fn move_new(from: &Path, to: &Path) -> std::io::Result<()> {
             Some(libc::EEXIST) => return Err(taken()),
             // not supported here (macFUSE answers ENOSYS, e.g. Mountpoint workspaces): the check above stays
             Some(libc::ENOTSUP) | Some(libc::EOPNOTSUPP) | Some(libc::EINVAL) | Some(libc::ENOSYS) => {}
-            _ => return Err(e),
+            // other answers: macFUSE sometimes gives ERANGE instead of ENOSYS (Mountpoint workspace, 2026-11-26) –
+            // moved anyway: done; nothing moved and the name still free: the checked rename below; else the error
+            _ if from.symlink_metadata().is_err() && to.symlink_metadata().is_ok() => return Ok(()),
+            _ if from.symlink_metadata().is_err() || to.symlink_metadata().is_ok() => return Err(e),
+            _ => {}
         }
     }
     if to.symlink_metadata().is_ok() {

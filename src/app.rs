@@ -391,7 +391,8 @@ fn show_compare(app: &AppWindow, c: &Compare) {
     x.set_remote_name(shorten(&c.remote.system, TITLE_CHARS).into());
     let fmt = if lang == "en" { "%Y-%m-%d %H:%M" } else { "%d.%m.%Y %H:%M" };
     x.set_remote_date(fy::local_time(c.remote.created, fmt).into());
-    let sends: Vec<VolumeRow> = c.drives.iter().map(|(n, on)| VolumeRow { name: shorten(n, NAME_CHARS).into(), files: "".into(), online: true, selected: *on }).collect();
+    let count = |n: usize| pick(&lang, ["{n} files", "{n} Dateien", "{n} fichiers", "{n} archivos"]).replace("{n}", &n.to_string());
+    let sends: Vec<VolumeRow> = c.drives.iter().map(|(name, n)| VolumeRow { name: shorten(name, NAME_CHARS).into(), files: count(*n).into(), online: true, selected: true }).collect();
     x.set_sends(ModelRc::new(VecModel::from(sends)));
     x.set_skip_renders(c.skip_renders);
     x.set_skip_mixdowns(c.skip_mixdowns);
@@ -715,17 +716,6 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
         }
     });
 
-    x.on_send_toggled({
-        let (weak, compare) = (app.as_weak(), compare.clone());
-        move |row| {
-            let mut c = compare.borrow_mut();
-            let Some(c) = c.as_mut() else { return };
-            if let Some(d) = c.drives.get_mut(row as usize) {
-                d.1 = !d.1;
-            }
-            show_compare(&weak.unwrap(), c);
-        }
-    });
     x.on_kind_toggled({
         let (weak, compare) = (app.as_weak(), compare.clone());
         move |which| {

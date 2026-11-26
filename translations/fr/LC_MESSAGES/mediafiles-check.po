@@ -8,20 +8,20 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
+msgid "ALSO SEND"
+msgstr "ENVOYER AUSSI"
+
+msgid "The drives of the scan, each under its own name – {} chooses on import which of its drives it goes to."
+msgstr "Les disques de l’analyse, chacun sous son propre nom – {} choisit à l’importation sur lequel de ses disques il va."
+
 msgid "Choose the delivery folder another system collected for this one – a delivery in parts (…_part1of2, …_part2of2): select all its folders together. Everything is verified first; only a complete delivery is imported."
 msgstr "Choisissez le dossier de livraison qu’un autre poste a rassemblé pour celui-ci – pour une livraison en parties (…_part1of2, …_part2of2), sélectionnez tous ses dossiers ensemble. Tout est d’abord vérifié ; seule une livraison complète est importée."
 
 msgid "Choose the delivery folder (or all its parts)"
 msgstr "Choisir le dossier de livraison (ou toutes ses parties)"
 
-msgid "SEND"
-msgstr "ENVOYER"
-
 msgid "Mixdowns"
 msgstr "Mixdowns"
-
-msgid "Every drive goes under its own name – {} chooses on import which of its drives it goes to."
-msgstr "Chaque disque part sous son propre nom – {} choisit à l’importation sur lequel de ses disques il va."
 
 msgid "This scan is older and does not know render files and mixdowns yet – scan again under Scan to leave them out."
 msgstr "Cette analyse est ancienne et ne connaît pas encore les fichiers de rendu ni les mixdowns – analysez à nouveau sous Analyser pour les exclure."

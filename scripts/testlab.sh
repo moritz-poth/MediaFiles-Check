@@ -166,7 +166,8 @@ start() {
   esac
   [ -d "$h" ] || die "Erst: scripts/testlab.sh reset"
   for d in ${drives//,/ }; do [ -d "/Volumes/$d/Avid MediaFiles/MXF" ] || say "Achtung: /Volumes/$d ist nicht gemountet (Mountpoint)."; done
-  open -n --env HOME="$h" --env MFC_LAB_DRIVES="$drives" --env MFC_LAB_COMPUTER="$name" "$BUNDLE"
+  # MFC_LAB_RESERVE=<bytes> before the command: less than 1 GB stays free (to show a delivery split over small disk images)
+  open -n --env HOME="$h" --env MFC_LAB_DRIVES="$drives" --env MFC_LAB_COMPUTER="$name" ${MFC_LAB_RESERVE:+--env MFC_LAB_RESERVE="$MFC_LAB_RESERVE"} "$BUNDLE"
   sleep 2
   pgrep -n -f "$APP" > "$LAB/pid-$1" || true
   say "System $(echo "$1" | tr ab AB) gestartet (Laufwerke $drives)."

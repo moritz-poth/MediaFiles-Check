@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Mappings {
-    /// Gegenseite -> (eigenes Volume -> "" = nicht senden; anything else = send – older versions stored a drive there)
+    /// no longer used (drive choices of older versions); kept so their mappings.json still loads and saves
     pub send: BTreeMap<String, BTreeMap<String, String>>,
     /// Compare: leave out render files / mixdowns (the last choice)
     pub skip_renders: bool,
@@ -43,8 +43,9 @@ pub struct Choice {
 pub struct Compare {
     pub local: Manifest,
     pub remote: Manifest,
-    /// every drive of this system and whether it is sent (each under its own name: the other side assigns it on import)
-    pub drives: Vec<(String, bool)>,
+    /// every scanned drive of this system with its number of MXF files – all are sent, each under its own name
+    /// (which drives go is decided by what is scanned; the other side assigns them on import, user 2026-11-26)
+    pub drives: Vec<(String, usize)>,
     pub skip_renders: bool,
     pub skip_mixdowns: bool,
     /// Anforderung aus MediaFiles Check: fester Plan, nichts zuzuordnen
@@ -53,8 +54,7 @@ pub struct Compare {
 
 impl Compare {
     pub fn new(local: Manifest, remote: Manifest, saved: &Mappings) -> Self {
-        let sent = saved.send.get(&remote.system);
-        let drives = local.volumes.iter().map(|lv| (lv.name.clone(), sent.and_then(|m| m.get(&lv.name)).is_none_or(|r| !r.is_empty()))).collect();
+        let drives = local.volumes.iter().map(|lv| (lv.name.clone(), lv.folders.iter().map(|f| f.files.len()).sum())).collect();
         Compare { local, remote, drives, skip_renders: saved.skip_renders, skip_mixdowns: saved.skip_mixdowns, request: None }
     }
 
@@ -71,11 +71,7 @@ impl Compare {
     }
 
     fn options(&self) -> Options {
-        Options {
-            skip: self.drives.iter().filter(|d| !d.1).map(|d| d.0.clone()).collect(),
-            skip_renders: self.skip_renders,
-            skip_mixdowns: self.skip_mixdowns,
-        }
+        Options { skip_renders: self.skip_renders, skip_mixdowns: self.skip_mixdowns, ..Default::default() }
     }
 
     pub fn plan(&self) -> Plan {
@@ -86,10 +82,6 @@ impl Compare {
     }
 
     pub fn remember(&self, m: &mut Mappings) {
-        let entry = m.send.entry(self.remote.system.clone()).or_default();
-        for (name, send) in &self.drives {
-            entry.insert(name.clone(), if *send { name.clone() } else { String::new() });
-        }
         if self.request.is_none() {
             m.skip_renders = self.skip_renders;
             m.skip_mixdowns = self.skip_mixdowns;
@@ -219,21 +211,21 @@ mod tests {
     }
 
     #[test]
-    fn every_drive_is_sent_under_its_own_name_unless_switched_off_and_remembered() {
+    fn every_scanned_drive_is_sent_under_its_own_name() {
         let local = Manifest { system: "A".into(), volumes: vec![vol("Data", &[("1", &["a"])]), vol("Audio", &[("2", &["b"])])], ..Default::default() };
         let remote = Manifest { system: "B".into(), volumes: vec![vol("Data", &[]), vol("Audio_B", &[])], ..Default::default() };
-        let mut c = Compare::new(local.clone(), remote.clone(), &Mappings::default());
-        assert_eq!(c.drives, [("Data".to_string(), true), ("Audio".to_string(), true)]);
+        // an older version's "don't send" no longer hides a drive
+        let mut old = Mappings::default();
+        old.send.insert("B".into(), [("Data".to_string(), String::new())].into());
+        let mut c = Compare::new(local.clone(), remote.clone(), &old);
+        assert_eq!(c.drives, [("Data".to_string(), 1), ("Audio".to_string(), 1)]);
         let plan = c.plan();
         let to: Vec<&str> = plan.copies.iter().filter(|x| x.hash.is_some()).map(|x| x.to_volume.as_str()).collect();
         assert_eq!(to, ["Data", "Audio"]);
-        c.drives[0].1 = false; // not sent, even though B has a drive of that name
         c.skip_renders = true;
-        assert_eq!(media(&c.plan()).0, 1);
         let mut m = Mappings::default();
         c.remember(&mut m);
-        let again = Compare::new(local, remote, &m);
-        assert_eq!((again.drives[0].1, again.drives[1].1, again.skip_renders), (false, true, true));
+        assert!(Compare::new(local, remote, &m).skip_renders);
     }
 
     #[test]
