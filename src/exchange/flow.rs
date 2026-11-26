@@ -12,8 +12,11 @@ use std::path::{Path, PathBuf};
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Mappings {
-    /// Gegenseite -> (eigenes Volume -> Volume drüben, "" = nicht senden)
+    /// Gegenseite -> (eigenes Volume -> "" = nicht senden; anything else = send – older versions stored a drive there)
     pub send: BTreeMap<String, BTreeMap<String, String>>,
+    /// Compare: leave out render files / mixdowns (the last choice)
+    pub skip_renders: bool,
+    pub skip_mixdowns: bool,
     /// Absender -> (Volume der Lieferung -> eigenes Volume)
     pub receive: BTreeMap<String, BTreeMap<String, String>>,
 }
@@ -40,50 +43,39 @@ pub struct Choice {
 pub struct Compare {
     pub local: Manifest,
     pub remote: Manifest,
-    /// alle eigenen Volumes; options = Volumes drüben, letzter Index = nicht senden; gleichnamige sind vorausgewählt
-    pub drives: Vec<Choice>,
+    /// every drive of this system and whether it is sent (each under its own name: the other side assigns it on import)
+    pub drives: Vec<(String, bool)>,
+    pub skip_renders: bool,
+    pub skip_mixdowns: bool,
     /// Anforderung aus MediaFiles Check: fester Plan, nichts zuzuordnen
     pub request: Option<Plan>,
 }
 
 impl Compare {
     pub fn new(local: Manifest, remote: Manifest, saved: &Mappings) -> Self {
-        let remote_names: Vec<String> = remote.volumes.iter().map(|v| v.name.clone()).collect();
-        let saved = saved.send.get(&remote.system);
-        let drives = local
-            .volumes
-            .iter()
-            .map(|lv| {
-                // the saved choice first, else the drive of the same name over there (user 2026-11-16: preselected, not fixed)
-                let same = || remote_names.iter().position(|n| key(n) == key(&lv.name)).map_or(0, |i| i + 1);
-                let selected = match saved.and_then(|m| m.get(&lv.name)) {
-                    Some(r) if r.is_empty() => remote_names.len() + 1,
-                    Some(r) => remote_names.iter().position(|n| key(n) == key(r)).map_or_else(same, |i| i + 1),
-                    None => same(),
-                };
-                Choice { name: lv.name.clone(), options: remote_names.clone(), selected }
-            })
-            .collect();
-        Compare { local, remote, drives, request: None }
+        let sent = saved.send.get(&remote.system);
+        let drives = local.volumes.iter().map(|lv| (lv.name.clone(), sent.and_then(|m| m.get(&lv.name)).is_none_or(|r| !r.is_empty()))).collect();
+        Compare { local, remote, drives, skip_renders: saved.skip_renders, skip_mixdowns: saved.skip_mixdowns, request: None }
+    }
+
+    /// false: the local manifest comes from a scan before 2026-11-26 – render files and mixdowns are not known
+    pub fn kinds_known(&self) -> bool {
+        self.local.volumes.iter().flat_map(|v| &v.folders).flat_map(|f| &f.files).all(|e| e.kind.is_some())
     }
 
     /// Anforderung: die Gegenseite ist der Anfordernde, der Plan steht fest.
     pub fn from_request(local: Manifest, req: &crate::exchange::request::Request) -> Self {
         let plan = crate::exchange::request::plan(&local, req);
         let remote = Manifest { system: req.system.clone(), created: req.created, ..Default::default() };
-        Compare { local, remote, drives: vec![], request: Some(plan) }
+        Compare { local, remote, request: Some(plan), ..Default::default() }
     }
 
     fn options(&self) -> Options {
-        let mut o = Options::default();
-        for d in &self.drives {
-            if (1..=d.options.len()).contains(&d.selected) {
-                o.volume_map.insert(d.name.clone(), d.options[d.selected - 1].clone());
-            } else if d.selected > d.options.len() {
-                o.skip.insert(d.name.clone());
-            }
+        Options {
+            skip: self.drives.iter().filter(|d| !d.1).map(|d| d.0.clone()).collect(),
+            skip_renders: self.skip_renders,
+            skip_mixdowns: self.skip_mixdowns,
         }
-        o
     }
 
     pub fn plan(&self) -> Plan {
@@ -93,26 +85,28 @@ impl Compare {
         plan::plan(&self.local, &self.remote, &self.options())
     }
 
-    pub fn ready(&self) -> bool {
-        self.drives.iter().all(|d| d.selected != 0)
-    }
-
     pub fn remember(&self, m: &mut Mappings) {
         let entry = m.send.entry(self.remote.system.clone()).or_default();
-        for d in &self.drives {
-            match d.selected {
-                0 => {}
-                i if i <= d.options.len() => {
-                    entry.insert(d.name.clone(), d.options[i - 1].clone());
-                }
-                _ => {
-                    entry.insert(d.name.clone(), String::new());
-                }
-            }
+        for (name, send) in &self.drives {
+            entry.insert(name.clone(), if *send { name.clone() } else { String::new() });
+        }
+        if self.request.is_none() {
+            m.skip_renders = self.skip_renders;
+            m.skip_mixdowns = self.skip_mixdowns;
         }
     }
 
     /// Lieferordner im gewählten Ordner, z. B. "261102-1830_Mac Studio_to_MacBook"
+    /// One delivery folder per chosen place; with several places each holds a part: "<name>_part1of2", …
+    pub fn delivery_dirs(&self, parents: &[PathBuf]) -> Vec<PathBuf> {
+        let one = |p: &Path| self.delivery_dir(p);
+        if parents.len() == 1 {
+            return vec![one(&parents[0])];
+        }
+        let n = parents.len();
+        parents.iter().enumerate().map(|(i, p)| { let d = one(p); d.with_file_name(format!("{}_part{}of{n}", d.file_name().unwrap_or_default().to_string_lossy(), i + 1)) }).collect()
+    }
+
     pub fn delivery_dir(&self, parent: &Path) -> PathBuf {
         let name = format!("{}_{}_to_{}", local_time(now_secs(), "%y%m%d-%H%M"), safe_name(&self.local.system), safe_name(&self.remote.system));
         parent.join(name)
@@ -125,7 +119,8 @@ pub fn media(plan: &Plan) -> (usize, u64) {
 }
 
 pub struct Incoming {
-    pub dir: PathBuf,
+    /// the delivery's folder – or the folders of its parts (chosen together)
+    pub dirs: Vec<PathBuf>,
     pub delivery: Delivery,
     /// Volumes der Lieferung; options = eingehängte Laufwerke
     pub drives: Vec<Choice>,
@@ -136,8 +131,8 @@ pub struct Incoming {
 }
 
 impl Incoming {
-    pub fn open(dir: PathBuf, saved: &Mappings) -> std::io::Result<Self> {
-        let delivery = collect::load_delivery(&dir)?;
+    pub fn open(dirs: Vec<PathBuf>, saved: &Mappings) -> std::io::Result<Self> {
+        let (delivery, _) = collect::load_parts(&dirs)?;
         let found: Vec<String> = scan::find_volumes().iter().map(|p| scan::volume_name(p)).collect();
         let saved = saved.receive.get(&delivery.from);
         let mut names: Vec<String> = vec![];
@@ -162,7 +157,7 @@ impl Incoming {
             })
             .collect();
         let renders = vec![None; drives.len()];
-        Ok(Incoming { dir, delivery, drives, renders, folders })
+        Ok(Incoming { dirs, delivery, drives, renders, folders })
     }
 
     pub fn ready(&self) -> bool {
@@ -218,38 +213,27 @@ mod tests {
             path: String::new(),
             folders: folders
                 .iter()
-                .map(|(f, files)| Folder { name: (*f).into(), has_db: true, files: files.iter().map(|n| FileEntry { name: (*n).into(), size: 1, hash: (*n).into() }).collect() })
+                .map(|(f, files)| Folder { name: (*f).into(), has_db: true, files: files.iter().map(|n| FileEntry { name: (*n).into(), size: 1, hash: (*n).into(), kind: None }).collect() })
                 .collect(),
         }
     }
 
     #[test]
-    fn drives_are_preselected_by_name_assigned_otherwise_and_remembered() {
+    fn every_drive_is_sent_under_its_own_name_unless_switched_off_and_remembered() {
         let local = Manifest { system: "A".into(), volumes: vec![vol("Data", &[("1", &["a"])]), vol("Audio", &[("2", &["b"])])], ..Default::default() };
         let remote = Manifest { system: "B".into(), volumes: vec![vol("Data", &[]), vol("Audio_B", &[])], ..Default::default() };
         let mut c = Compare::new(local.clone(), remote.clone(), &Mappings::default());
-        assert_eq!(c.drives.iter().map(|d| (d.name.as_str(), d.selected)).collect::<Vec<_>>(), [("Data", 1), ("Audio", 0)]);
-        assert!(!c.ready());
-        assert_eq!(media(&c.plan()).0, 1, "unassigned drive is not sent");
-        c.drives[1].selected = 2; // Audio_B
-        assert!(c.ready());
-        assert_eq!(media(&c.plan()).0, 2);
-        // a drive of the same name can go elsewhere
-        c.drives[0].selected = 2; // Data -> Audio_B
-        assert_eq!(c.plan().copies.iter().filter(|x| x.from_volume == "Data").map(|x| x.to_volume.as_str()).next(), Some("Audio_B"));
+        assert_eq!(c.drives, [("Data".to_string(), true), ("Audio".to_string(), true)]);
+        let plan = c.plan();
+        let to: Vec<&str> = plan.copies.iter().filter(|x| x.hash.is_some()).map(|x| x.to_volume.as_str()).collect();
+        assert_eq!(to, ["Data", "Audio"]);
+        c.drives[0].1 = false; // not sent, even though B has a drive of that name
+        c.skip_renders = true;
+        assert_eq!(media(&c.plan()).0, 1);
         let mut m = Mappings::default();
         c.remember(&mut m);
         let again = Compare::new(local, remote, &m);
-        assert_eq!((again.drives[0].selected, again.drives[1].selected), (2, 2));
-    }
-
-    #[test]
-    fn dont_send_is_respected_for_a_drive_of_the_same_name() {
-        let local = Manifest { system: "A".into(), volumes: vec![vol("Data", &[("1", &["a"])])], ..Default::default() };
-        let remote = Manifest { system: "B".into(), volumes: vec![vol("Data", &[])], ..Default::default() };
-        let mut c = Compare::new(local, remote, &Mappings::default());
-        c.drives[0].selected = c.drives[0].options.len() + 1; // Don't send
-        assert_eq!(media(&c.plan()).0, 0);
+        assert_eq!((again.drives[0].1, again.drives[1].1, again.skip_renders), (false, true, true));
     }
 
     #[test]

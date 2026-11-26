@@ -7,6 +7,9 @@ struct Cached {
     size: u64,
     mtime: u128,
     hash: String,
+    /// header kind; missing in caches from before 2026-11-26 – then the header is read once
+    #[serde(default)]
+    kind: Option<FileKind>,
 }
 
 /// "Ordner/Datei" -> zuletzt berechneter Hash
@@ -196,9 +199,11 @@ pub fn scan(volumes: &[PathBuf], full: bool, cache_dir: Option<&Path>, progress:
                         }
                     },
                 };
-                cache.insert(rel.clone(), Cached { size, mtime, hash: hash.clone() });
+                // only the header (a few kB): known from the cache unless the file changed
+                let kind = cached.and_then(|c| c.kind).filter(|_| !full).unwrap_or_else(|| FileKind::of(&path));
+                cache.insert(rel.clone(), Cached { size, mtime, hash: hash.clone(), kind: Some(kind) });
                 seen.insert(rel);
-                folder.files.push(FileEntry { name: n, size, hash });
+                folder.files.push(FileEntry { name: n, size, hash, kind: Some(kind) });
             }
             folder.has_db = db[0] && db[1];
             folders.push(folder);

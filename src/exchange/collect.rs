@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::{Read, Write};
 
 pub const DELIVERY_FORMAT: &str = "mediafiles-exchange-delivery";
+/// a part of a delivery split over several places: older versions refuse it instead of importing one part alone
+pub const DELIVERY_PARTS_FORMAT: &str = "mediafiles-exchange-delivery-parts";
 pub const DELIVERY_FILE: &str = "exchange-delivery.json";
 
 /// Aufgabendatei der Lieferung, in der Sprache des Absenders
@@ -24,6 +26,17 @@ pub struct Delivery {
     #[serde(default)]
     pub db_folders: BTreeMap<String, Vec<String>>,
     pub tasks: Vec<String>,
+    /// a delivery split over several places (user 2026-11-26): same `id` in every part, `files` = this part's files
+    #[serde(default)]
+    pub id: String,
+    #[serde(default = "one")]
+    pub part: usize,
+    #[serde(default = "one")]
+    pub parts: usize,
+}
+
+fn one() -> usize {
+    1
 }
 
 #[derive(Serialize, Deserialize)]
@@ -41,11 +54,69 @@ fn is_db(name: &str) -> bool {
 /// Kopiert alle Dateien des Plans nach `dest/<Volume>/<Ordner>/`. Bricht bei einzelnen Fehlern nicht ab, sondern gibt sie zurück –
 /// mit den Aufgaben der Lieferung (in `lang`, auch die, die erst beim Sammeln dazukamen).
 pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<(Vec<String>, Vec<String>)> {
-    let mut files = vec![];
+    collect_parts(local, to_system, plan, &[dest.to_path_buf()], lang, progress)
+}
+
+/// Bytes still free for a delivery at `path` (its drive, minus the reserve); None when the drive does not say.
+pub fn room(path: &Path) -> Option<u64> {
+    let free = path.ancestors().find(|p| p.exists()).and_then(free_bytes)?;
+    Some(free.saturating_sub(reserve()))
+}
+
+/// Which part (index into `dests`) each copy of the plan goes to: in plan order, a part filled before the next one
+/// starts, so a folder stays together where it can (its database right after its files). A file already in one of
+/// these folders stays there (only when collecting again into the same folders). Err = bytes that fit nowhere.
+/// shortcut: first fit, forward only – room left in an earlier place after a big file is not used; fine while
+/// folders should stay together, revisit if users are asked for an extra place too often.
+pub fn assign(plan: &Plan, dests: &[PathBuf]) -> Result<Vec<usize>, u64> {
+    assign_within(plan, dests, dests.iter().map(|d| room(d).unwrap_or(u64::MAX)).collect())
+}
+
+/// `assign` with the room of each place given.
+pub fn assign_within(plan: &Plan, dests: &[PathBuf], mut left: Vec<u64>) -> Result<Vec<usize>, u64> {
+    let at = |c: &crate::exchange::plan::Copy, d: &Path| d.join(&c.to_volume).join(&c.to_folder).join(&c.name);
+    let (mut part, mut missing, mut out) = (0, 0u64, vec![]);
+    for c in &plan.copies {
+        if let Some(j) = dests.iter().position(|d| at(c, d).exists()) {
+            out.push(j);
+            continue;
+        }
+        while part < dests.len() && left[part] < c.size {
+            part += 1;
+        }
+        match left.get_mut(part) {
+            Some(l) => {
+                *l -= c.size;
+                out.push(part);
+            }
+            None => {
+                missing += c.size;
+                out.push(dests.len().saturating_sub(1));
+            }
+        }
+    }
+    if missing > 0 { Err(missing) } else { Ok(out) }
+}
+
+/// `collect` over several places (each gets a part of the delivery, a folder of its own: `dests` are those folders).
+pub fn collect_parts(local: &Manifest, to_system: &str, plan: &Plan, dests: &[PathBuf], lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<(Vec<String>, Vec<String>)> {
+    let part_of = if dests.len() == 1 {
+        vec![0; plan.copies.len()]
+    } else {
+        assign(plan, dests).map_err(|missing| io::Error::new(io::ErrorKind::StorageFull, format!("not enough space – {} MB more needed", missing >> 20)))?
+    };
+    collect_split(local, to_system, plan, dests, &part_of, lang, progress)
+}
+
+/// `collect_parts` with the part of each copy given (`part_of[i]` = index into `dests`).
+pub fn collect_split(local: &Manifest, to_system: &str, plan: &Plan, dests: &[PathBuf], part_of: &[usize], lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<(Vec<String>, Vec<String>)> {
+    let mut files: Vec<Vec<Delivered>> = dests.iter().map(|_| vec![]).collect();
     let mut errors = vec![];
     let mut dbs: BTreeMap<String, (usize, Vec<String>)> = BTreeMap::new();
-    let target = |c: &crate::exchange::plan::Copy| dest.join(&c.to_volume).join(&c.to_folder).join(&c.name);
-    check_space(dest, plan.copies.iter().filter(|c| !target(c).exists()).map(|c| c.size).sum())?;
+    let target = |i: usize, c: &crate::exchange::plan::Copy| dests[part_of[i]].join(&c.to_volume).join(&c.to_folder).join(&c.name);
+    for (n, dest) in dests.iter().enumerate() {
+        check_space(dest, plan.copies.iter().enumerate().filter(|(i, c)| part_of[*i] == n && !target(*i, c).exists()).map(|(_, c)| c.size).sum())?;
+    }
     let mut tasks = plan.tasks.clone();
     for (i, c) in plan.copies.iter().enumerate() {
         let rel = format!("{}/{}/{}", c.to_volume, c.to_folder, c.name);
@@ -55,7 +126,7 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
             continue;
         };
         let src = mxf_dir(Path::new(&vol.path)).join(&c.from_folder).join(&c.name);
-        let dst = target(c);
+        let dst = target(i, c);
         // a database describes its folder as it is now: only while that still is the scanned folder does it fit the delivery
         if c.hash.is_none() {
             let scanned = vol.folders.iter().find(|f| f.name == c.from_folder).map(|f| f.files.iter().map(|e| key(&e.name)).collect());
@@ -69,7 +140,7 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
         }
         match copy_verified(&src, &dst, c.hash.as_deref()) {
             Ok((size, hash)) => {
-                files.push(Delivered { path: rel, size, hash });
+                files[part_of[i]].push(Delivered { path: rel, size, hash });
                 if c.hash.is_none() {
                     let source = vol.folders.iter().find(|f| f.name == c.from_folder);
                     let entry = dbs.entry(format!("{}/{}", c.to_volume, c.to_folder)).or_default();
@@ -83,16 +154,33 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
     // nur vollständige Datenbanken (beide Dateien) dürfen beim Einspielen ersetzt werden
     let db_folders: BTreeMap<String, Vec<String>> = dbs.into_iter().filter(|(_, (n, _))| *n == DB_FILES.len()).map(|(k, (_, f))| (k, f)).collect();
 
-    fs::create_dir_all(dest)?;
     let tasks: Vec<String> = tasks.iter().map(|t| t.describe(lang)).collect();
     let t = |a: [&'static str; 4]| crate::pick(lang, a);
-    let mut text = t([
+    let created = now_secs();
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let id = format!("{}-{nanos}", safe_name(&local.system));
+    let parts = dests.len();
+    for (n, (dest, files)) in dests.iter().zip(files).enumerate() {
+    fs::create_dir_all(dest)?;
+    let mut text = if parts > 1 {
+        t([
+            "PART {n} OF {parts} – import all parts together: in Exchange › Import choose all {parts} folders at once.\n\n",
+            "TEIL {n} VON {parts} – alle Teile zusammen importieren: unter Austausch › Importieren alle {parts} Ordner gemeinsam wählen.\n\n",
+            "PARTIE {n} SUR {parts} – importez toutes les parties ensemble : dans Échange › Importer, choisissez les {parts} dossiers à la fois.\n\n",
+            "PARTE {n} DE {parts}: importa todas las partes juntas: en Intercambio › Importar elige las {parts} carpetas a la vez.\n\n",
+        ])
+        .replace("{n}", &(n + 1).to_string())
+        .replace("{parts}", &parts.to_string())
+    } else {
+        String::new()
+    };
+    text += &t([
         "MediaFiles Check – delivery from {from} for {to}\n\n\
          IMPORT WITH MEDIAFILES CHECK: Exchange › Import (quit Media Composer first).\n\n\
          IMPORT BY HAND:\n\
          1. Quit Media Composer.\n\
-         2. Every folder of this delivery is named <volume>/<folder>. On that volume open\n   \
-            \"Avid MediaFiles/MXF/<folder>\" (create it if it is missing).\n\
+         2. Every folder of this delivery is named <volume>/<folder> (the drive's name on {from}). On the drive\n   \
+            where it belongs open \"Avid MediaFiles/MXF/<folder>\" (create it if it is missing).\n\
          3. Copy ONLY THE CONTENTS of the delivery folder into it – NEVER drag the whole folder onto an\n   \
             existing folder! Finder and Explorer would replace it including all media files.\n\
          4. If you are asked to replace .mxf files: DON'T – cancel and check.\n\
@@ -101,8 +189,8 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
          IMPORTIEREN MIT MEDIAFILES CHECK: Austausch › Importieren (Media Composer vorher schließen).\n\n\
          VON HAND IMPORTIEREN:\n\
          1. Media Composer schließen.\n\
-         2. Jeder Ordner dieser Lieferung heißt <Volume>/<Ordner>. Auf dem Volume den Ordner\n   \
-            \"Avid MediaFiles/MXF/<Ordner>\" öffnen (fehlt er, neu anlegen).\n\
+         2. Jeder Ordner dieser Lieferung heißt <Volume>/<Ordner> (Name des Laufwerks bei {from}). Auf dem\n   \
+            Laufwerk, auf das er gehört, \"Avid MediaFiles/MXF/<Ordner>\" öffnen (fehlt er, neu anlegen).\n\
          3. NUR DEN INHALT des Lieferordners hineinkopieren – NIEMALS den ganzen Ordner auf einen\n   \
             bestehenden Ordner ziehen! Finder und Explorer ersetzen ihn sonst samt allen Mediendateien.\n\
          4. Fragt das System, ob .mxf-Dateien ersetzt werden sollen: NICHT ersetzen, abbrechen und prüfen.\n\
@@ -111,8 +199,8 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
          IMPORTER AVEC MEDIAFILES CHECK : Échange › Importer (quittez d’abord Media Composer).\n\n\
          IMPORTER À LA MAIN :\n\
          1. Quittez Media Composer.\n\
-         2. Chaque dossier de cette livraison s’appelle <volume>/<dossier>. Sur ce volume, ouvrez\n   \
-            « Avid MediaFiles/MXF/<dossier> » (créez-le s’il manque).\n\
+         2. Chaque dossier de cette livraison s’appelle <volume>/<dossier> (nom du disque chez {from}). Sur le\n   \
+            disque où il doit aller, ouvrez « Avid MediaFiles/MXF/<dossier> » (créez-le s’il manque).\n\
          3. Copiez SEULEMENT LE CONTENU du dossier de livraison – ne glissez JAMAIS le dossier entier sur un\n   \
             dossier existant ! Le Finder et l’Explorateur le remplaceraient avec tous les fichiers média.\n\
          4. Si l’on vous demande de remplacer des fichiers .mxf : NE LE FAITES PAS – annulez et vérifiez.\n\
@@ -121,8 +209,8 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
          IMPORTAR CON MEDIAFILES CHECK: Intercambio › Importar (cierra antes Media Composer).\n\n\
          IMPORTAR A MANO:\n\
          1. Cierra Media Composer.\n\
-         2. Cada carpeta de esta entrega se llama <volumen>/<carpeta>. En ese volumen abre\n   \
-            «Avid MediaFiles/MXF/<carpeta>» (créala si falta).\n\
+         2. Cada carpeta de esta entrega se llama <volumen>/<carpeta> (nombre del disco en {from}). En el\n   \
+            disco donde debe ir abre «Avid MediaFiles/MXF/<carpeta>» (créala si falta).\n\
          3. Copia SOLO EL CONTENIDO de la carpeta de entrega; NUNCA arrastres la carpeta entera sobre una\n   \
             carpeta existente. El Finder y el Explorador la reemplazarían con todos los archivos de medios.\n\
          4. Si se te pregunta si reemplazar archivos .mxf: NO lo hagas; cancela y comprueba.\n\
@@ -145,23 +233,27 @@ pub fn collect(local: &Manifest, to_system: &str, plan: &Plan, dest: &Path, lang
     }
     fs::write(dest.join(tasks_file(lang)), text)?;
     let delivery = Delivery {
-        format: DELIVERY_FORMAT.into(),
+        format: if parts > 1 { DELIVERY_PARTS_FORMAT } else { DELIVERY_FORMAT }.into(),
         from: local.system.clone(),
         to: to_system.into(),
-        created: now_secs(),
+        created,
         files,
-        db_folders,
-        tasks,
+        db_folders: db_folders.clone(),
+        tasks: tasks.clone(),
+        id: id.clone(),
+        part: n + 1,
+        parts,
     };
     write_atomic(&dest.join(DELIVERY_FILE), &serde_json::to_vec_pretty(&delivery)?)?;
-    Ok((errors, delivery.tasks))
+    }
+    Ok((errors, tasks))
 }
 
 fn load(dest: &Path) -> io::Result<Delivery> {
     let file = Some(dest.join(DELIVERY_FILE)).filter(|p| p.exists());
     let not_delivery = || io::Error::new(io::ErrorKind::InvalidData, format!("{} is not an Exchange delivery", dest.display()));
     let d: Delivery = serde_json::from_slice(&fs::read(file.ok_or_else(not_delivery)?)?).map_err(|_| not_delivery())?;
-    if d.format != DELIVERY_FORMAT {
+    if d.format != DELIVERY_FORMAT && d.format != DELIVERY_PARTS_FORMAT {
         return Err(not_delivery());
     }
     // the delivery comes from another system: every path must be exactly "volume/folder/file", nothing that
@@ -191,13 +283,63 @@ pub fn load_delivery(dest: &Path) -> io::Result<Delivery> {
     load(dest)
 }
 
+/// The parts of one delivery, chosen together, as one delivery: every part must be there, none twice, all of the
+/// same delivery. Returns it with the file each delivery path is read from.
+pub fn load_parts(dests: &[PathBuf]) -> io::Result<(Delivery, HashMap<String, PathBuf>)> {
+    let bad = |m: String| io::Error::new(io::ErrorKind::InvalidData, m);
+    let mut all: Vec<(Delivery, &PathBuf)> = dests.iter().map(|d| load(d).map(|x| (x, d))).collect::<io::Result<_>>()?;
+    all.sort_by_key(|(d, _)| d.part);
+    let Some((first, _)) = all.first() else { return Err(bad("no delivery chosen".into())) };
+    let (id, parts) = (first.id.clone(), first.parts.max(1));
+    if all.iter().any(|(d, _)| d.id != id || d.parts.max(1) != parts) {
+        return Err(bad("these folders belong to different deliveries – choose the parts of one delivery".into()));
+    }
+    let have: Vec<usize> = all.iter().map(|(d, _)| d.part).collect();
+    if let Some(n) = (1..=parts).find(|n| !have.contains(n)) {
+        return Err(bad(format!("part {n} of {parts} is missing – choose all {parts} parts together")));
+    }
+    if parts == 1 && dests.len() > 1 {
+        return Err(bad("these folders are separate deliveries – import them one at a time".into()));
+    }
+    if have.len() != parts {
+        return Err(bad("a part was chosen twice".into()));
+    }
+    let mut from: HashMap<String, PathBuf> = HashMap::new();
+    let mut merged: Option<Delivery> = None;
+    for (d, dir) in all {
+        for f in &d.files {
+            if from.insert(f.path.clone(), dir.join(&f.path)).is_some() {
+                return Err(bad(format!("{}: in two parts", f.path)));
+            }
+        }
+        match merged.as_mut() {
+            None => merged = Some(d),
+            Some(m) => {
+                m.files.extend(d.files);
+                m.db_folders.extend(d.db_folders);
+            }
+        }
+    }
+    // paths compared by key too (case, Unicode form), as within one part
+    let mut seen = HashSet::new();
+    let m = merged.expect("one part at least");
+    if let Some(f) = m.files.iter().find(|f| !seen.insert(key(&f.path))) {
+        return Err(bad(format!("{}: listed twice", f.path)));
+    }
+    Ok((m, from))
+}
+
 /// Prüft eine Lieferung gegen ihr Manifest. Gibt die gefundenen Probleme zurück (leer = alles in Ordnung).
 pub fn verify(dest: &Path, progress: &mut dyn FnMut(&str)) -> io::Result<Vec<String>> {
-    let d = load(dest)?;
+    verify_parts(&[dest.to_path_buf()], progress)
+}
+
+pub fn verify_parts(dests: &[PathBuf], progress: &mut dyn FnMut(&str)) -> io::Result<Vec<String>> {
+    let (d, from) = load_parts(dests)?;
     let mut problems = vec![];
     for (i, f) in d.files.iter().enumerate() {
         progress(&format!("[{}/{}] {}", i + 1, d.files.len(), f.path));
-        match hash_file(&dest.join(&f.path)) {
+        match hash_file(&from[&f.path]) {
             Ok(h) if h == f.hash => {}
             Ok(_) => problems.push(format!("{}: damaged (checksum does not match)", f.path)),
             Err(e) => problems.push(format!("{}: missing or unreadable ({e})", f.path)),
@@ -234,7 +376,12 @@ pub fn own_folder_name(from: &str, folder: &str) -> String {
 /// ersetzte Datenbanken wandern nach "Avid MediaFiles/Exchange-Backup/". Ein Ordner, der Dateien bekommt, aber
 /// keine passende Datenbank, bekommt die Aufgabe "Datenbank neu schreiben" (in `lang`).
 pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<Imported> {
-    let d = load(dest)?;
+    import_parts(&[dest.to_path_buf()], t, lang, progress)
+}
+
+/// `import` of a delivery in several parts (all chosen together).
+pub fn import_parts(dests: &[PathBuf], t: &Targets, lang: &str, progress: &mut dyn FnMut(&str)) -> io::Result<Imported> {
+    let (d, from) = load_parts(dests)?;
     let split = |p: &str| -> (String, String, String) {
         let mut it = p.splitn(3, '/').map(String::from);
         (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default())
@@ -266,7 +413,7 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
     for f in d.files.iter().filter(|f| !is_db(&split(&f.path).2)) {
         let (vol, folder, name) = split(&f.path);
         let id = format!("{vol}/{folder}");
-        let render = t.render.get(&vol).filter(|_| crate::mxf::file_info(&dest.join(&f.path)).is_ok_and(|i| i.render == Some(true)));
+        let render = t.render.get(&vol).filter(|_| crate::mxf::file_info(&from[&f.path]).is_ok_and(|i| i.render == Some(true)));
         let drive = render.unwrap_or(&volumes[&vol]).clone();
         let to_folder = if t.own_folder.contains(&id) { own_folder_name(&d.from, &folder) } else { folder };
         if render.is_some() || t.own_folder.contains(&id) {
@@ -302,7 +449,7 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
         let dir = mxf_dir(&drive).join(&to_folder);
         let new = !dir.join(&name).exists();
         names.insert(dir.clone(), (scan::volume_name(&drive), to_folder.clone()));
-        match copy_verified(&dest.join(&f.path), &dir.join(&name), Some(&f.hash)) {
+        match copy_verified(&from[&f.path], &dir.join(&name), Some(&f.hash)) {
             // only a folder that really got a new file needs its database rebuilt
             Ok(_) if new => {
                 touched.insert(dir.clone(), (scan::volume_name(&drive), to_folder));
@@ -323,9 +470,20 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
     if mc {
         problems.push("Media Composer was started during the import – no database replaced, please rebuild them".into());
     }
+    // two folders of the delivery in one folder here (two drives over there assigned to one drive here): neither database fits
+    let mut sources: HashMap<&PathBuf, usize> = HashMap::new();
+    for dir in landed.values().flatten() {
+        *sources.entry(dir).or_default() += 1;
+    }
     for (id, expected) in d.db_folders.iter().filter(|_| !mc) {
         // the database fits one folder only: separated into media and render files it fits none
         let Some(dir) = landed.get(id).filter(|s| s.len() == 1).and_then(|s| s.first()) else { continue };
+        if sources[dir] > 1 {
+            if let Some(n) = names.get(dir) {
+                touched.insert(dir.clone(), n.clone());
+            }
+            continue;
+        }
         // the names may match while a file of the same name with other content stayed (its copy was refused)
         if failed.contains(id) {
             problems.push(format!("{id}: not every file could be imported – database not replaced, please rebuild it"));
@@ -359,7 +517,7 @@ pub fn import(dest: &Path, t: &Targets, lang: &str, progress: &mut dyn FnMut(&st
             let name = split(&f.path).2;
             let new = dir.join(format!(".{name}.exchange-new"));
             let _ = fs::remove_file(&new); // left over from an interrupted import
-            match copy_verified(&dest.join(&f.path), &new, Some(&f.hash)) {
+            match copy_verified(&from[&f.path], &new, Some(&f.hash)) {
                 Ok(_) => staged.push((new, name, f.hash.clone())),
                 Err(e) => problems.push(format!("{}: {e} – database not replaced, please rebuild it", f.path)),
             }
@@ -485,6 +643,22 @@ fn write_part(src: &Path, part: &Path, expected: Option<&str>) -> io::Result<(u6
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parts_are_filled_in_order_and_files_already_there_stay() {
+        let c = |folder: &str, name: &str, size| crate::exchange::plan::Copy { from_volume: "V".into(), from_folder: folder.into(), to_volume: "V".into(), to_folder: folder.into(), name: name.into(), size, hash: None };
+        let plan = Plan { copies: vec![c("1", "a", 5), c("1", "b", 5), c("1", "db", 0), c("2", "c", 5)], tasks: vec![] };
+        let root = std::env::temp_dir().join(format!("mfc-assign-{}", std::process::id()));
+        let dests = [root.join("p1"), root.join("p2")];
+        assert_eq!(assign_within(&plan, &dests, vec![12, 100]), Ok(vec![0, 0, 0, 1]));
+        // the database stays with its folder; what fits nowhere is reported
+        assert_eq!(assign_within(&plan, &dests, vec![7, 6]), Err(5));
+        // c already in part 1 (collected before an interruption): it stays there
+        fs::create_dir_all(dests[0].join("V/2")).unwrap();
+        fs::write(dests[0].join("V/2/c"), "x").unwrap();
+        assert_eq!(assign_within(&plan, &dests, vec![0, 10]), Ok(vec![1, 1, 1, 0]));
+        fs::remove_dir_all(&root).unwrap();
+    }
     use crate::exchange::plan::{self, Options};
 
     fn tmp(name: &str) -> PathBuf {
@@ -735,7 +909,7 @@ mod tests {
             (vec![file("V/1/.msmMMOB.mdb.exchange-new")], false),
             (vec![file("V/1/msmFMID.pmr"), file("V/1/MSMFMID.PMR")], false),
         ] {
-            let d = Delivery { format: DELIVERY_FORMAT.into(), from: "A".into(), to: "B".into(), created: 0, files, db_folders: Default::default(), tasks: vec![] };
+            let d = Delivery { format: DELIVERY_FORMAT.into(), from: "A".into(), to: "B".into(), created: 0, files, db_folders: Default::default(), tasks: vec![], id: String::new(), part: 1, parts: 1 };
             fs::write(dir.join(DELIVERY_FILE), serde_json::to_vec(&d).unwrap()).unwrap();
             assert_eq!(load(&dir).is_ok(), ok);
         }
@@ -758,7 +932,7 @@ mod tests {
         }
         let dir = std::env::temp_dir().join(format!("mfc-delivery-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let d = Delivery { format: DELIVERY_FORMAT.into(), from: "A".into(), to: "B".into(), created: 0, files: vec![Delivered { path: "V/../../evil".into(), size: 1, hash: "x".into() }], db_folders: Default::default(), tasks: vec![] };
+        let d = Delivery { format: DELIVERY_FORMAT.into(), from: "A".into(), to: "B".into(), created: 0, files: vec![Delivered { path: "V/../../evil".into(), size: 1, hash: "x".into() }], db_folders: Default::default(), tasks: vec![], id: String::new(), part: 1, parts: 1 };
         fs::write(dir.join(DELIVERY_FILE), serde_json::to_vec(&d).unwrap()).unwrap();
         assert!(load(&dir).is_err());
         let _ = fs::remove_dir_all(&dir);

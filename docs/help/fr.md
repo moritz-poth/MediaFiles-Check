@@ -46,17 +46,17 @@ L’analyse écrit aussi le *manifeste* d’Échange : chaque fichier MXF des di
 
 1. Analysez d’abord ce poste sous Analyser, pour que votre manifeste soit à jour.
 2. Échange › **Comparer** → **Ouvrir un manifeste…** et choisissez le manifeste de l’autre poste – ou une demande enregistrée sous Liens de projet › Demander.
-3. **Associer les disques :** à gauche vos disques (ce poste), à droite leur destination sur l’autre poste. Un disque du même nom de l’autre côté est présélectionné, mais vous pouvez en choisir un autre ; un disque sans équivalent a besoin d’une cible – ou de **Ne pas envoyer**. Le choix est mémorisé.
+3. **Envoyer :** chaque disque de ce poste part sous son propre nom – l’autre poste choisit à l’importation sur lequel de ses disques il va. Désactivez un disque qui ne doit pas partir, et désactivez **Fichiers de rendu** ou **Mixdowns** pour les exclure (reconnus à leur en-tête MXF ; un dossier auquel ils manquent alors reçoit la tâche « Reconstruire la base de données » au lieu de sa base). Le choix est mémorisé. Avec une analyse plus ancienne, la page demande d’analyser à nouveau.
 4. Vérifiez le nombre de fichiers – **Afficher … tâches…** ouvre les tâches dans une fenêtre à part –, puis cliquez sur **Rassembler…** et choisissez où créer le dossier de livraison.
 
-Chaque fichier est copié avec contrôle de somme dans un nouveau dossier comme `261102-1830_Mac Studio_to_MacBook`, avec `Tasks.txt` (instructions pour importer à la main). Rassembler à nouveau après une interruption reprend là où cela s’est arrêté.
+Chaque fichier est copié avec contrôle de somme dans un nouveau dossier comme `261102-1830_Mac Studio_to_MacBook`, avec `Tasks.txt` (instructions pour importer à la main). Rassembler à nouveau après une interruption reprend là où cela s’est arrêté. **Trop peu de place :** si la livraison ne tient pas (1 Go reste libre sur chaque disque), MediaFiles Check demande un autre emplacement – sur un autre disque – et divise la livraison en parties (`…_part1of2`, `…_part2of2`), en gardant un dossier ensemble si possible.
 
 ![Comparer avec un autre poste](images/fr/exchange.png)
 
 ## Échange : importer
 
 1. Quittez Media Composer.
-2. Échange › **Importer** → **Choisir la livraison…**. Une livraison rassemblée pour un autre système est refusée – importez-la là-bas.
+2. Échange › **Importer** → **Choisir la livraison…**. Une livraison rassemblée pour un autre système est refusée – importez-la là-bas. Une livraison en parties : sélectionnez tous ses dossiers ensemble dans la fenêtre – s’il manque une partie, rien n’est importé.
 3. Chaque disque de la livraison a besoin d’un disque sur ce poste ; les disques du même nom sont associés automatiquement. Avec **Séparer**, les fichiers média vont sur un disque et les fichiers de rendu sur un autre (reconnus par leur en-tête MXF).
 4. **Dossiers :** la page indique combien de dossiers sont fusionnés ; **Choisir les dossiers…** ouvre une fenêtre avec tous les dossiers de la livraison : pour chaque dossier **Fusionner** (dans le dossier du même nom) ou **Dossier propre** (`<expéditeur>_<dossier>`, p. ex. `Mac Studio_1` ; s’il existe déjà, les fichiers y vont). **Tout fusionner** / **Tous dans des dossiers propres** règle tous les dossiers.
 5. **Vérifier et importer** vérifie d’abord chaque fichier. Seule une livraison complète et intacte est importée – les fichiers sont seulement ajoutés, un fichier média n’est jamais écrasé. Les bases de données remplacées sont gardées dans `Avid MediaFiles/Exchange-Backup/`.

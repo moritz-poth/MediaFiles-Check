@@ -7,10 +7,11 @@ use std::fmt;
 
 #[derive(Default)]
 pub struct Options {
-    /// lokaler Volume-Name -> Volume-Name auf der Gegenseite (ohne Eintrag: gleicher Name)
-    pub volume_map: HashMap<String, String>,
-    /// local volumes the user chose not to send ("Don't send"), even if the other side has one of the same name
+    /// local volumes the user chose not to send
     pub skip: HashSet<String>,
+    /// leave out render files / mixdowns (by the manifest's header kind)
+    pub skip_renders: bool,
+    pub skip_mixdowns: bool,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -61,8 +62,6 @@ impl fmt::Display for Task {
 pub struct Plan {
     pub copies: Vec<Copy>,
     pub tasks: Vec<Task>,
-    /// lokale Volumes ohne Gegenstück: User muss sie zuordnen
-    pub unmapped: Vec<String>,
 }
 
 struct Proposal<'a> {
@@ -85,16 +84,18 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options) -> Plan {
     }
     let mut proposals = vec![];
 
+    let left_out = |e: &FileEntry| match e.kind {
+        Some(FileKind::Render) => opts.skip_renders,
+        Some(FileKind::Mixdown) => opts.skip_mixdowns,
+        _ => false,
+    };
+    // every drive goes under its own name; the receiver assigns it to one of its drives when importing (user 2026-11-26)
     for lv in local.volumes.iter().filter(|v| !opts.skip.contains(&v.name)) {
-        let mapped = opts.volume_map.get(&lv.name).cloned();
-        let rv = remote.volumes.iter().find(|rv| key(&rv.name) == key(mapped.as_deref().unwrap_or(&lv.name)));
-        let Some(to_volume) = mapped.or_else(|| rv.map(|rv| rv.name.clone())) else {
-            p.unmapped.push(lv.name.clone());
-            continue;
-        };
+        let rv = remote.volumes.iter().find(|rv| key(&rv.name) == key(&lv.name));
+        let to_volume = rv.map_or_else(|| lv.name.clone(), |rv| rv.name.clone());
         for f in &lv.folders {
             let mut missing = vec![];
-            for e in &f.files {
+            for e in f.files.iter().filter(|e| !left_out(e)) {
                 match remote_files.get(&key(&e.name)) {
                     None => missing.push(e),
                     Some(hashes) if hashes.contains(e.hash.as_str()) => {}
@@ -109,14 +110,21 @@ pub fn plan(local: &Manifest, remote: &Manifest, opts: &Options) -> Plan {
             if missing.is_empty() {
                 continue;
             }
-            let same = rv.and_then(|rv| rv.folders.iter().find(|rf| key(&rf.name) == key(&f.name)));
+            // the folder over there: on the drive of the same name; without one, the only folder of that name on any drive
+            // there (two of them: not known which one it lands in – no database, a rebuild task)
+            let named: Vec<&Folder> = remote.volumes.iter().flat_map(|v| &v.folders).filter(|rf| key(&rf.name) == key(&f.name)).collect();
+            let same = match rv {
+                Some(rv) => rv.folders.iter().find(|rf| key(&rf.name) == key(&f.name)),
+                None => named.first().copied().filter(|_| named.len() == 1),
+            };
+            let unknown = rv.is_none() && named.len() > 1;
             // the receiver decides on import whether a folder merges or goes into a folder of its own
             let (to_folder, existing) = (same.map_or_else(|| f.name.clone(), |s| s.name.clone()), same);
             let mine: HashSet<(String, &str)> = f.files.iter().map(|e| (key(&e.name), e.hash.as_str())).collect();
             let subset = existing.is_none_or(|x| x.files.iter().all(|e| mine.contains(&(key(&e.name), e.hash.as_str()))));
             let existing = existing.map_or(0, |x| x.files.len());
             // Die DB passt nur, wenn der Zielordner danach exakt dem Quellordner entspricht.
-            let db_ok = f.has_db && subset && existing + missing.len() == f.files.len();
+            let db_ok = f.has_db && !unknown && subset && existing + missing.len() == f.files.len();
             proposals.push(Proposal { from_volume: &lv.name, from: f, to_volume: to_volume.clone(), to_folder, missing, db_ok });
         }
     }
@@ -165,7 +173,7 @@ mod tests {
             .iter()
             .map(|f| {
                 let (n, h) = f.split_once('=').unwrap_or((f, f));
-                FileEntry { name: n.into(), size: 1, hash: h.into() }
+                FileEntry { name: n.into(), size: 1, hash: h.into(), kind: None }
             })
             .collect();
         Folder { name: name.into(), has_db: true, files }
@@ -238,22 +246,44 @@ mod tests {
     }
 
     #[test]
-    fn two_local_volumes_into_one_remote_volume() {
-        let a = ma("A", vec![("V1", vec![fo("1", &["a"])]), ("V2", vec![fo("1", &["b"])])]);
-        let b = ma("B", vec![("W", vec![])]);
-        let opts = Options { volume_map: [("V1".into(), "W".into()), ("V2".into(), "W".into())].into(), ..Default::default() };
-        let (copies, p) = run(&a, &b, &opts);
-        assert_eq!(copies, ["W/1/a", "W/1/b"]);
-        assert_eq!(p.tasks, [rebuild("W", "1")]);
-    }
-
-    #[test]
-    fn unknown_volume_must_be_mapped() {
+    fn a_drive_without_counterpart_goes_under_its_own_name() {
+        // the receiver assigns it when importing
         let a = ma("A", vec![("X", vec![fo("1", &["a"])])]);
         let b = ma("B", vec![("Y", vec![])]);
         let (copies, p) = run(&a, &b, &Options::default());
-        assert!(copies.is_empty());
-        assert_eq!(p.unmapped, ["X"]);
+        assert_eq!(copies, ["X/1/a", "X/1/msmFMID.pmr", "X/1/msmMMOB.mdb"]);
+        assert!(p.tasks.is_empty());
+    }
+
+    #[test]
+    fn a_folder_of_the_same_name_on_another_drive_over_there_decides_the_database() {
+        // over there "1" is on "Y" with a file of its own: the database does not fit
+        let a = ma("A", vec![("X", vec![fo("1", &["a", "b"])])]);
+        let b = ma("B", vec![("Y", vec![fo("1", &["a", "c"])])]);
+        let (copies, p) = run(&a, &b, &Options::default());
+        assert_eq!(copies, ["X/1/b"]);
+        assert_eq!(p.tasks, [rebuild("X", "1")]);
+        // "1" on two drives over there: not known where it lands, so no database
+        let b = ma("B", vec![("Y", vec![fo("1", &["a"])]), ("Z", vec![fo("1", &["z"])])]);
+        let (copies, p) = run(&a, &b, &Options::default());
+        assert_eq!(copies, ["X/1/b"]);
+        assert_eq!(p.tasks, [rebuild("X", "1")]);
+    }
+
+    #[test]
+    fn render_files_and_mixdowns_can_be_left_out() {
+        let mut f = fo("1", &["a", "r", "m"]);
+        f.files[1].kind = Some(FileKind::Render);
+        f.files[2].kind = Some(FileKind::Mixdown);
+        let a = ma("A", vec![("V", vec![f])]);
+        let b = ma("B", vec![("V", vec![])]);
+        assert_eq!(run(&a, &b, &Options::default()).0, ["V/1/a", "V/1/r", "V/1/m", "V/1/msmFMID.pmr", "V/1/msmMMOB.mdb"]);
+        let (copies, p) = run(&a, &b, &Options { skip_renders: true, ..Default::default() });
+        // the folder ends up without the render file: its database does not fit
+        assert_eq!(copies, ["V/1/a", "V/1/m"]);
+        assert_eq!(p.tasks, [rebuild("V", "1")]);
+        let (copies, _) = run(&a, &b, &Options { skip_renders: true, skip_mixdowns: true, ..Default::default() });
+        assert_eq!(copies, ["V/1/a"]);
     }
 
     #[test]

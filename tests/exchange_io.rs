@@ -97,9 +97,13 @@ fn two_volumes_into_one() {
     lab.folder("A", "V1", "1", &["a.mxf", "+db"]);
     lab.folder("A", "V2", "1", &["b.mxf", "+db"]);
     fs::create_dir_all(mxf_dir(&lab.drive("B", "W"))).unwrap();
-    let opts = Options { volume_map: [("V1".into(), "W".into()), ("V2".into(), "W".into())].into(), ..Default::default() };
-    collect_checked(&lab, &opts);
-    let (problems, tasks) = import_checked(&lab, &lab.targets(&["W"]));
+    // sent under their own names; the receiver puts both into its drive W when importing
+    collect_checked(&lab, &Options::default());
+    let mut t = lab.targets(&[]);
+    for v in ["V1", "V2"] {
+        t.media.insert(v.into(), lab.drive("B", "W"));
+    }
+    let (problems, tasks) = import_checked(&lab, &t);
     assert!(problems.is_empty(), "{problems:?}");
     assert_eq!(tasks, ["[B] Rebuild database: W/1"], "two databases never fit one folder");
     assert!(lab.read("B", "W", "1/a.mxf").is_some() && lab.read("B", "W", "1/b.mxf").is_some());
@@ -259,4 +263,59 @@ fn source_changed_after_the_scan_is_not_delivered() {
     assert!(problems.is_empty(), "{problems:?}");
     assert_eq!(tasks, ["[B] Rebuild database: V/1"]);
     assert_eq!(snap(&mxf_dir(&lab.drive("B", "V")).join("1")).into_keys().collect::<Vec<_>>(), ["c.mxf"]);
+}
+
+// ── delivery in parts (several places) ──
+
+#[test]
+fn a_delivery_in_two_parts_is_imported_only_as_a_whole() {
+    let lab = Lab::new("parts");
+    lab.folder("A", "V", "1", &["a.mxf", "b.mxf", "+db"]);
+    lab.folder("A", "V", "2", &["c.mxf", "+db"]);
+    fs::create_dir_all(mxf_dir(&lab.drive("B", "V"))).unwrap();
+    let (a, b) = (lab.scan("A"), lab.scan("B"));
+    let p = plan::plan(&a, &b, &Options::default());
+    // folder 1 with its database into part 1, folder 2 into part 2
+    let dests = [lab.root.join("Place1/x_part1of2"), lab.root.join("Place2/x_part2of2")];
+    let part_of: Vec<usize> = p.copies.iter().map(|c| usize::from(c.to_folder == "2")).collect();
+    let before = snap(&lab.root.join("A"));
+    let (errors, _) = collect::collect_split(&a, "B", &p, &dests, &part_of, "en", &mut |_| {}).unwrap();
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(snap(&lab.root.join("A")), before);
+    assert!(dests[0].join("V/1/a.mxf").exists() && dests[1].join("V/2/c.mxf").exists() && !dests[0].join("V/2").exists());
+    assert!(fs::read_to_string(dests[1].join(collect::tasks_file("en"))).unwrap().starts_with("PART 2 OF 2"));
+    // a format of its own: an older MediaFiles Check refuses a part instead of importing it alone
+    assert!(fs::read_to_string(dests[0].join(DELIVERY_FILE)).unwrap().contains(collect::DELIVERY_PARTS_FORMAT));
+    // one part alone: nothing is imported
+    let e = collect::import_parts(&dests[..1], &lab.targets(&["V"]), "en", &mut |_| {}).err().unwrap();
+    assert!(e.to_string().contains("part 2 of 2 is missing"), "{e}");
+    assert!(collect::verify_parts(&dests[1..], &mut |_| {}).is_err());
+    assert!(snap(&lab.b).is_empty());
+    // both, in any order
+    let both = [dests[1].clone(), dests[0].clone()];
+    assert!(collect::verify_parts(&both, &mut |_| {}).unwrap().is_empty());
+    let r = collect::import_parts(&both, &lab.targets(&["V"]), "en", &mut |_| {}).unwrap();
+    assert!(r.problems.is_empty() && r.tasks.is_empty(), "{:?} {:?}", r.problems, r.tasks);
+    for f in ["1/a.mxf", "1/b.mxf", "1/msmFMID.pmr", "2/c.mxf", "2/msmMMOB.mdb"] {
+        assert!(lab.read("B", "V", f).is_some(), "{f}");
+    }
+    no_temp_files(&lab.root);
+    no_temp_files(&lab.b);
+}
+
+#[test]
+fn parts_of_two_deliveries_are_refused() {
+    let lab = Lab::new("partsmix");
+    lab.folder("A", "V", "1", &["a.mxf", "+db"]);
+    fs::create_dir_all(mxf_dir(&lab.drive("B", "V"))).unwrap();
+    let (a, b) = (lab.scan("A"), lab.scan("B"));
+    let p = plan::plan(&a, &b, &Options::default());
+    let one = vec![0; p.copies.len()];
+    let first = [lab.root.join("P/d1_part1of2"), lab.root.join("Q/d1_part2of2")];
+    collect::collect_split(&a, "B", &p, &first, &one, "en", &mut |_| {}).unwrap();
+    let second = [lab.root.join("P/d2_part1of2"), lab.root.join("Q/d2_part2of2")];
+    collect::collect_split(&a, "B", &p, &second, &one, "en", &mut |_| {}).unwrap();
+    let e = collect::import_parts(&[first[0].clone(), second[1].clone()], &lab.targets(&["V"]), "en", &mut |_| {}).err().unwrap();
+    assert!(e.to_string().contains("different deliveries"), "{e}");
+    assert!(collect::import_parts(&[first[0].clone(), first[0].clone()], &lab.targets(&["V"]), "en", &mut |_| {}).is_err());
 }

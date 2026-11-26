@@ -46,17 +46,17 @@ Austausch › **Vergleichen** → **Manifest sichern…** speichert das Manifest
 
 1. Zuerst diesen Schnittplatz unter Scannen scannen, damit das eigene Manifest aktuell ist.
 2. Austausch › **Vergleichen** → **Manifest öffnen…** und das Manifest des anderen Schnittplatzes wählen – oder eine Anforderung aus Projekt-Verlinkungen › Anfordern.
-3. **Laufwerke zuordnen:** Links deine Laufwerke (diese Workstation), rechts, wohin sie auf der anderen Workstation kommen. Ein gleichnamiges Laufwerk drüben ist vorausgewählt, du kannst aber ein anderes wählen; ein Laufwerk ohne Gegenstück braucht ein Ziel – oder **Nicht senden**. Die Wahl wird gemerkt.
+3. **Senden:** Jedes Laufwerk dieser Workstation geht unter seinem eigenen Namen – die andere Workstation wählt beim Importieren, auf welches ihrer Laufwerke es kommt. Ein Laufwerk, das nicht mitgehen soll, ausschalten; **Render-Dateien** oder **Mixdowns** ausschalten, um sie wegzulassen (erkannt am MXF-Header; ein Ordner, dem sie dann fehlen, bekommt statt seiner Datenbank die Aufgabe „Datenbank neu schreiben“). Die Wahl wird gemerkt. Bei einem älteren Scan bittet die Seite, erst neu zu scannen.
 4. Anzahl der Dateien prüfen – **… Aufgaben anzeigen…** öffnet die Aufgaben in einem eigenen Fenster –, dann **Sammeln…** und wählen, wo der Lieferordner entstehen soll.
 
-Jede Datei wird mit Prüfsumme in einen neuen Ordner wie `261102-1830_Mac Studio_to_MacBook` kopiert, zusammen mit `Aufgaben.txt` (Anleitung zum Importieren von Hand). Nochmal Sammeln nach einer Unterbrechung macht dort weiter, wo es aufgehört hat.
+Jede Datei wird mit Prüfsumme in einen neuen Ordner wie `261102-1830_Mac Studio_to_MacBook` kopiert, zusammen mit `Aufgaben.txt` (Anleitung zum Importieren von Hand). Nochmal Sammeln nach einer Unterbrechung macht dort weiter, wo es aufgehört hat. **Zu wenig Platz:** Passt die Lieferung nicht (auf jedem Laufwerk bleibt 1 GB frei), fragt MediaFiles Check nach einem weiteren Ort – auf einem anderen Laufwerk – und teilt die Lieferung in Teile (`…_part1of2`, `…_part2of2`); ein Ordner bleibt nach Möglichkeit zusammen.
 
 ![Mit einem anderen Schnittplatz vergleichen](images/de/exchange.png)
 
 ## Austausch: Importieren
 
 1. Media Composer beenden.
-2. Austausch › **Importieren** → **Lieferung wählen…**. Eine Lieferung, die für ein anderes System gesammelt wurde, wird abgelehnt – spiel sie dort ein.
+2. Austausch › **Importieren** → **Lieferung wählen…**. Eine Lieferung, die für ein anderes System gesammelt wurde, wird abgelehnt – spiel sie dort ein. Eine Lieferung in Teilen: alle ihre Ordner im Dialog gemeinsam auswählen – fehlt ein Teil, wird nichts eingespielt.
 3. Jedes Laufwerk der Lieferung braucht ein Laufwerk auf diesem Schnittplatz; gleichnamige werden automatisch zugeordnet. Mit **Trennen** gehen die Mediendateien auf ein Laufwerk und die Render-Dateien auf ein anderes (erkannt am MXF-Header).
 4. **Ordner:** Die Seite zeigt, wie viele Ordner zusammengeführt werden; **Ordner festlegen…** öffnet ein Fenster mit allen Ordnern der Lieferung: für jeden Ordner **Zusammenführen** (in den Ordner mit demselben Namen) oder **Eigener Ordner** (`<Absender>_<Ordner>`, z. B. `Mac Studio_1`; gibt es ihn schon, kommen die Dateien hinein). **Alle zusammenführen** / **Alle in eigene Ordner** wählt für alle.
 5. **Prüfen & importieren** prüft zuerst jede Datei. Nur eine vollständige, unbeschädigte Lieferung wird importiert – Dateien kommen nur dazu, eine Mediendatei wird nie überschrieben. Ersetzte Datenbanken bleiben in `Avid MediaFiles/Exchange-Backup/`.

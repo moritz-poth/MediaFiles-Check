@@ -46,17 +46,17 @@ Exchange › **Compare** → **Save manifest…** saves the manifest of the last
 
 1. Scan this system first under Scan, so that your own manifest is up to date.
 2. Exchange › **Compare** → **Open manifest…** and choose the manifest of the other system – or a request saved under Project links › Request.
-3. **Assign drives:** left your drives (this workstation), right where they go on the other workstation. A drive of the same name there is preselected, but you can choose another one; a drive without a counterpart needs a target – or **Don't send**. The choice is remembered.
+3. **Send:** every drive of this workstation goes under its own name – the other workstation chooses on import which of its drives it goes to. Switch off a drive that should not be sent, and switch off **Render files** or **Mixdowns** to leave them out (recognised by their MXF header; a folder that ends up without them gets the task “Rebuild database” instead of its database). The choice is remembered. With an older scan the page asks you to scan again first.
 4. Check the number of files – **Show … tasks…** opens the tasks in a window of their own – then click **Collect…** and choose where the delivery folder should be created.
 
-Every file is copied with a checksum check into a new folder like `261102-1830_Mac Studio_to_MacBook`, together with `Tasks.txt` (instructions for importing by hand). Collecting again after an interruption continues where it stopped.
+Every file is copied with a checksum check into a new folder like `261102-1830_Mac Studio_to_MacBook`, together with `Tasks.txt` (instructions for importing by hand). Collecting again after an interruption continues where it stopped. **Too little space:** if the delivery does not fit (1 GB stays free on every drive), MediaFiles Check asks for another place – on another drive – and splits the delivery into parts (`…_part1of2`, `…_part2of2`), a folder kept together where possible.
 
 ![Compare with another system](images/en/exchange.png)
 
 ## Exchange: import
 
 1. Quit Media Composer.
-2. Exchange › **Import** → **Choose delivery…**. A delivery collected for another system is refused – import it there.
+2. Exchange › **Import** → **Choose delivery…**. A delivery collected for another system is refused – import it there. A delivery in parts: select all its folders together in the dialog – a missing part stops the import before anything is copied.
 3. Every drive of the delivery needs a drive on this system; drives with the same name are assigned automatically. With **Separate**, media files go to one drive and render files to another (recognised by their MXF header).
 4. **Folders:** the page shows how many folders merge; **Choose folders…** opens a window with every folder of the delivery:  **Merge** (into the folder of the same name) or **Own folder** (`<sender>_<folder>`, e.g. `Mac Studio_1`; if it exists already, the files go into it). **All merge** / **All in own folders** sets every folder.
 5. **Verify & import** first verifies every file. Only a complete, undamaged delivery is imported – files are only added, a media file is never overwritten. Replaced databases are kept in `Avid MediaFiles/Exchange-Backup/`.

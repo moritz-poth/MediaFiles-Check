@@ -1188,11 +1188,15 @@ export global Exchange {
     in property <string> remote-name;
     in property <string> remote-date;
     in property <bool> is-request;
-    in property <[MapRow]> maps;
+    // Laufwerke dieser Workstation: name, selected = wird gesendet (jedes unter seinem Namen; zugeordnet wird beim Import)
+    in property <[VolumeRow]> sends;
+    in property <bool> skip-renders;
+    in property <bool> skip-mixdowns;
+    // false: der Scan kennt Render-Dateien und Mixdowns noch nicht (Scan von vor 2026-11-26)
+    in property <bool> kinds-known: true;
     in property <int> copy-files;
     in property <string> copy-size;
     in property <[string]> tasks;
-    in property <bool> can-collect;
     // Fortschritt (busy): 0 sammeln, 1 prüfen, 2 einspielen
     in property <bool> busy;
     in property <int> work-kind;
@@ -1216,7 +1220,9 @@ export global Exchange {
     in property <bool> can-import;
     callback save-manifest();
     callback open-manifest();
-    callback map-changed(int, int);
+    callback send-toggled(int);
+    // 0 Render-Dateien, 1 Mixdowns
+    callback kind-toggled(int);
     callback collect();
     callback choose-delivery();
     callback delivery-map-changed(int, int);
@@ -1229,35 +1235,6 @@ export global Exchange {
     callback close-result();
     // Aufgaben des Vergleichs in eigenem Fenster
     callback show-tasks();
-}
-
-component MapList inherits Card {
-    in property <[MapRow]> rows;
-    callback changed(int, int);
-    for r[i] in root.rows: CardRow {
-        first: i == 0;
-        Text {
-            text: r.name;
-            width: 220px;
-            overflow: elide;
-            vertical-alignment: center;
-            color: Theme.text;
-        }
-        Text {
-            text: "→";
-            vertical-alignment: center;
-            color: Theme.muted;
-        }
-        VerticalLayout {
-            alignment: center;
-            Dropdown {
-                items: r.options;
-                current: r.selected;
-                selected(index) => { root.changed(i, index); }
-            }
-        }
-        Rectangle { horizontal-stretch: 1; }
-    }
 }
 
 // Prüfen: was geprüft wird (Seite ohne Ergebnis)
@@ -1457,7 +1434,7 @@ component ExchangePane inherits VerticalLayout {
             if Exchange.has-compare: CheckButton {
                 text: @tr("Collect…");
                 primary: true;
-                enabled: Exchange.can-collect && Exchange.copy-files > 0 && !Exchange.busy;
+                enabled: Exchange.copy-files > 0 && !Exchange.busy;
                 clicked => { Exchange.collect(); }
             }
         }
@@ -1469,31 +1446,41 @@ component ExchangePane inherits VerticalLayout {
             font-size: 12px;
             color: Theme.muted;
         }
-        if Exchange.has-compare && Exchange.maps.length > 0: Section {
-            title: @tr("ASSIGN DRIVES");
-            Para { text: @tr("Choose for every drive of this workstation where its files go over there. A drive of the same name is preselected; you can choose another one."); }
-            // Spaltenköpfe: links diese Workstation, rechts die andere (gleiche Breiten wie MapList)
-            HorizontalLayout {
-                padding-left: 15px;
-                spacing: 12px;
-                VerticalLayout {
-                    width: 220px;
-                    spacing: 2px;
-                    SectionLabel { text: @tr("THIS WORKSTATION"); }
-                    Text { text: Exchange.system-name; overflow: elide; font-size: 12px; color: Theme.text; }
+        if Exchange.has-compare && !Exchange.is-request: Section {
+            title: @tr("SEND");
+            Para { text: @tr("Every drive goes under its own name – {} chooses on import which of its drives it goes to.", Exchange.remote-name); }
+            Card {
+                for r[i] in Exchange.sends: ToggleRow {
+                    first: i == 0;
+                    toggled => { Exchange.send-toggled(i); }
+                    Text { text: r.name; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; color: r.selected ? Theme.text : Theme.muted; }
+                    VerticalLayout {
+                        alignment: center;
+                        Switch { on: r.selected; label: r.name; toggled => { Exchange.send-toggled(i); } }
+                    }
                 }
-                // so breit wie der Pfeil in MapList
-                Text { text: "→"; color: transparent; }
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 2px;
-                    SectionLabel { text: @tr("OTHER WORKSTATION"); }
-                    Text { text: Exchange.remote-name; overflow: elide; font-size: 12px; color: Theme.text; }
+                ToggleRow {
+                    first: Exchange.sends.length == 0;
+                    toggled => { Exchange.kind-toggled(0); }
+                    Text { text: @tr("Render files"); horizontal-stretch: 1; vertical-alignment: center; color: !Exchange.skip-renders ? Theme.text : Theme.muted; }
+                    VerticalLayout {
+                        alignment: center;
+                        Switch { on: !Exchange.skip-renders; label: @tr("Render files"); toggled => { Exchange.kind-toggled(0); } }
+                    }
+                }
+                ToggleRow {
+                    first: false;
+                    toggled => { Exchange.kind-toggled(1); }
+                    Text { text: @tr("Mixdowns"); horizontal-stretch: 1; vertical-alignment: center; color: !Exchange.skip-mixdowns ? Theme.text : Theme.muted; }
+                    VerticalLayout {
+                        alignment: center;
+                        Switch { on: !Exchange.skip-mixdowns; label: @tr("Mixdowns"); toggled => { Exchange.kind-toggled(1); } }
+                    }
                 }
             }
-            MapList {
-                rows: Exchange.maps;
-                changed(i, v) => { Exchange.map-changed(i, v); }
+            if !Exchange.kinds-known: Para {
+                text: @tr("This scan is older and does not know render files and mixdowns yet – scan again under Scan to leave them out.");
+                color: Theme.warning;
             }
         }
         if Exchange.has-compare: Section {
@@ -1603,7 +1590,7 @@ component ExchangePane inherits VerticalLayout {
             }
         }
         if !Exchange.has-delivery: Para {
-            text: @tr("Choose the delivery folder another system collected for this one. Everything is verified first; only a complete delivery is imported.");
+            text: @tr("Choose the delivery folder another system collected for this one – a delivery in parts (…_part1of2, …_part2of2): select all its folders together. Everything is verified first; only a complete delivery is imported.");
         }
         if Exchange.has-delivery: Text {
             text: @tr("{n} file ({})" | "{n} files ({})" % Exchange.delivery-files, Exchange.delivery-size);
@@ -2899,10 +2886,9 @@ export component AppWindow inherits CheckWindow {
     out property <string> txt-choose-folder: @tr("Choose a drive or MXF folder");
     out property <string> txt-choose: @tr("Choose the folder with your Avid projects");
     out property <string> txt-choose-drive: @tr("Choose…");
-    out property <string> txt-skip: @tr("Don't send");
     out property <string> txt-same-system: @tr("this manifest is from this system");
     out property <string> txt-choose-target: @tr("Choose where to create the delivery folder");
-    out property <string> txt-choose-delivery: @tr("Choose the delivery folder");
+    out property <string> txt-choose-delivery: @tr("Choose the delivery folder (or all its parts)");
     out property <string> txt-quit-mc: @tr("Quit Media Composer first.");
     out property <string> txt-renames-open: @tr("Folders are renamed for Media Composer right now. Rename them back first (Check DBs › New databases) – until then no other folders are renamed and no databases are rewritten.");
     out property <string> txt-not-for-us: @tr("This delivery is for {}, not for this system ({}). Import it there.", "{}", "{}"); // Rust fills in both systems

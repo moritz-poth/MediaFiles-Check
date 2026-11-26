@@ -45,6 +45,28 @@ pub struct FileEntry {
     pub name: String,
     pub size: u64,
     pub hash: String,
+    /// what the header says (for "send render files / mixdowns"); None in manifests written before 2026-11-26
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<FileKind>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileKind {
+    /// everything else, also a file whose header could not be read
+    Media,
+    Render,
+    Mixdown,
+}
+
+impl FileKind {
+    pub fn of(path: &Path) -> FileKind {
+        match crate::mxf::file_info(path) {
+            Ok(i) if i.render == Some(true) => FileKind::Render,
+            Ok(i) if i.mixdown => FileKind::Mixdown,
+            _ => FileKind::Media,
+        }
+    }
 }
 
 impl Manifest {
@@ -92,16 +114,20 @@ pub const RESERVE: u64 = 1 << 30;
 /// Fails when `needed` bytes plus `RESERVE` do not fit on the drive of `path` (or its nearest existing parent).
 pub fn check_space(path: &Path, needed: u64) -> io::Result<()> {
     let Some(free) = path.ancestors().find(|p| p.exists()).and_then(free_bytes) else { return Ok(()) };
-    // test lab only (scripts/exchange-disks.sh): small disk images can't keep 1 GB free
-    let reserve = std::env::var("MFC_LAB_RESERVE").ok().and_then(|v| v.parse().ok()).unwrap_or(RESERVE);
+    let reserve = reserve();
     if free < needed.saturating_add(reserve) {
         return Err(io::Error::new(io::ErrorKind::StorageFull, format!("{}: not enough space – needs {} MB plus {} MB reserve, {} MB free", path.display(), needed >> 20, reserve >> 20, free >> 20)));
     }
     Ok(())
 }
 
+/// `RESERVE`; test lab only (scripts/exchange-disks.sh, tests): small disk images can't keep 1 GB free
+pub fn reserve() -> u64 {
+    std::env::var("MFC_LAB_RESERVE").ok().and_then(|v| v.parse().ok()).unwrap_or(RESERVE)
+}
+
 #[cfg(unix)]
-fn free_bytes(path: &Path) -> Option<u64> {
+pub fn free_bytes(path: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
     let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
@@ -110,7 +136,7 @@ fn free_bytes(path: &Path) -> Option<u64> {
 }
 
 #[cfg(not(unix))]
-fn free_bytes(_: &Path) -> Option<u64> {
+pub fn free_bytes(_: &Path) -> Option<u64> {
     None
 }
 

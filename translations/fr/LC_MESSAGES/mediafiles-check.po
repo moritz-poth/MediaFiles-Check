@@ -8,6 +8,24 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
+msgid "Choose the delivery folder another system collected for this one – a delivery in parts (…_part1of2, …_part2of2): select all its folders together. Everything is verified first; only a complete delivery is imported."
+msgstr "Choisissez le dossier de livraison qu’un autre poste a rassemblé pour celui-ci – pour une livraison en parties (…_part1of2, …_part2of2), sélectionnez tous ses dossiers ensemble. Tout est d’abord vérifié ; seule une livraison complète est importée."
+
+msgid "Choose the delivery folder (or all its parts)"
+msgstr "Choisir le dossier de livraison (ou toutes ses parties)"
+
+msgid "SEND"
+msgstr "ENVOYER"
+
+msgid "Mixdowns"
+msgstr "Mixdowns"
+
+msgid "Every drive goes under its own name – {} chooses on import which of its drives it goes to."
+msgstr "Chaque disque part sous son propre nom – {} choisit à l’importation sur lequel de ses disques il va."
+
+msgid "This scan is older and does not know render files and mixdowns yet – scan again under Scan to leave them out."
+msgstr "Cette analyse est ancienne et ne connaît pas encore les fichiers de rendu ni les mixdowns – analysez à nouveau sous Analyser pour les exclure."
+
 msgid "UNDOING THE REBALANCING"
 msgstr "ANNULATION DU RÉÉQUILIBRAGE"
 
@@ -92,9 +110,6 @@ msgstr "Dossiers de la livraison de {}"
 
 msgid "Choose folders…"
 msgstr "Choisir les dossiers…"
-
-msgid "Choose for every drive of this workstation where its files go over there. A drive of the same name is preselected; you can choose another one."
-msgstr "Choisissez pour chaque disque de ce poste où vont ses fichiers de l’autre côté. Un disque du même nom est présélectionné ; vous pouvez en choisir un autre."
 
 msgid "THIS WORKSTATION"
 msgstr "CE POSTE"
@@ -707,17 +722,11 @@ msgstr "Demandez une nouvelle livraison à {} ou copiez à nouveau le dossier."
 msgid "Choose…"
 msgstr "Choisir…"
 
-msgid "Don't send"
-msgstr "Ne pas envoyer"
-
 msgid "this manifest is from this system"
 msgstr "ce manifeste provient de ce système"
 
 msgid "Choose where to create the delivery folder"
 msgstr "Choisissez où créer le dossier de livraison"
-
-msgid "Choose the delivery folder"
-msgstr "Choisissez le dossier de livraison"
 
 msgid "Compare with another system"
 msgstr "Comparer avec un autre poste"
@@ -748,9 +757,6 @@ msgstr "Livraison de {}"
 
 msgid "Choose delivery…"
 msgstr "Choisir la livraison…"
-
-msgid "Choose the delivery folder another system collected for this one. Everything is verified first; only a complete delivery is imported."
-msgstr "Choisissez le dossier de livraison qu’un autre poste a rassemblé pour celui-ci. Tout est d’abord vérifié ; seule une livraison complète est importée."
 
 msgid "Quit Media Composer before importing. Every file is verified first, and only a complete delivery is imported. A media file is never overwritten."
 msgstr "Quittez Media Composer avant d’importer. Chaque fichier est d’abord vérifié, et seule une livraison complète est importée. Un fichier média n’est jamais écrasé."

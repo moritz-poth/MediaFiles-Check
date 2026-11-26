@@ -114,7 +114,8 @@ fn header(path: &Path) -> Result<Vec<u8>, String> {
         let at = 16 + l + 8 + 24;
         if let Some(b) = d.get(at..at + 8) {
             let header = u64::from_be_bytes(b.try_into().unwrap());
-            let want = (16 + l as u64 + pack + header).min(MAX_HEADER) as usize;
+            // any file can be read here (a damaged or foreign one): the numbers must not overflow
+            let want = (16 + l as u64).saturating_add(pack).saturating_add(header).min(MAX_HEADER) as usize;
             if want > d.len() && n == 64 << 10 {
                 let have = d.len();
                 d.resize(want, 0);
@@ -152,6 +153,10 @@ pub struct Info {
     /// Some(true): a render (precompute); Some(false): media written by a known program without the render mark;
     /// None: nothing in the header says
     pub render: Option<bool>,
+    /// a video or audio mixdown: Media Composer names its source "Signature Source Mob" (seen on every mixdown of the
+    /// test lab and of two real projects, 2026-11-26; no other file has it)
+    #[serde(default)]
+    pub mixdown: bool,
     /// product that wrote the file (identification set)
     pub writer: Option<String>,
     pub codec: Option<String>,
@@ -249,7 +254,11 @@ pub fn info(d: &[u8]) -> Result<Info, String> {
                     (ESSENCE_CONTAINER_DATA, 0x2701) if l == 32 => out.file_id = Some(to_mob_id(v)),
                     (MATERIAL_PACKAGE, 0x4401) if l == 32 => out.master_id = Some(to_mob_id(v)),
                     (MATERIAL_PACKAGE, 0x4402) => out.clip = utf16(v),
-                    (SOURCE_PACKAGE, 0x4402) => precompute_source |= utf16(v).is_some_and(|n| n == "Precompute Source Mob"),
+                    (SOURCE_PACKAGE, 0x4402) => {
+                        let n = utf16(v);
+                        precompute_source |= n.as_deref() == Some("Precompute Source Mob");
+                        out.mixdown |= n.as_deref() == Some("Signature Source Mob");
+                    }
                     (IDENTIFICATION, 0x3c01) => company = company.take().or_else(|| utf16(v)),
                     (IDENTIFICATION, 0x3c02) => out.writer = out.writer.take().or_else(|| utf16(v)),
                     (k, 0x3201) if PICTURE.contains(&k) || k == MPEG_VIDEO => out.codec = codec_name(v),
@@ -358,6 +367,28 @@ mod tests {
         assert_eq!(info(&avid_header(None, Some("Avid Technology, Inc."))).unwrap().render, Some(false));
         // nothing says who wrote it: unknown, never guessed
         assert_eq!(info(&avid_header(None, None)).unwrap().render, None);
+        // a mixdown's source is the "Signature Source Mob"
+        let m = info(&avid_header(Some("Signature Source Mob"), Some("Avid Technology, Inc."))).unwrap();
+        assert_eq!((m.mixdown, m.render), (true, Some(false)));
+        assert!(!r.mixdown);
+        // as the manifest records it
+        use crate::exchange::FileKind;
+        let dir = std::env::temp_dir().join(format!("mfc-kind-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (source, kind) in [(Some("Precompute Source Mob"), FileKind::Render), (Some("Signature Source Mob"), FileKind::Mixdown), (None, FileKind::Media)] {
+            let f = dir.join("x.mxf");
+            std::fs::write(&f, avid_header(source, Some("Avid Technology, Inc."))).unwrap();
+            assert_eq!(FileKind::of(&f), kind);
+        }
+        std::fs::write(dir.join("x.mxf"), b"no header").unwrap();
+        assert_eq!(FileKind::of(&dir.join("x.mxf")), FileKind::Media);
+        // a partition key followed by huge lengths (damaged file, random data): no overflow
+        let mut junk = PARTITION.to_vec();
+        junk.extend([0x02, 0x04, 0x00, 0x88, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf0]);
+        junk.resize(70 << 10, 0xff);
+        std::fs::write(dir.join("x.mxf"), &junk).unwrap();
+        assert_eq!(FileKind::of(&dir.join("x.mxf")), FileKind::Media);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

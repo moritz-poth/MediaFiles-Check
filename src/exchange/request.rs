@@ -148,7 +148,7 @@ mod tests {
                 path: root.display().to_string(),
                 folders: vec![
                     Folder { name: "1".into(), has_db: true, files: vec![] },
-                    Folder { name: "2".into(), has_db: true, files: vec![FileEntry { name: "x.mxf".into(), size: 1, hash: "h".into() }] },
+                    Folder { name: "2".into(), has_db: true, files: vec![FileEntry { name: "x.mxf".into(), size: 1, hash: "h".into(), kind: None }] },
                 ],
             }],
             ..Default::default()
@@ -173,7 +173,7 @@ mod tests {
             volumes: vec![Volume {
                 name: "V".into(),
                 path: root.display().to_string(),
-                folders: vec![Folder { name: "1".into(), has_db: true, files: vec![FileEntry { name: "Kölsch A01.mxf".into(), size: 5, hash: "h".into() }] }],
+                folders: vec![Folder { name: "1".into(), has_db: true, files: vec![FileEntry { name: "Kölsch A01.mxf".into(), size: 5, hash: "h".into(), kind: None }] }],
             }],
             ..Default::default()
         };
