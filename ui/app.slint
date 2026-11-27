@@ -677,6 +677,8 @@ export global Access {
 export global Shared {
     // Größe des Fensters hat sich geändert (jedes Fenster hat sein eigenes Shared)
     callback resized();
+    // Maus auf der leeren Fläche der Reiterleiste gedrückt: Fenster ziehen wie an der Titelleiste
+    callback drag-window();
     in property <[MenuChoice]> languages;
     in property <[string]> language-names;
     in property <int> language-index;
@@ -849,6 +851,15 @@ component CheckWindow inherits Window {
     }
 }
 
+// Leere Fläche der Reiterleiste: zieht das Fenster (die Reiter liegen darüber und bekommen ihre Klicks selbst)
+component DragArea inherits TouchArea {
+    pointer-event(e) => {
+        if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+            Shared.drag-window();
+        }
+    }
+}
+
 component SettingsTab {
     in property <image> icon;
     in property <string> text;
@@ -865,7 +876,8 @@ component SettingsTab {
     accessible-action-default => { root.clicked(); }
     Rectangle {
         border-radius: 6px;
-        background: root.selected ? (Theme.dark ? #ffffff14 : #00000012) : transparent;
+        background: root.selected ? (Theme.dark ? #ffffff14 : #00000012) : touch.has-hover ? (Theme.dark ? #ffffff0a : #0000000a) : transparent;
+        animate background { duration: 120ms; }
     }
     VerticalLayout {
         padding-top: 2px;
@@ -899,7 +911,7 @@ component SettingsTab {
             color: root.selected ? Theme.accent : Theme.dark ? #ffffff8c : #000000a6;
         }
     }
-    TouchArea {
+    touch := TouchArea {
         clicked => { root.clicked(); }
     }
 }
@@ -2745,6 +2757,11 @@ export component AppWindow inherits CheckWindow {
     // erster Start: Überblick über die Reiter (Rust merkt sich das Schließen in welcome-seen)
     in-out property <bool> show-welcome;
     callback welcome-done();
+    // Frage als Karte im Fenster (App-Stil statt macOS-Dialog, user 2026-11-26): Text, Knopf für die Aktion
+    in-out property <bool> show-ask;
+    in property <string> ask-text;
+    in property <string> ask-yes;
+    callback ask-answer(bool);
 
     // -1: Seite gehört zu keinem bestimmten Reiter (Fortschritt, Hinweis) – sie bleibt im aktuellen
     pure function tab-of(p: Page) -> int {
@@ -2979,6 +2996,7 @@ export component AppWindow inherits CheckWindow {
         Rectangle {
             height: 80px;
             background: Theme.dark ? (root.active ? #383838 : #292929) : (root.active ? #f0f0f0 : #e7e7e7);
+            DragArea { }
             HorizontalLayout {
                 alignment: center;
                 padding-top: 28px;
@@ -3850,6 +3868,44 @@ FillScroll {
         }
     }
 
+    // ── Frage (Löschen bestätigen, weiterer Ort beim Sammeln …) ──
+    if root.show-ask: Rectangle {
+        background: #00000080;
+        TouchArea { }
+        Rectangle {
+            width: 480px;
+            height: ask-card.preferred-height;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.line;
+            background: Theme.background;
+            ask-card := VerticalLayout {
+                padding: 24px;
+                spacing: 20px;
+                Text {
+                    width: 480px - 48px;
+                    text: root.ask-text;
+                    wrap: word-wrap;
+                    font-size: 13px;
+                    color: Theme.text;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    CheckButton {
+                        text: @tr("Cancel");
+                        clicked => { root.ask-answer(false); }
+                    }
+                    CheckButton {
+                        text: root.ask-yes;
+                        primary: true;
+                        clicked => { root.ask-answer(true); }
+                    }
+                }
+            }
+        }
+    }
+
     // ── Erster Start ──
     if root.show-welcome: Rectangle {
         background: #00000080;
@@ -4085,6 +4141,7 @@ export component SettingsWindow inherits CheckWindow {
         Rectangle {
             height: 80px;
             background: Theme.dark ? (root.active ? #383838 : #292929) : (root.active ? #f0f0f0 : #e7e7e7);
+            DragArea { }
             HorizontalLayout {
                 alignment: center;
                 padding-top: 28px;

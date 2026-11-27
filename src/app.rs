@@ -28,6 +28,9 @@ macro_rules! repaint_on_resize {
     ($w:expr) => {{
         let weak = $w.as_weak();
         $w.global::<Shared>().on_resized(move || weak.upgrade().iter().for_each(repaint_soon));
+        // the empty part of the tab bar moves the window like a title bar (user 2026-11-27)
+        #[cfg(target_os = "macos")]
+        $w.global::<Shared>().on_drag_window(mac_window::drag_window);
     }};
 }
 
@@ -90,21 +93,6 @@ fn settings_path() -> Option<PathBuf> {
     app_dir().map(|d| d.join("settings.txt"))
 }
 
-/// Which files rebalancing moved where – needed to undo it.
-/// A yes/no question in a real macOS dialog; true = `yes` (one of four languages) clicked.
-fn ask(lang: &str, question: &str, yes: [&'static str; 4]) -> bool {
-    let yes = pick(lang, yes);
-    let cancel = pick(lang, ["Cancel", "Abbrechen", "Annuler", "Cancelar"]);
-    #[cfg(target_os = "macos")]
-    return mac_menu::ask(question, yes, cancel, false);
-    #[cfg(not(target_os = "macos"))]
-    return rfd::MessageDialog::new()
-        .set_description(question)
-        .set_buttons(rfd::MessageButtons::OkCancelCustom(yes.into(), cancel.into()))
-        .show()
-        == rfd::MessageDialogResult::Custom(yes.into());
-}
-
 /// Both places on the same drive (nearest existing folder of each).
 fn same_drive(a: &Path, b: &Path) -> bool {
     #[cfg(unix)]
@@ -119,20 +107,27 @@ fn same_drive(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// × and "Delete all" ask in a real macOS dialog first (user 2026-11-16); true = Delete clicked.
-fn sure_delete(lang: &str, question: String) -> bool {
-    let delete = pick(lang, ["Delete", "Löschen", "Supprimer", "Borrar"]);
-    let cancel = pick(lang, ["Cancel", "Abbrechen", "Annuler", "Cancelar"]);
-    #[cfg(target_os = "macos")]
-    return mac_menu::ask_delete(&question, delete, cancel);
-    #[cfg(not(target_os = "macos"))]
-    return rfd::MessageDialog::new()
-        .set_description(question)
-        .set_buttons(rfd::MessageButtons::OkCancelCustom(delete.into(), cancel.into()))
-        .show()
-        == rfd::MessageDialogResult::Custom(delete.into());
+thread_local! {
+    /// what the question card does when its action button is clicked
+    static ASKED: RefCell<Option<Box<dyn FnOnce(&AppWindow)>>> = const { RefCell::new(None) };
 }
 
+/// A question as a card in the window (app style instead of a macOS dialog, user 2026-11-26): `then` runs when
+/// `yes` is clicked, nothing on Cancel.
+fn ask_card(app: &AppWindow, question: &str, yes: &str, then: impl FnOnce(&AppWindow) + 'static) {
+    ASKED.with(|a| *a.borrow_mut() = Some(Box::new(then)));
+    app.set_ask_text(question.into());
+    app.set_ask_yes(yes.into());
+    app.set_show_ask(true);
+}
+
+/// × and "Delete all…" in a History ask first (user 2026-11-16).
+fn sure_delete(app: &AppWindow, question: &str, then: impl FnOnce(&AppWindow) + 'static) {
+    let delete = pick(&app.get_language(), ["Delete", "Löschen", "Supprimer", "Borrar"]);
+    ask_card(app, question, delete, then);
+}
+
+/// Which files rebalancing moved where – needed to undo it.
 fn rebalance_journal_path() -> PathBuf {
     app_dir().unwrap_or_else(|| PathBuf::from(".")).join("rebalanced.json")
 }
@@ -403,6 +398,66 @@ fn show_compare(app: &AppWindow, c: &Compare) {
     x.set_tasks(strings(&tasks, 400));
     x.set_has_compare(true);
     x.set_view(1);
+}
+
+/// Collects into `parents` (one place, or several: each gets a part of the delivery, user 2026-11-26). Too little
+/// room: a question card offers another place – a place on an already chosen drive is refused – and this runs again.
+fn collect_to(app: &AppWindow, compare: &Rc<RefCell<Option<Compare>>>, mut parents: Vec<PathBuf>) {
+    let c = compare.borrow();
+    let Some(c) = c.as_ref() else { return };
+    let (plan, lang) = (c.plan(), app.get_language().to_string());
+    if let Err(missing) = fcollect::assign(&plan, &c.delivery_dirs(&parents)) {
+        let question = pick(&lang, [
+            "{} more is needed than fits there (1 GB stays free on every drive). Choose another place? The delivery is then split into parts.",
+            "Es fehlen noch {} Platz (auf jedem Laufwerk bleibt 1 GB frei). Einen weiteren Ort wählen? Die Lieferung wird dann in Teile aufgeteilt.",
+            "Il manque encore {} de place (1 Go reste libre sur chaque disque). Choisir un autre emplacement ? La livraison sera alors divisée en parties.",
+            "Faltan {} de espacio (en cada disco quedan libres 1 GB). ¿Elegir otro lugar? La entrega se dividirá en partes.",
+        ]).replace("{}", &exflow::format_size(missing, &lang));
+        let compare = compare.clone();
+        ask_card(app, &question, pick(&lang, ["Another place…", "Weiterer Ort…", "Autre emplacement…", "Otro lugar…"]), move |app| {
+            let Some(more) = rfd::FileDialog::new().set_title(app.get_txt_choose_target()).pick_folder() else { return };
+            // a second folder on the same drive adds no space
+            if parents.iter().any(|p| same_drive(p, &more)) {
+                let note = pick(&app.get_language(), ["That place is on a drive already chosen – choose another drive.", "Dieser Ort liegt auf einem schon gewählten Laufwerk – bitte ein anderes Laufwerk wählen.", "Cet emplacement est sur un disque déjà choisi – choisissez un autre disque.", "Ese lugar está en un disco ya elegido: elige otro disco."]);
+                app.global::<Exchange>().set_error(note.into());
+            } else {
+                parents.push(more);
+            }
+            collect_to(app, &compare, parents);
+        });
+        return;
+    }
+    let weak = app.as_weak();
+    let Some(work) = begin_exchange(app) else { return };
+    let mut m = Mappings::load(&exchange_dir());
+    c.remember(&mut m);
+    m.save(&exchange_dir());
+    let (local, to, dests) = (c.local.clone(), c.remote.system.clone(), c.delivery_dirs(&parents));
+    let dest = dests[0].clone();
+    log::write(&format!("collect for {to} into {}", dests.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")));
+    start_work(app, 0);
+    let (weak, mut progress) = (weak.clone(), progress_to(&weak));
+    std::thread::spawn(move || {
+        let _work = work;
+        let result = fcollect::collect_parts(&local, &to, &plan, &dests, &lang, &mut progress);
+        log::write(&format!("  collect: {:?}", result.as_ref().map(|e| e.0.len())));
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(app) = weak.upgrade() else { return };
+            // the delivery's tasks, with those collect added (a database left out because its folder changed)
+            let planned: Vec<String> = plan.tasks.iter().map(|t| t.describe(&lang)).collect();
+            let tasks = result.as_ref().map_or(&planned, |r| &r.1);
+            add_tasks(tasks, &app.get_txt_task_for().replace("{}", &to), &fscan::computer_name());
+            app.global::<Tasks>().invoke_reload();
+            match &result {
+                Ok((errors, _)) => show_exchange_result(&app, if errors.is_empty() { 0 } else { 1 }, Some(&dest), errors, tasks),
+                Err(e) => show_exchange_result(&app, 1, Some(&dest), &[e.to_string()], tasks),
+            }
+            // a delivery in parts: every part's folder is shown (one per line) and opened by "Show"
+            if dests.len() > 1 {
+                app.global::<Exchange>().set_result_path(dests.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join("\n").into());
+            }
+        });
+    });
 }
 
 thread_local! {
@@ -758,65 +813,16 @@ fn wire_exchange(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
         let (weak, compare) = (app.as_weak(), compare.clone());
         move || {
             let app = weak.unwrap();
-            let c = compare.borrow();
-            let Some(c) = c.as_ref() else { return };
+            if compare.borrow().is_none() {
+                return;
+            }
             // the databases are copied as they are on the drive: Media Composer must not write them meanwhile
             if media_composer_running() {
                 err(&app, app.get_txt_quit_mc().to_string());
                 return;
             }
             let Some(parent) = rfd::FileDialog::new().set_title(app.get_txt_choose_target()).pick_folder() else { return };
-            let (plan, lang) = (c.plan(), app.get_language().to_string());
-            // too much for one place: more places, each gets a part of the delivery (user 2026-11-26)
-            let mut parents = vec![parent];
-            while let Err(missing) = fcollect::assign(&plan, &c.delivery_dirs(&parents)) {
-                let question = pick(&lang, [
-                    "{} more is needed than fits there (1 GB stays free on every drive). Choose another place? The delivery is then split into parts.",
-                    "Es fehlen noch {} Platz (auf jedem Laufwerk bleibt 1 GB frei). Einen weiteren Ort wählen? Die Lieferung wird dann in Teile aufgeteilt.",
-                    "Il manque encore {} de place (1 Go reste libre sur chaque disque). Choisir un autre emplacement ? La livraison sera alors divisée en parties.",
-                    "Faltan {} de espacio (en cada disco quedan libres 1 GB). ¿Elegir otro lugar? La entrega se dividirá en partes.",
-                ]).replace("{}", &exflow::format_size(missing, &lang));
-                if !ask(&lang, &question, ["Another place…", "Weiterer Ort…", "Autre emplacement…", "Otro lugar…"]) {
-                    return;
-                }
-                let Some(more) = rfd::FileDialog::new().set_title(app.get_txt_choose_target()).pick_folder() else { return };
-                // a second folder on the same drive adds no space
-                if parents.iter().any(|p| same_drive(p, &more)) {
-                    err(&app, pick(&lang, ["That place is on a drive already chosen – choose another drive.", "Dieser Ort liegt auf einem schon gewählten Laufwerk – bitte ein anderes Laufwerk wählen.", "Cet emplacement est sur un disque déjà choisi – choisissez un autre disque.", "Ese lugar está en un disco ya elegido: elige otro disco."]).into());
-                    continue;
-                }
-                parents.push(more);
-            }
-            let Some(work) = begin_exchange(&app) else { return };
-            let mut m = Mappings::load(&exchange_dir());
-            c.remember(&mut m);
-            m.save(&exchange_dir());
-            let (local, to, dests) = (c.local.clone(), c.remote.system.clone(), c.delivery_dirs(&parents));
-            let dest = dests[0].clone();
-            log::write(&format!("collect for {to} into {}", dests.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")));
-            start_work(&app, 0);
-            let (weak, mut progress) = (weak.clone(), progress_to(&weak));
-            std::thread::spawn(move || {
-                let _work = work;
-                let result = fcollect::collect_parts(&local, &to, &plan, &dests, &lang, &mut progress);
-                log::write(&format!("  collect: {:?}", result.as_ref().map(|e| e.0.len())));
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(app) = weak.upgrade() else { return };
-                    // the delivery's tasks, with those collect added (a database left out because its folder changed)
-                    let planned: Vec<String> = plan.tasks.iter().map(|t| t.describe(&lang)).collect();
-                    let tasks = result.as_ref().map_or(&planned, |r| &r.1);
-                    add_tasks(tasks, &app.get_txt_task_for().replace("{}", &to), &fscan::computer_name());
-                    app.global::<Tasks>().invoke_reload();
-                    match &result {
-                        Ok((errors, _)) => show_exchange_result(&app, if errors.is_empty() { 0 } else { 1 }, Some(&dest), errors, tasks),
-                        Err(e) => show_exchange_result(&app, 1, Some(&dest), &[e.to_string()], tasks),
-                    }
-                    // a delivery in parts: every part's folder is shown (one per line) and opened by "Show"
-                    if dests.len() > 1 {
-                        app.global::<Exchange>().set_result_path(dests.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join("\n").into());
-                    }
-                });
-            });
+            collect_to(&app, &compare, vec![parent]);
         }
     });
 
@@ -2558,26 +2564,6 @@ mod mac_menu {
         unsafe { msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()] }
     }
 
-    /// App-modal warning alert in this process (rfd fell back to a CFUserNotification outside the app).
-    /// First button = `delete` (destructive, Return), second = `cancel` (Esc); true = delete clicked.
-    pub fn ask_delete(question: &str, delete: &str, cancel: &str) -> bool {
-        ask(question, delete, cancel, true)
-    }
-
-    pub fn ask(question: &str, yes: &str, cancel: &str, destructive: bool) -> bool {
-        unsafe {
-            let alert: Retained<AnyObject> = msg_send![class!(NSAlert), new];
-            let _: () = msg_send![&*alert, setAlertStyle: 0usize];
-            let _: () = msg_send![&*alert, setMessageText: &*ns_string(question)];
-            let ok: *mut AnyObject = msg_send![&*alert, addButtonWithTitle: &*ns_string(yes)];
-            let _: () = msg_send![ok, setHasDestructiveAction: destructive];
-            let no: *mut AnyObject = msg_send![&*alert, addButtonWithTitle: &*ns_string(cancel)];
-            let _: () = msg_send![no, setKeyEquivalent: &*ns_string("\u{1b}")];
-            let answer: isize = msg_send![&*alert, runModal];
-            answer == 1000
-        }
-    }
-
     /// Adds "Settings…" to the app menu if it is missing and keeps its title in the current language.
     pub fn ensure() {
         unsafe {
@@ -2805,6 +2791,22 @@ mod mac_window {
         }
     }
 
+    /// Moves the window with the mouse, like dragging its title bar: called while the mouse-down that started it is
+    /// still the current event (a press on the empty part of the tab bar).
+    pub fn drag_window() {
+        unsafe {
+            let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+            let event: *mut AnyObject = msg_send![app, currentEvent];
+            if event.is_null() {
+                return;
+            }
+            let win: *mut AnyObject = msg_send![event, window];
+            if !win.is_null() {
+                let _: () = msg_send![win, performWindowDragWithEvent: event];
+            }
+        }
+    }
+
     /// Whether the window is the key window (the title bar is lighter then; the tab bar follows).
     pub fn is_key(w: &slint::Window) -> bool {
         ns_window(w).is_some_and(|win| unsafe { msg_send![win, isKeyWindow] })
@@ -2987,7 +2989,7 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
             if run_going(&app) {
                 return;
             }
-            // × and "Delete all…" both ask in a macOS dialog first (user 2026-11-16)
+            // × and "Delete all…" both ask first (user 2026-11-16)
             {
                 let lang = app.get_language().to_string();
                 let history = app.get_history();
@@ -3015,17 +3017,20 @@ fn wire_maintain(app: &AppWindow, drives: &Drives, settings: &Rc<RefCell<Setting
                         "¿Quitar de verdad las {n} entradas del historial? En las unidades no cambia nada, pero estas operaciones ya no se podrán deshacer.",
                     ]).replace("{n}", &n.to_string())
                 };
-                if !sure_delete(&lang, q) {
-                    return;
-                }
+                sure_delete(&app, &q, move |app| {
+                    // a run may have started while the question was open
+                    if run_going(app) {
+                        return;
+                    }
+                    if let Err(e) = forget_runs(kind, index) {
+                        app.set_notice(ModelRc::new(VecModel::from(vec![notice(3, "History", &e, 0)])));
+                        app.set_page(Page::Notice);
+                    }
+                    let lang = app.get_language().to_string();
+                    show_rebalanced(app, &lang);
+                    show_dup_runs(app, &lang);
+                });
             }
-            if let Err(e) = forget_runs(kind, index) {
-                app.set_notice(ModelRc::new(VecModel::from(vec![notice(3, "History", &e, 0)])));
-                app.set_page(Page::Notice);
-            }
-            let lang = app.get_language().to_string();
-            show_rebalanced(&app, &lang);
-            show_dup_runs(&app, &lang);
         }
     });
 
@@ -3743,6 +3748,16 @@ fn main() -> Result<(), slint::PlatformError> {
     wire_exchange(&app, &drives, &settings, &renames);
     let welcome_seen = || app_dir().map(|d| d.join("welcome-seen"));
     app.set_show_welcome(welcome_seen().is_some_and(|p| !p.exists()));
+    app.on_ask_answer({
+        let weak = app.as_weak();
+        move |yes| {
+            let app = weak.unwrap();
+            app.set_show_ask(false);
+            if let Some(then) = ASKED.with(|a| a.borrow_mut().take()).filter(|_| yes) {
+                then(&app);
+            }
+        }
+    });
     app.on_welcome_done({
         let weak = app.as_weak();
         move || {

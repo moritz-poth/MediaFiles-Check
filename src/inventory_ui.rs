@@ -1174,7 +1174,7 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
         let ww = app.as_weak();
         move |which| {
             let app = ww.unwrap();
-            // × and "Delete all…" both ask in a macOS dialog first (user 2026-11-16)
+            // × and "Delete all…" both ask first (user 2026-11-16)
             {
                 let lang = app.get_language().to_string();
                 let scans = app.global::<Inventory>().get_scans();
@@ -1202,18 +1202,17 @@ pub fn wire(app: &AppWindow, inv: &Inv, drives: &Drives, projects: &Rc<RefCell<P
                         "¿Borrar de verdad los {n} análisis? No se puede deshacer.",
                     ]).replace("{n}", &n.to_string())
                 };
-                if !sure_delete(&lang, q) {
-                    return;
-                }
+                sure_delete(&app, &q, move |app| {
+                    // the list shows list_scans in the same order (newest first); -1 = all
+                    for (i, (path, head)) in inventory::list_scans(&scans_dir()).into_iter().enumerate() {
+                        if which < 0 || i == which as usize {
+                            log::write(&format!("media scan deleted: {}", head.date));
+                            inventory::delete_scan(&path);
+                        }
+                    }
+                    show_scans(app);
+                });
             }
-            // the list shows list_scans in the same order (newest first); -1 = all
-            for (i, (path, head)) in inventory::list_scans(&scans_dir()).into_iter().enumerate() {
-                if which < 0 || i == which as usize {
-                    log::write(&format!("media scan deleted: {}", head.date));
-                    inventory::delete_scan(&path);
-                }
-            }
-            show_scans(&app);
         }
     });
     g.on_go_scan({
