@@ -410,7 +410,7 @@ fn collect_to(app: &AppWindow, compare: &Rc<RefCell<Option<Compare>>>, mut paren
         let question = pick(&lang, [
             "{} more is needed than fits there (1 GB stays free on every drive). Choose another place? The delivery is then split into parts.",
             "Es fehlen noch {} Platz (auf jedem Laufwerk bleibt 1 GB frei). Einen weiteren Ort wählen? Die Lieferung wird dann in Teile aufgeteilt.",
-            "Il manque encore {} de place (1 Go reste libre sur chaque disque). Choisir un autre emplacement ? La livraison sera alors divisée en parties.",
+            "Il manque encore {} de place (1 GB reste libre sur chaque disque). Choisir un autre emplacement ? La livraison sera alors divisée en parties.",
             "Faltan {} de espacio (en cada disco quedan libres 1 GB). ¿Elegir otro lugar? La entrega se dividirá en partes.",
         ]).replace("{}", &exflow::format_size(missing, &lang));
         let compare = compare.clone();
